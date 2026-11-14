@@ -193,9 +193,9 @@ SemaEffectGraphResult: struct {
     complete: Bool
     memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
-    // Solved rows that would have changed a taken seeded module's body
-    // (sema_effects_check_modules `taken`); a final seeded body keeps 0.
-    seeded_writes: Int{0}
+    // Each solved row that would have changed a taken seeded module's body
+    // (sema_effects_check_modules `taken`); empty when every seeded body is final.
+    seeded_writes: [SemaSeededWrite]{[SemaSeededWrite]{}}
     // The run's symbol table the check borrowed, handed back to its graph.
     symbols: SymbolTable
 }
@@ -544,11 +544,11 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
 // is a fixed Core row or a source-owned Core function.
 // The module identity of a direct call's callee body, or the none id when
 // the call has no body node in this program.
-sema_effect_callee_module: fn(nodes: [SemaEffectNode], facts: SemaEffectCallIndex, expression: BodyNode) -> ModuleID Never! {
+sema_effect_callee_module: fn(facts: SemaEffectCallIndex, expression: BodyNode) -> ModuleID Never! {
     if expression.kind == .Call(callee, _, _) {
         decl_row: callee.row.index()
         target: if decl_row >= 0 && decl_row < facts.node_by_decl.len() -> facts.node_by_decl[decl_row] else -> -1
-        if target >= 0 && target < nodes.len() -> return nodes[target].module_identity
+        if target >= 0 && target < facts.node_modules.len() -> return facts.node_modules[target]
     }
     module_none()
 }
@@ -2122,7 +2122,11 @@ sema_effect_publish_diagnostics: fn(all: &[Diagnostic], source_segments: [SemaSo
     }
 }
 
-sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], symbols: SymbolTable, diagnostics: &[Diagnostic]) -> SemaEffectNode {
+// The graph node of `function`. A `recorded` function is a body taken from
+// the Core record (sema_finalize_seeded_taken), whose effects are the row its
+// Core check solved: it keeps that row's direct spans as they are, each at
+// the span and in the order that check found it, not at the body's span.
+sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], symbols: SymbolTable, diagnostics: &[Diagnostic], recorded: Bool{false}) -> SemaEffectNode {
     node := SemaEffectNode{
         key: function.key,
         name: function.name,
@@ -2148,8 +2152,10 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         dispatches: [TEffectSpan]{},
     }
     loop effect_name in function.effects.direct {
-        if sema_effect_set_add(node.direct, effect_name) -> node.direct_spans.push(TEffectSpan{name: effect_name, span: function.source_span})
+        if !sema_effect_set_add(node.direct, effect_name) -> next
+        if !recorded -> node.direct_spans.push(TEffectSpan{name: effect_name, span: function.source_span})
     }
+    if recorded -> node.direct_spans = loop row in function.effects.direct_spans -> TEffectSpan{name: row.name, span: row.span, held: row.held}
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
     if function.unsafe_gate == .Val(gate) && !module_is_core(function.module_identity) {
         node.unsafe_site = sema_effect_unsafe_site(gate)
@@ -2416,6 +2422,8 @@ SemaEffectCallIndex: struct {
     // without reading that node: a collecting thread holds only its own
     // node's row (sema_effect_collect_claimed).
     node_keys: [String]{[String]{}}
+    // Each node's module identity, in node order, for the same reason.
+    node_modules: [ModuleID]{[ModuleID]{}}
     // The effect each Core scope publisher publishes, by key
     // (effect_scope_published_effect), read off its node before the walks:
     // a collecting thread holds only its own node's row.
@@ -3324,7 +3332,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             if found == {
                 .Val(position) -> {
                     value: facts.modules[caller.module_index].facts[position]
-                    nondeterministic: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(nodes, facts, node), tree, facts.symbols)
+                    nondeterministic: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(facts, node), tree, facts.symbols)
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
                         // the pure function reports E3403 instead of E3401.
@@ -5223,8 +5231,8 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // which seals each call through a function value to the program's own
 // functions and lambdas (sema_effect_stack_seal). The first `taken` modules
 // are taken seeded ones (sema_finalize_seeded_taken): their bodies keep the
-// rows their finalization solved, and a row this solve would change on one is
-// counted in the result's `seeded_writes`, not stamped.
+// effect rows their Core check solved, and a row this solve would change on
+// one is listed in the result's `seeded_writes`, not stamped.
 sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
@@ -5273,7 +5281,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
-    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), published_effects: published_effects.move(), symbols: symbols.move()}
+    node_modules := loop node in nodes -> node.module_identity
+    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), node_modules: node_modules.move(), published_effects: published_effects.move(), symbols: symbols.move()}
     unsafe_node: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
@@ -5469,11 +5478,13 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
-    // function's heap and stack bounds.
+    // function's heap and stack bounds. Those three are the program's on a
+    // taken seeded body too: the record holds none of them
+    // (CoreRecordBodies.jet sema_core_body_packets).
     called: sema_effect_called(nodes, calls.node_by_key)
     heaps: sema_effect_heap_bounds(nodes, calls.node_by_key, called)
     stacks: sema_effect_stack_bounds(stack, frames, nodes, called)
-    seeded_writes := 0
+    seeded_writes := [SemaSeededWrite]{}
     loop module_row in inputs {
         target: module_row.module_index
         loop function_index in 0..<modules[target].functions.len() {
@@ -5484,14 +5495,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
             frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
             if target < taken {
-                heap_differs: heaps[node_index] != "" && modules[target].functions[function_index].heap != heaps[node_index]
-                stack_differs: stacks[node_index] != "" && modules[target].functions[function_index].stack != stacks[node_index]
-                bounds_differ: heap_differs || stack_differs || modules[target].functions[function_index].frame_bound != frame_bound
-                if capped || modules[target].functions[function_index].effects != effects || bounds_differ -> seeded_writes += 1
-                next
+                sema_effect_seeded_writes(modules[target].functions[function_index], modules[target].module_name, effects, if capped -> cap_frames[node_index] else -> "", seeded_writes)
+            } else {
+                modules[target].functions[function_index].effects = effects.move()
+                if capped -> modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
             }
-            modules[target].functions[function_index].effects = effects.move()
-            if capped -> modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
             if heaps[node_index] != "" -> modules[target].functions[function_index].heap = heaps[node_index].copy()
             if stacks[node_index] != "" -> modules[target].functions[function_index].stack = stacks[node_index].copy()
             modules[target].functions[function_index].frame_bound = frame_bound
@@ -5506,6 +5514,15 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     complete: !sema_has_error_since(diagnostics, 0)
     SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), seeded_writes: seeded_writes, symbols: calls.symbols.move()}
+}
+
+// What the solve would change on one function `function` of a taken seeded
+// module `module_name` (sema_effects_check_modules `taken`), listed in
+// `writes`: its solved `effects` and the cap frame its scope lacks
+// (`capped`, "" when none).
+sema_effect_seeded_writes: fn(function: FnBody, module_name: String, effects: TEffectFacts, capped: String, writes: &[SemaSeededWrite]) Never! {
+    if capped != "" -> writes.push(SemaSeededWrite{kind: "effect scope", module_name: "{module_name}", key: "{function.key}", recorded: "{function.effect_scope}", finalized: "{capped}"})
+    if function.effects != effects -> writes.push(SemaSeededWrite{kind: "effects", module_name: "{module_name}", key: "{function.key}", recorded: "{function.effects:Debug}", finalized: "{effects:Debug}"})
 }
 
 // The rows of the effect graph each input module contributes on its own:
@@ -5532,10 +5549,11 @@ sema_effect_prepare_modules: fn(modules: [SemaGraphModuleResult], inputs: [SemaE
     prepared
 }
 
-// Appends the rows of the input module at `input_position`.
-sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable, symbols: SymbolTable) {
+// Appends the rows of the input module at `input_position`; `recorded` when
+// its bodies are taken from the Core record (sema_effect_node_from_source).
+sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable, symbols: SymbolTable, recorded: Bool{false}) {
     source_index := sema_effect_source_index(module_row.sources)
-    sema_effect_add_module_nodes(functions, module_row, input_position, source_index, symbols, prepared.nodes, prepared.node_keys, prepared.diagnostics)
+    sema_effect_add_module_nodes(functions, module_row, input_position, source_index, symbols, prepared.nodes, prepared.node_keys, prepared.diagnostics, recorded)
     loop function in functions {
         row: if decl_table_find(decls, function.key) == .Val(id) -> id.row.index() else -> -1
         prepared.node_decls.push(row)
@@ -5560,11 +5578,11 @@ sema_effect_prepared_join: fn(prepared: &SemaEffectPrepared, part: &&SemaEffectP
 
 // One graph node per function of the input module `module_index`, in order,
 // and its key in `node_keys` (node order).
-sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, symbols: SymbolTable, nodes: &[SemaEffectNode], node_keys: &[String], diagnostics: &[Diagnostic]) {
+sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, symbols: SymbolTable, nodes: &[SemaEffectNode], node_keys: &[String], diagnostics: &[Diagnostic], recorded: Bool{false}) {
     loop function in functions {
         function_diagnostics := [Diagnostic]{}
         node_keys.push(function.key)
-        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, module_row.library_effects, symbols, function_diagnostics))
+        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, module_row.library_effects, symbols, function_diagnostics, recorded))
         sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, function_diagnostics)
     }
 }

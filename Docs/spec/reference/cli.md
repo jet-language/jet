@@ -1460,7 +1460,7 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v11` record of that check to the file and prints one
+also writes the `jet.core/v12` record of that check to the file and prints one
 line per record section at once: its element count, the bytes its elements
 take and the bytes of its largest element. It then reads the file back and
 encodes every row again, which must give the tree it was read from. The record

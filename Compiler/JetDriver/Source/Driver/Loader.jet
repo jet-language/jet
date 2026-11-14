@@ -4190,18 +4190,20 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
-        .Record(record, _, module_name, index) -> jet_driver_core_record_parsed_unit(jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}"), module_name, index)
+        .Record(record, _, module_name, index) -> jet_driver_core_record_parsed_unit(jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}"), jet_driver_core_record_demand(record, index) ?? panic("the Core record: {err}"), module_name, index)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
 
 // A Core module the Core record holds: its registration row decoded, the
-// row's tree the unit's program, the row kept without it. It spells no word
-// and demands nothing: the record's check loaded every module it names, and
-// the row's imports are already final. Its line table is the row's own, so
-// no load step scans the module's text for one (jet_driver_fill_line_starts).
-// A record this jet wrote whose row doesn't decode is a compiler fault.
-jet_driver_core_record_parsed_unit: fn(row: Dyn, module_name: String, index: Int) -> JetDriverParsedUnit {
+// row's tree the unit's program, the row kept without it, and `demand` the
+// identifier demand the record's check found in its source, so the load
+// takes the Core modules its bodies name as a load of its source would. It
+// spells no word: the row's imports are already final. Its line table is the
+// row's own, so no load step scans the module's text for one
+// (jet_driver_fill_line_starts). A record this jet wrote whose row doesn't
+// decode is a compiler fault.
+jet_driver_core_record_parsed_unit: fn(row: Dyn, demand: JetDriverCoreIdentifierDemand, module_name: String, index: Int) -> JetDriverParsedUnit {
     registration := jet_driver_core_record_registration_decode(row, module_name) ?? panic("the Core record: {err}")
     program := registration.program.move()
     registration.program = ast_program()
@@ -4209,7 +4211,7 @@ jet_driver_core_record_parsed_unit: fn(row: Dyn, module_name: String, index: Int
     line_starts: if registration.source_segments.len() == 1 -> registration.source_segments[0].line_starts.copy() else -> [Int]{}
     JetDriverParsedUnit{
         parsed: ParseResult{program: program.move(), diagnostics: [Diagnostic]{}},
-        demand: jet_driver_empty_core_identifier_demand(),
+        demand: demand,
         line_starts: line_starts,
         core_record_index: index,
         core_registration: [SemaRegistrationModule]{registration.move()},
@@ -5186,6 +5188,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     modules := [JetDriverLoadedModule]{}
+    core_demands := [JetDriverCoreModuleDemand]{}
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
@@ -5299,7 +5302,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         deferred := [JetDriverScopedImport]{}
         parsed_unit := parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
-        demand: parsed_unit.demand.move()
+        demand := parsed_unit.demand.move()
         words := parsed_unit.words.move()
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
@@ -5317,8 +5320,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
+
         // A module the Core record holds loads its finalized row: its imports
-        // are final, so none waits on reach and none is added.
+        // are final, so none waits on reach and none is added, and its
+        // recorded identifier demand loads the Core modules its bodies name.
         core_record_index: parsed_unit.core_record_index
         core_registration := parsed_unit.core_registration.move()
         recorded: core_registration.len() > 0
@@ -5856,6 +5861,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 _ := jet_driver_follow_core_demands(reach, source_units, queued, pending, generated_records, request.core_sources, entry_module, entry_index ?? 0, bare_modules, diagnostics)
             }
         }
+        // The Core record's check keeps each module's demand for the record
+        // (CoreRecord.jet section 16), which leaves its entry's out.
+        if request.every_core_body -> core_demands.push(JetDriverCoreModuleDemand{module_identity: module_identity, demand: demand.move()})
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
         modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
@@ -5929,6 +5937,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         complete: complete,
         run_member_paths: run_member_paths,
         spells_program: spells_program,
+        core_demands: core_demands.move(),
     }
 }
 

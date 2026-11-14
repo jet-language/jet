@@ -1,4 +1,4 @@
-// The Core record's body packets (its section 5, schema `jet.core/v11`). The
+// The Core record's body packets (its section 5, schema `jet.core/v12`). The
 // record is written from a finalized Core check, whose module rows hold every
 // checked body with the facts all of them recorded, merged. At write time
 // each row is split: every body becomes one packet, a
@@ -68,6 +68,13 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     }
     loop owned.len() > 0 {
         function := owned.pop() ?? break
+        // A body's heap, stack and frame bounds are its program's: they hang
+        // on what calls it and on the denials that reach it, so the record
+        // holds none, and the effect solve of each compile that takes the
+        // body stamps its own (Effects/Checks.jet sema_effects_check_modules).
+        function.heap = ""
+        function.stack = ""
+        function.frame_bound = -1
         // A body keyed "" has no name row; it fills its own packet.
         position: sema_core_body_at(keys, at, function.key) ?? first + owned.len()
         packets[position].function = Val(function)

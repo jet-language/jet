@@ -215,13 +215,13 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     checked := registration_seeds_refinalize(seeds, taken, walked, seeded_table, reserved)
     assert(checked.complete)
     // Finalizing against the same Core changes nothing on the taken slot.
-    assert_eq(checked.seeded_writes, 0)
+    assert_eq(checked.seeded_writes.len(), 0)
     assert_eq(checked.modules[0].module_identity, module_result.module_identity)
     assert_eq("{checked.modules[0].functions:Debug}", "{module_result.functions:Debug}")
     assert_eq("{checked.modules[0].call_facts:Debug}", "{module_result.call_facts:Debug}")
 }
 
-#Test("a taken seeded slot a finalization would change is counted, not written") {
+#Test("a taken seeded slot a finalization would change is listed, not written") {
     seeds := [SemaRegistrationModule]{}
     seeded_table := module_table()
     reserved := [SymbolKeys]{}
@@ -232,7 +232,14 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     taken := [SemaGraphModuleResult]{stale.copy()}
     walked := [SemaCoreModuleUsageResult]{}
     checked := registration_seeds_refinalize(seeds, taken, walked, seeded_table, reserved)
-    assert(checked.seeded_writes > 0)
+    assert(checked.seeded_writes.len() > 0)
+    // Each listed write names its kind, module and function, and the stale
+    // row the record holds.
+    loop write in checked.seeded_writes {
+        assert_eq(write.kind, "effects")
+        assert_eq(write.module_name, module_result.module_name)
+        assert(write.recorded.contains("Stale"))
+    }
     // The slot stays as it was given.
     assert_eq("{checked.modules[0].functions:Debug}", "{stale.functions:Debug}")
 }

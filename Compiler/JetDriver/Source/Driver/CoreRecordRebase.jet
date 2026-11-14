@@ -11,7 +11,7 @@
 // graph indexes become module key positions before a row is encoded.
 use {
     jet_foundation.[Item, compiler_transfer_rows, module_text, symbol_find]
-    jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaCoreModuleUsageResult, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, sema_core_body_store_new]
+    jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaCoreModuleUsageResult, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, SemaSeededWrite, sema_core_body_store_new]
 }
 
 // Module index `index` under the map `modules`. A row that names a module
@@ -154,9 +154,66 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
 // The compiler fault of a finalization (`graph`) that would have changed a
 // taken seeded module: a taken module is final (sema_finalize_seeded_taken),
 // so a change means the Core record disagrees with the Core this program
-// checks against, and nothing lowered from it can be trusted. None when the
-// finalization would have changed none.
+// checks against, and nothing lowered from it can be trusted. It counts the
+// facts by kind and lists each (kind, module, key, the record's value, the
+// finalized one), the first JET_DRIVER_SEEDED_WRITE_LINES of them. None when
+// the finalization would have changed none.
 jet_driver_core_record_seeded_problem: fn(graph: SemaGraphResult) -> String? Never! {
-    if graph.seeded_writes == 0 -> return None
-    Val("finalization would have changed {graph.seeded_writes} facts of the Core modules taken from the Core record: the record doesn't match the Core this program checks against")
+    if graph.seeded_writes.len() == 0 -> return None
+    Val(jet_driver_core_record_seeded_text(graph.seeded_writes))
+}
+
+jet_driver_core_record_seeded_text: fn(writes: [SemaSeededWrite]) -> String Never! {
+    kinds := [String]{}
+    counts := [Int]{}
+    loop write in writes {
+        at := -1
+        loop (index, kind) in kinds {
+            if kind == write.kind -> at = index
+        }
+        if at < 0 {
+            kinds.push("{write.kind}")
+            counts.push(0)
+            at = counts.len() - 1
+        }
+        counts[at] = counts[at] + 1
+    }
+    by_kind: loop (index, kind) in kinds -> "{kind} {counts[index]}"
+    shown: if writes.len() < JET_DRIVER_SEEDED_WRITE_LINES -> writes.len() else -> JET_DRIVER_SEEDED_WRITE_LINES
+    lines: loop index in 0..<shown -> jet_driver_seeded_line(writes[index])
+    more: if writes.len() > shown -> "\n  … and {writes.len() - shown} more" else -> ""
+    "finalization would have changed {writes.len()} facts of the Core modules taken from the Core record: the record doesn't match the Core this program checks against ({by_kind.join(", ")}){lines.join("")}{more}"
+}
+
+// The facts jet_driver_core_record_seeded_problem lists one per line.
+JET_DRIVER_SEEDED_WRITE_LINES: 50
+
+// One fact's line: its kind, module and key, and both values around where
+// they first differ.
+jet_driver_seeded_line: fn(write: SemaSeededWrite) -> String Never! {
+    from: jet_driver_seeded_difference(write.recorded, write.finalized)
+    "\n  {write.kind}: {write.module_name} `{write.key}`: record {jet_driver_seeded_value(write.recorded, from)}, finalized {jet_driver_seeded_value(write.finalized, from)}"
+}
+
+// The first byte at which `left` and `right` differ: the shorter one's
+// length when one begins the other.
+jet_driver_seeded_difference: fn(left: String, right: String) -> Int Never! {
+    left_bytes: left.bytes()
+    right_bytes: right.bytes()
+    limit: if left_bytes.len() < right_bytes.len() -> left_bytes.len() else -> right_bytes.len()
+    loop index in 0..<limit {
+        if left_bytes[index] != right_bytes[index] -> return index
+    }
+    limit
+}
+
+// One fact value of a seeded-write line: at most 200 bytes of it, from a
+// little before `from`, where the two values first differ.
+jet_driver_seeded_value: fn(value: String, from: Int) -> String Never! {
+    if value.len() <= 200 -> return "`{value}`"
+    start: if from > value.len() - 140 -> value.len() - 200 else if from > 60 -> from - 60 else -> 0
+    end: start + 200
+    lead: if start > 0 -> "…" else -> ""
+    tail: if end < value.len() -> "…" else -> ""
+    "{lead}`{value.slice(start, end)}`{tail}"
 }

@@ -4418,6 +4418,9 @@ JetDriverLoweringInputs: struct {
     // Each checked module's Core usage (SemaCoreUsageResult.modules), for the
     // Core record to hold its Core modules' rows.
     core_usage: [SemaCoreModuleUsageResult]{[SemaCoreModuleUsageResult]{}}
+    // Each loaded Core module's identifier demand (JetDriverLoadResult
+    // `core_demands`), for the Core record to hold its Core modules' rows.
+    core_demands: [JetDriverCoreModuleDemand]{[JetDriverCoreModuleDemand]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5567,6 +5570,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             registration_modules := [SemaRegistrationModule]{}
             landed_values := [SemaComptimeItemValue]{}
             usage_rows := [SemaCoreModuleUsageResult]{}
+            demand_rows := [JetDriverCoreModuleDemand]{}
             if request.every_core_body {
                 registration_modules = registration_graph.modules.move()
                 registration_graph.modules = [SemaRegistrationModule]{}
@@ -5574,8 +5578,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 comptime_values = [SemaComptimeItemValue]{}
                 usage_rows = checked_graph.core_usage.modules.move()
                 checked_graph.core_usage.modules = [SemaCoreModuleUsageResult]{}
+                demand_rows = load.core_demands.move()
+                load.core_demands = [JetDriverCoreModuleDemand]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move(), core_usage: usage_rows.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move(), core_usage: usage_rows.move(), core_demands: demand_rows.move()})
         }
         return result
     }

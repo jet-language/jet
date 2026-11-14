@@ -579,10 +579,21 @@ SemaGraphResult: struct {
     outputs: [ResolvedOutput]{[ResolvedOutput]{}}
     memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
-    // What finalization would have changed on the taken seeded modules'
-    // final slots, counted instead of written (sema_finalize_seeded_taken);
-    // 0 when their record matches the Core this program checks against.
-    seeded_writes: Int{0}
+    // Each fact finalization would have changed on the taken seeded modules'
+    // final slots, listed instead of written (sema_finalize_seeded_taken);
+    // empty when their record matches the Core this program checks against.
+    seeded_writes: [SemaSeededWrite]{[SemaSeededWrite]{}}
+}
+
+// One fact of a taken seeded module (sema_finalize_seeded_taken) that this
+// program's finalization solved differently from the record: what kind of
+// fact, its module and function key, and the two values as text.
+SemaSeededWrite: struct {
+    kind: String
+    module_name: String
+    key: String
+    recorded: String
+    finalized: String
 }
 
 sema_name_facts_empty: fn() -> NameFacts Never! {
@@ -11656,17 +11667,16 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 // (E0433). Its call sites keep the carrier they were checked against; lowering hands
 // a plain-return callee's value to any `Result` carrier a call site names. The
 // first `taken` modules are taken seeded ones (sema_finalize_seeded_taken),
-// final already: what the projection would change on one is counted, not
-// written. Returns that count.
-sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable, taken: Int) -> Int Never! {
-    if projected.len() == 0 -> return 0
+// final already: what the projection would change on one is listed in
+// `seeded_writes`, not written.
+sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable, taken: Int, seeded_writes: &[SemaSeededWrite]) Never! {
+    if projected.len() == 0 -> return
     keys := [String:Bool]{}
     ids := [U32:Bool]{}
     loop key in projected {
         keys[key] = true
         if symbol_find(symbols, key) == .Val(id) -> ids[id.id] = true
     }
-    seeded_writes := 0
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
             if keys.get(modules[module_index].functions[function_index].key) == None -> next
@@ -11675,22 +11685,21 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
                 next
             }
             if modules[module_index].functions[function_index].ret == .Val(.Result(_, err)) {
-                if err != (Type.Named{name: "Never"}) -> seeded_writes += 1
+                if err != (Type.Named{name: "Never"}) -> seeded_writes.push(SemaSeededWrite{kind: "failure projection", module_name: "{modules[module_index].module_name}", key: "{modules[module_index].functions[function_index].key}", recorded: "{err:Debug}", finalized: "Never"})
             }
         }
-        loop fact_index in 0..<modules[module_index].call_facts.len() {
-            if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded {
-                next
+        if module_index >= taken {
+            loop fact_index in 0..<modules[module_index].call_facts.len() {
+                if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded -> next
+                if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None -> modules[module_index].call_facts[fact_index].discarded = true
             }
-            if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None {
-                seeded_writes += if module_index < taken -> 1 else -> 0
-                if module_index >= taken {
-                    modules[module_index].call_facts[fact_index].discarded = true
-                }
-            }
+            next
+        }
+        loop fact in modules[module_index].call_facts {
+            if !fact.discarded_if_infallible || fact.discarded -> next
+            if fact.callee == .Val(callee) && ids.get(callee.id) != None -> seeded_writes.push(SemaSeededWrite{kind: "discarded call", module_name: "{modules[module_index].module_name}", key: "{fact.caller_key} at {fact.span.start}", recorded: "kept", finalized: "discarded"})
         }
     }
-    seeded_writes
 }
 
 // One projected function's checked signature names the `T Never!` carrier
@@ -12080,10 +12089,10 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     checked_types: held.checked_types.move()
     complete := held.complete
     // The taken seeded modules' slots are final (sema_finalize_seeded_taken):
-    // a pass that would change one counts it here instead, so a finalization
-    // over a record that matches its Core keeps `seeded_writes` at 0.
+    // a pass that would change one lists it here instead, so a finalization
+    // over a record that matches its Core leaves `seeded_writes` empty.
     taken: sema_finalize_seeded_taken(after_body_graph)
-    seeded_writes := 0
+    seeded_writes := [SemaSeededWrite]{}
     hook_access: sema_host_hook_access(host_hooks)
     diagnostics := stage.diagnostics
     if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
@@ -12108,11 +12117,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // failure obligations name a callee the solve left fallible, are checked
     // again; the `T Never!` projections are reconciled onto the checked bodies.
     // A taken seeded module's bodies were checked against the contracts its
-    // own finalization solved: one this solve would recheck is counted.
+    // own finalization solved: one this solve would recheck is listed.
     recheck := [Int]{}
     loop module_index in sema_failure_recheck_modules(after_body_graph, modules, unions, infallible) {
         if module_index < taken {
-            seeded_writes += 1
+            seeded_writes.push(SemaSeededWrite{kind: "failure recheck", module_name: "{modules[module_index].module_name}", key: "", recorded: "checked", finalized: "rechecked"})
             next
         }
         recheck.push(module_index)
@@ -12139,7 +12148,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         }
         else -> after_body_graph.move()
     }
-    seeded_writes += sema_failure_reconcile_infallible(modules, infallible, final_graph.symbols, taken)
+    sema_failure_reconcile_infallible(modules, infallible, final_graph.symbols, taken, seeded_writes)
     // The export and import rows read the projected declarations; a taken
     // seeded module's were final in its result.
     loop module_index in taken..<modules.len() {
@@ -12234,7 +12243,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     effect_symbols := final_graph.symbols.move()
     effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, taken)
     final_graph.symbols = effects.symbols.move()
-    seeded_writes += effects.seeded_writes
+    seeded_writes.extend(effects.seeded_writes.move())
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -12451,7 +12460,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> programs.push(source_module.program)
     }
-    if trace_sink == .Val(sink) -> sink.progress("counters.sema.seeded_writes", seeded_writes, -1)
+    if trace_sink == .Val(sink) -> sink.progress("counters.sema.seeded_writes", seeded_writes.len(), -1)
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
@@ -12529,10 +12538,10 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // every module in order. The graph and the modules move into the threads'
 // shared state and back; the graph is returned. A program whose work admits
 // one thread walks on the calling thread.
-sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult], seeded_writes: &Int) -> SemaRegistrationGraph {
+sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult], seeded_writes: &[SemaSeededWrite]) -> SemaRegistrationGraph {
     owned := graph.move()
     // A taken seeded module's bodies are final: the branches the walk would
-    // mask on one are counted in `seeded_writes`, not marked. Its Core usage,
+    // mask on one are listed in `seeded_writes`, not marked. Its Core usage,
     // when it came with it, is not walked again.
     seeded_taken: sema_finalize_seeded_taken(owned)
     seeded_usage: sema_finalize_seeded_usage(owned, seeded_taken)
@@ -12665,23 +12674,17 @@ sema_mark_masked_branches: fn(functions: &[FnBody], masked: [Span], fixed_tags: 
 
 // sema_mark_masked_branches on the bodies of module `module_index`, or, when
 // it is one of the first `taken` (a taken seeded module's, final already,
-// sema_finalize_seeded_taken), what it would change on them counted in
+// sema_finalize_seeded_taken), what it would change on them listed in
 // `seeded_writes` instead.
-sema_finalize_mask: fn(modules: &[SemaGraphModuleResult], module_index: Int, masked: [Span], fixed_tags: [String], taken: Int, seeded_writes: &Int) Never! {
-    if module_index >= taken {
-        return sema_mark_masked_branches(modules[module_index].functions, masked, fixed_tags)
-    }
+sema_finalize_mask: fn(modules: &[SemaGraphModuleResult], module_index: Int, masked: [Span], fixed_tags: [String], taken: Int, seeded_writes: &[SemaSeededWrite]) Never! {
+    if module_index >= taken -> return sema_mark_masked_branches(modules[module_index].functions, masked, fixed_tags)
     loop span in masked {
         loop function in modules[module_index].functions {
-            if span.start >= function.source_span.start && span.end <= function.source_span.end && !function.masked.contains(span) {
-                seeded_writes += 1
-            }
+            if span.start >= function.source_span.start && span.end <= function.source_span.end && !function.masked.contains(span) -> seeded_writes.push(SemaSeededWrite{kind: "taint mask", module_name: "{modules[module_index].module_name}", key: "{function.key}", recorded: "unmasked {span.start}..{span.end}", finalized: "masked"})
         }
     }
     loop function in modules[module_index].functions {
-        if function.fixed_tags != fixed_tags && sema_fixed_types(function.tree.types.types, fixed_tags) {
-            seeded_writes += 1
-        }
+        if function.fixed_tags != fixed_tags && sema_fixed_types(function.tree.types.types, fixed_tags) -> seeded_writes.push(SemaSeededWrite{kind: "fixed tags", module_name: "{modules[module_index].module_name}", key: "{function.key}", recorded: "{function.fixed_tags:Debug}", finalized: "{fixed_tags:Debug}"})
     }
 }
 
@@ -12981,11 +12984,12 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             last: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             type_caps: sema_effect_type_caps(graph.modules)
             library: sema_library_effects(graph)
+            taken: sema_finalize_seeded_taken(graph)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
                 input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
                 // Input positions count from the part's first input; the join shifts them.
-                sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls, graph.symbols)
+                sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls, graph.symbols, module_index < taken)
                 side.effect_inputs.push(input)
             }
         }
