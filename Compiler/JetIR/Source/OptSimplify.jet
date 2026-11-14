@@ -84,7 +84,9 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         changed += ir_opt_dead(m, f, facts, report)
         changed += ir_opt_structure(f, report)
         changed += ir_opt_unwrap(f)
-        ir_opt_compact(f)
+        // A later round that changed nothing up to here finds the function
+        // as the last round's compaction (or short circuits) left it.
+        if changed > 0 || round == 0 -> ir_opt_compact(f)
         changed += ir_opt_short_circuits(f, report)
         if changed == 0 -> break
         round += 1
@@ -251,12 +253,15 @@ ir_opt_fold_text: fn(m: IRModule, f: &IRFunction, facts: OptFacts, texts: OptTex
 }
 
 ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, texts: OptTextRoutes, report: &IROptReport) -> Int Never! {
-    nesting: ir_opt_nesting(f)
+    // Only folding an If reads the nesting. The folds before the first one
+    // change no Block, Loop, If, Else or End, so it is taken there.
+    nesting := OptNesting{end: [Int]{}, els: [Int]{}}
     changed := 0
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .If || op == .BrIf {
             value: ir_opt_const_at(f, facts, f.a[at], at) ?? next
+            if op == .If && nesting.end.len() == 0 -> nesting = ir_opt_nesting(f)
             ir_opt_fold_branch(f, nesting, at, value != 0)
             report.branches_folded += 1
             changed += 1
@@ -607,6 +612,20 @@ ir_opt_short_circuits: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // circuit ending right before it.
 ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], first: Bool) -> Int Never! {
     count: f.op.len()
+    // A short circuit's If has the Copy or Move of its test right before
+    // it (ir_opt_short_circuit_copy): without one there is nothing to find,
+    // and no facts or nesting to take.
+    candidate := false
+    loop at in 1..<count {
+        if f.op[at] == .If && ir_opt_short_circuit_copy(f, at) >= 0 {
+            candidate = true
+            break
+        }
+    }
+    if !candidate {
+        exposed.clear()
+        return 0
+    }
     facts: ir_opt_facts(f)
     nesting: ir_opt_nesting(f)
     wanted := [Bool]{}
