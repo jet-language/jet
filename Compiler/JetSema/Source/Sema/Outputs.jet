@@ -626,11 +626,22 @@ sema_output_legacy_run_contract: fn(graph: SemaRegistrationGraph, intent: SemaOu
     }
     loop function in graph.modules[entry_index].functions {
         if function.declaration.name == "run" {
-            _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.declaration.span, "declare the entry as `run: fn()` or `run: fn() IOError!`", diagnostics)
+            _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.declaration.span, sema_output_run_contract_fix(function), diagnostics)
             break
         }
     }
     diagnostics.move()
+}
+
+// A `run` that returns a value beside a named error keeps that error: the
+// fix drops only the value, so the body's own failures still fit.
+sema_output_run_contract_fix: fn(function: SemaRegistrationFunction) -> String Never! {
+    if function.declaration.return_type == .Val(ty) {
+        if ty == .Result(_, err) {
+            if err == .Named(name) -> return "declare the entry as `run: fn() {name}!` and drop the value it returns: end with `Ok()`"
+        }
+    }
+    "declare the entry as `run: fn()` or `run: fn() IOError!`"
 }
 
 // The Rust original publishes the same solved callable row into every checked
