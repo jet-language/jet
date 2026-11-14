@@ -692,8 +692,11 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
     resolution := SemaExprOperatorResolution?{None}
     if {
         op == BinOp.Eq || op == BinOp.Ne -> {
-            graph: program.registration_graph ?? return None
-            resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)
+            // Read in place through the pattern: a `??` binding copies the graph.
+            if program.registration_graph == {
+                .Val(graph) -> { resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics) }
+                .None -> return None
+            }
         }
         else -> {
             resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, program, scopes, diagnostics)

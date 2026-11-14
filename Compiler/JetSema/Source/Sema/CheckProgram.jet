@@ -3764,17 +3764,20 @@ sema_function_registered_declares_generics: fn(job: SemaBodyJob, module_index: I
             return planned.type_params.len() != 0
         }
     }
-    graph: program.registration_graph ?? panic("a registered Jet body check lost its owning graph")
-    if job == {
-        .TopLevel(item_index) -> {
-            if graph.modules[module_index].program.items[item_index] == .Func(func) {
-                return func.type_params.len() != 0
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        return if job == {
+            .TopLevel(item_index) -> {
+                if graph.modules[module_index].program.items[item_index] == .Func(func) {
+                    return func.type_params.len() != 0
+                }
+                panic("a selected source function lost its original item")
             }
-            panic("a selected source function lost its original item")
+            .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].declaration.type_params.len() != 0
+            .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].declaration.type_params.len() != 0
         }
-        .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].declaration.type_params.len() != 0
-        .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].declaration.type_params.len() != 0
     }
+    panic("a registered Jet body check lost its owning graph")
 }
 
 sema_function_check_registered_location: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) {
@@ -5923,11 +5926,14 @@ sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int,
 // author to act on advice, so it reports its errors alone, as a derived
 // body does (sema_author_facing_diagnostics); they keep their own spans.
 sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph ?? panic("a registered Jet method lost its owning graph")
-    if job == .ImplMethod(_, owner, _) {
-        return graph.modules[module_index].impls[owner].compiler_generated
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        if job == .ImplMethod(_, owner, _) {
+            return graph.modules[module_index].impls[owner].compiler_generated
+        }
+        return false
     }
-    false
+    panic("a registered Jet method lost its owning graph")
 }
 
 sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {

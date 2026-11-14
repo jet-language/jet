@@ -219,10 +219,13 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
 // which the caller need not see (`Transform.point<P: GeometryPoint>` called
 // from user code); the actual type resolves where the caller wrote it.
 sema_inference_bound_value: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String, bound_module: ModuleID) -> Bool? {
-    graph_value: graph ?? return None
-    if module_is_none(bound_module) || bound_module == context.caller_module_identity -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
-    resolved: sema_type_resolve_declared_recursive(graph_value, actual, sema_type_module_row(graph_value, context.caller_module_identity), context.lexical_generic_params)
-    sema_type_bound_satisfied_with_generics(graph_value, resolved, bound, bound_module, context.lexical_generic_params)
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if graph == .Val(graph_value) {
+        if module_is_none(bound_module) || bound_module == context.caller_module_identity -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
+        resolved: sema_type_resolve_declared_recursive(graph_value, actual, sema_type_module_row(graph_value, context.caller_module_identity), context.lexical_generic_params)
+        return sema_type_bound_satisfied_with_generics(graph_value, resolved, bound, bound_module, context.lexical_generic_params)
+    }
+    None
 }
 
 sema_inference_assignable: fn(graph: SemaRegistrationGraph?, context: SemaInferenceContext, required: Type, offered: Type) -> Bool Never! {

@@ -69,33 +69,35 @@ sema_root_call_named: fn(method: String, environment: SemaScopeEnvironment, prog
 // alias order; with `receiver`, only those accepting `(receiver type)`.
 sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaRootCallTarget] {
     targets := [SemaRootCallTarget]{}
-    graph: program.registration_graph ?? return targets
-    if !graph.root_functions -> return targets
-    module_index: sema_scope_caller_index(environment, graph) ?? return targets
-    aliases := [String]{}
-    loop import_row in graph.modules[module_index].imports {
-        loop binding in import_row.bindings {
-            if binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
-            aliases.push(binding.local)
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        if !graph.root_functions -> return targets
+        module_index: sema_scope_caller_index(environment, graph) ?? return targets
+        aliases := [String]{}
+        loop import_row in graph.modules[module_index].imports {
+            loop binding in import_row.bindings {
+                if binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
+                aliases.push(binding.local)
+            }
         }
-    }
-    aliases.sort()
-    seen := [String]{}
-    loop alias in aliases {
-        imported: sema_call_source_import_target(environment, program, alias) ?? next
-        if seen.contains(imported.module_identity) -> next
-        seen.push(imported.module_identity)
-        target_index: sema_registration_module_index_text(graph, imported.module_identity) ?? next
-        export: sema_registration_resolve_export(graph, target_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? next
-        row: sema_call_export_function_row(environment, program, export) ?? next
-        registered: graph.modules[row.module_index].functions[row.row]
-        if registered.declaration.params.len() == 0 || !registered.declaration.params[0].root -> next
-        if receiver == .Val(receiver_type) {
-            generic_names: loop param in registered.generic_params -> param.name
-            signature: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}})
-            if !sema_root_call_param_accepts(signature, generic_names, receiver_type, environment, program) -> next
+        aliases.sort()
+        seen := [String]{}
+        loop alias in aliases {
+            imported: sema_call_source_import_target(environment, program, alias) ?? next
+            if seen.contains(imported.module_identity) -> next
+            seen.push(imported.module_identity)
+            target_index: sema_registration_module_index_text(graph, imported.module_identity) ?? next
+            export: sema_registration_resolve_export(graph, target_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? next
+            row: sema_call_export_function_row(environment, program, export) ?? next
+            registered: graph.modules[row.module_index].functions[row.row]
+            if registered.declaration.params.len() == 0 || !registered.declaration.params[0].root -> next
+            if receiver == .Val(receiver_type) {
+                generic_names: loop param in registered.generic_params -> param.name
+                signature: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}})
+                if !sema_root_call_param_accepts(signature, generic_names, receiver_type, environment, program) -> next
+            }
+            targets.push(SemaRootCallTarget{alias: Val(alias), shown: "{alias}.{method}"})
         }
-        targets.push(SemaRootCallTarget{alias: Val(alias), shown: "{alias}.{method}"})
     }
     targets
 }

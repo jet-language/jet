@@ -125,14 +125,16 @@ sema_call_source_import_target: fn(environment: SemaScopeEnvironment, program: S
 // and takes the file's item `alias` with a `use`: while that item is the
 // visible binding of `alias`, the dot reaches no file member.
 sema_call_taken_over_file_member: fn(alias: String, member: String, member_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic? Never! {
-    graph: program.registration_graph ?? return None
-    module_index: sema_scope_caller_index(environment, graph) ?? return None
-    if !sema_registration_file_name_taken_over(graph.modules[module_index], alias) -> return None
-    visible_index: sema_scope_resolve_index(scopes, alias) ?? return None
-    visible_id: scopes.bindings[visible_index].symbol.id
-    loop import in graph.modules[module_index].imports {
-        loop binding in import.bindings {
-            if binding.local == alias && binding.symbol.id == visible_id -> return Val(sema_taken_over_file_member(alias, member, member_span))
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_scope_caller_index(environment, graph) ?? return None
+        if !sema_registration_file_name_taken_over(graph.modules[module_index], alias) -> return None
+        visible_index: sema_scope_resolve_index(scopes, alias) ?? return None
+        visible_id: scopes.bindings[visible_index].symbol.id
+        loop import in graph.modules[module_index].imports {
+            loop binding in import.bindings {
+                if binding.local == alias && binding.symbol.id == visible_id -> return Val(sema_taken_over_file_member(alias, member, member_span))
+            }
         }
     }
     None

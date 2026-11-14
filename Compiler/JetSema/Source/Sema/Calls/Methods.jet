@@ -1365,15 +1365,17 @@ sema_app_is_route_table: fn(ty: Type, environment: SemaScopeEnvironment, program
 
 // Whether `ty` is a struct that carries the web marker `name`.
 sema_web_type_marked: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph ?? return false
-    resolved: sema_call_resolved_type(ty, environment, program)
-    row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
-    nominal: graph.modules[row.module_index].nominals[row.row]
-    if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
-    item: sema_registration_nominal_source_item(nominal.source) ?? return false
-    if item == .Struct(definition) {
-        loop marker in definition.type_markers {
-            if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, name) -> return true
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        resolved: sema_call_resolved_type(ty, environment, program)
+        row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+        item: sema_registration_nominal_source_item(nominal.source) ?? return false
+        if item == .Struct(definition) {
+            loop marker in definition.type_markers {
+                if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, name) -> return true
+            }
         }
     }
     false
