@@ -1,12 +1,14 @@
-// The `(before, after)` pair from `split_once` and `cut_last` has the
-// same type as a written `(before: String, after: String)` return type, in
-// either label order.
+// The `(before, after)` pair from `split_once` and `cut_last` has the type
+// of a written `(before: String, after: String)` return type. Written in the
+// other label order it is another type: the pair itself converts by name at
+// the return, and an optional holding it does not.
 split_assign: fn(text: String) -> (before: String, after: String)? {
     text.split_once("=")
 }
 
 cut_path: fn(path: String) -> (after: String, before: String)? {
-    path.cut_last("/")
+    pair: path.cut_last("/") ?? return None
+    pair
 }
 
 run: fn() {
