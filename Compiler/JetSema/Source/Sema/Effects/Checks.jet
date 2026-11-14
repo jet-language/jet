@@ -3444,7 +3444,9 @@ sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
     if sema_effect_is_call(node.kind) {
         found: sema_effect_find_fact(facts, caller, node.span)
         if found == .Val(position) {
-            if facts.modules[caller.module_index].facts[position].callee == .Val(callee) {
+            // A `mem.<operation>(…)` call sema already reported as E3101
+            // (`audited_operation`) is not reported again as E3103.
+            if facts.modules[caller.module_index].facts[position].callee == .Val(callee) && !facts.modules[caller.module_index].facts[position].audited_operation {
                 if facts.unsafe_names.get(symbol_key(facts.symbols, tree.symbols, callee)) == .Val(name) -> sema_effect_require_unsafe_call(name, true, audited, node.span, diagnostics)
             }
             if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
@@ -5238,10 +5240,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     published_effects := [String:String]{}
     loop (key_index, key) in node_by_key.texts {
         node_index: node_by_key.rows[key_index]
-        // Core marks its audited `core.mem` operations `#Unsafe`; outside a
-        // gate sema already reports each call as E3101, so E3103 would say it twice.
-        core_audited: module_is_core(nodes[node_index].module_identity) && SEMA_CORE_MEM_AUDITED.contains(nodes[node_index].name)
-        if nodes[node_index].is_unsafe && !core_audited -> unsafe_names[key] = nodes[node_index].name
+        if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
         if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())

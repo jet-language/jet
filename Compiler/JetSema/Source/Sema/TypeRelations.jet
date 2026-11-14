@@ -1263,14 +1263,13 @@ sema_type_core_pointer_name: fn(graph: SemaRegistrationGraph, name: String, call
     if qualified.after != "Ptr" -> return false
     loop import in graph.modules[caller].imports {
         if sema_registration_file_import_taken_over(graph.modules[caller], import) -> next
+        // `use core.mem` binds the submodule by its last segment, `mem`, to
+        // its interned identity, which may have no module row of its own.
+        loop binding in import.bindings {
+            if binding.local == qualified.before && binding.symbol.kind == SymbolKind.Import && module_text(graph.module_table, binding.target_module_identity) == "core.mem" -> return true
+        }
         if import.declaration.alias == qualified.before {
             target: sema_registration_module_index(graph, import.target_module_identity) ?? return false
-            return graph.modules[target].module_name == "core.mem"
-        }
-        // `use core.mem` binds the submodule by its last segment, `mem`.
-        loop binding in import.bindings {
-            if binding.local != qualified.before || binding.symbol.kind != SymbolKind.Import -> next
-            target: binding.target_module_index ?? return false
             return graph.modules[target].module_name == "core.mem"
         }
     }

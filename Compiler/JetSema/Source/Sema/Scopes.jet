@@ -187,6 +187,10 @@ SemaCallSiteFact: struct {
     // The callee is the `#Unsafe` inline foreign function of this name: the
     // call needs an audited region (E3103).
     unsafe_foreign_name: String?{None}
+    // The call is a `mem.<operation>(…)` of an audited `core.mem` operation:
+    // sema reports it outside `#Unsafe` as E3101, so the effect pass's E3103
+    // for its `#Unsafe` callee would report the call twice.
+    audited_operation: Bool{false}
     // The callee is a raw `extern rust` function whose parameter takes a
     // capability: the call needs an audited region (E0702).
     foreign_capability: SemaForeignCapability?{None}

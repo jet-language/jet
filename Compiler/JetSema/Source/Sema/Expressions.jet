@@ -3735,8 +3735,9 @@ sema_expr_try_core_module_method: fn(receiver: Expr, method: String, method_span
 }
 
 // The `core.mem` operations an audited `#Unsafe` region gates. Outside one
-// each is E3101 at its call; Core also marks them `#Unsafe`, and the effect
-// pass leaves them out of its E3103 call check so the call reports once.
+// a `mem.<operation>(…)` call is E3101; Core also marks them `#Unsafe`, and
+// the call's fact (`audited_operation`) keeps the effect pass's E3103 off it,
+// so the call reports once. A directly imported `copy(…)` stays E3103.
 SEMA_CORE_MEM_AUDITED: #run { [String]{"volatile_read", "volatile_write", "copy", "fill", "alloc_raw", "free_raw", "window"} }
 
 sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, unbuilt: &SemaCoreUnbuiltCall?, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
@@ -3793,7 +3794,8 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         .Source(target) -> {
             // An audited `core.mem` operation (SEMA_CORE_MEM_AUDITED) outside
             // `#Unsafe` is E3101 at the call, before its arguments are checked.
-            if module_name == "core.mem" && SEMA_CORE_MEM_AUDITED.contains(method) {
+            audited_operation: module_name == "core.mem" && SEMA_CORE_MEM_AUDITED.contains(method)
+            if audited_operation {
                 _: sema_expr_require_unsafe(method, method_span, context, diagnostics)
             }
             math_abs: sema_call_try_core_math_abs(module_name, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -3806,8 +3808,14 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
             if module_name == "core.encoding.csv" && method == "query" && type_args.len() == 1 && args.len() == 2 -> sema_data_check_analytics_sql_schema(type_args[0], args[1].expr, expr_span(args[1].expr), environment, program, diagnostics)
             if module_name == "core.ui" && method == "node_role" -> sema_call_core_ui_node_role_lint(args, method_span, environment, program, scopes, diagnostics)
             scopes.ownership_call_depth += 1
+            first_fact: context.call_facts.len()
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             scopes.ownership_call_depth -= 1
+            if audited_operation {
+                loop index in first_fact..<context.call_facts.len() {
+                    if context.call_facts[index].span == method_span -> context.call_facts[index].audited_operation = true
+                }
+            }
             return SemaMethodSpecialCheck{handled: true, value: value}
         }
         .Core(record) -> {
