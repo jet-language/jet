@@ -75,6 +75,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
+| `compiler.query(source, kind, at:, limit:)` | the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows |
 | `fn(…) { … }` | lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) { n > 2 })`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int { n * n }`); the body is always braced and its last value is the result |
 | `-[…]` | effect row on a callable |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
@@ -100,6 +101,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
 | `;` | retired explicit statement terminator |
 | `_name` | ordinary identifier |
+| `café / नमस्ते / v₀` | a name in any script: a letter or `_`, then letters, combining marks and digits (Unicode's default identifier rule); invisible characters are never part of a name, while math subscripts, superscripts and `∂`, `∇`, `∞` are; a name is stored in one normal form (NFC), so both typings of `é` are one name, and two names in one package that only look alike warn |
 | `__core_intrinsic` | compiler-only namespace |
 | `<:` | open a lock-step statement-expansion fence |
 | `:>` | close a lock-step statement-expansion fence |
@@ -160,6 +162,28 @@ dashed name `ident (-ident)*`, `-` joins only when span-adjacent on both sides,
 so spaced `a - b` stays subtraction — parser-level (`expect_dashed_name`), no
 lexer change. No leading/trailing/doubled hyphen. Code identifiers stay plain
 `ident`.
+
+**D-IDENT-CHARS1=A — Names in every script, one stored form, look-alike
+warnings** *(ratified 2026-10-05, card #4623)*: a name is Unicode's default
+identifier (UAX #31): a letter or `_`, then letters, combining marks and
+digits, so Hindi (`नमस्ते`), Arabic, Thai and accented names work. Two UAX #31
+profiles apply. The Default-Ignorable Exclusion Profile keeps invisible
+characters (U+3164, U+115F, U+034F, U+200B to U+200D, U+FE00 to U+FE0F) out of
+every name. The Mathematical Compatibility Notation Profile keeps subscript
+and superscript names (`v₀`, `x²`) and adds `∂`, `∇` and `∞`. Circled letters
+such as `ⓐ` and emoji are not names. A name is stored in one normal form, NFC,
+from the lexer on: a one-piece `é` and `e` plus U+0301 are one name on every
+engine, and `jet fmt` rewrites names, never text in strings or comments, to
+that form. Two names in one package with the same UTS #39 skeleton (Latin `a`
+and Cyrillic `а`) warn once, naming both declarations, and so does a single
+name that mixes scripts to look like another word; the warning never blocks
+(D-LINTPOLICY1). One generated character table, pinned to Core's Unicode
+data, is read by the lexer and by the casing check (D-CASE-LAW1), which counts
+combining marks and math-profile characters as word characters, so uncased
+scripts pass as before. Backends encode any name character outside their
+target's identifier set. Route, registry and file names keep their own rules,
+and invisible direction marks stay rejected by the UTF-8 source rules. The
+rule is ratified and not yet built; card #4623 tracks it.
 
 **S14 — Alias policy**: one canonical spelling per construct; **no aliases,
 ever**. The compiler may recognize foreign syntax to emit a teaching error
@@ -4139,6 +4163,27 @@ expansion is registered. A handler's actions are rechecked together with the
 callers they affect, and a failed handler publishes none of them. Handlers
 share D-PREP-FUEL1's step budget and the round limit, and cache keys cover
 source, compiler, reflected inputs, lock, authority and consent.
+
+**D-META-REG2=A — One typed fact query in `core.compiler`, with `jet inspect
+facts` as its view** *(ratified 2026-11-11, card #4276)*: `core.compiler` has
+one public fact query, `query(source: FactSource, kind: FactKind, at:
+QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError!`. A
+`FactSource` is `Schema(SchemaSnapshot)`, `Program(ProgramInfo)` or
+`Run(RunReceipt)`: an explicit, immutable, authorized snapshot, never a name
+or an ambient current program. The three stores of D-LEDGER1 stay separate,
+and no fourth store is added. A `Fact` is a tagged `SchemaFact`, `ProgramFact`
+or `RunFact` row that keeps its typed fields and source identity; `FactKind`
+comes from the executable schema, and `QueryTime` selects a recorded view.
+Leaving out `at` reads the snapshot's complete view, and leaving out `limit`
+asks for every authorized row. Failures are D-META-REFLECT2's
+`MetadataError`: a missing stage, a private fact or an absent run is never an
+empty success, and a limit that cuts rows is `Truncated`. Only claims carry
+evidence grades. A read needs no Meta effect, and a snapshot grants no
+`Compiler` authority. `jet inspect facts --store=schema|program|run --kind=K
+[SOURCE] [--json]` renders the same rows, identities and errors: `schema`
+takes no SOURCE, `program` checks a target source through the normal
+pipeline, and `run` needs an explicit receipt path, with no default latest
+run. Both views print the snapshot identity and completeness.
 
 **D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
 subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,
