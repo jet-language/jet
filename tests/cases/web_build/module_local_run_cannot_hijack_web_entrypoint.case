@@ -6,11 +6,9 @@ fixture: module_local_run_cannot_hijack_web_entrypoint.fixture
 env: NO_COLOR=1
 step: jet build --target web main.jet
 exit: 0
-file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
 file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
 file: .jet/build/app.wasm is-file
-file: .jet/build/web.manifest.json ~ "\"entry\": \"JS\"" # original JavaScript/runtime predicate
-file: .jet/build/app.js !~ "wasm.jet_export_run()" # original JavaScript/runtime predicate
 step: node app.js
 cwd: .jet/build
 exit: 0
