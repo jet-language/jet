@@ -1,0 +1,63 @@
+// A streaming struct read keeps each field's value as it decodes: scalar and
+// String fields, a nested struct, a list, an optional and a defaulted field,
+// through JSON and CSV, with repeats, missing keys and failed reads.
+use json: core.encoding.json
+use csv: core.encoding.csv
+
+#Codable
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Codable
+Row: struct {
+    name: String
+    count: Int
+    ratio: Float
+    small: U8
+    on: Bool
+    at: Point
+    tags: [String]
+    note: String?
+    level: Int{7}
+}
+
+#Codable
+Sale: struct {
+    region: String
+    amount: Float
+    units: Int
+}
+
+attempt: fn(label: String, raw: String) {
+    value: json.decode<Row>(raw) ?? {
+        print("{label}: {err}")
+        return
+    }
+    print("{label}: {json.to_string(value) ?? panic("JSON encode")}")
+}
+
+table: fn(label: String, raw: String) {
+    rows: csv.decode<Sale>(raw) ?? {
+        print("{label}: {err}")
+        return
+    }
+    loop row in rows -> print("{label}: {row.region} {row.amount} {row.units}")
+}
+
+run: fn() {
+    attempt("complete", "{{\"name\":\"Ada\",\"count\":3,\"ratio\":1.5,\"small\":9,\"on\":true,\"at\":{{\"x\":1,\"y\":2}},\"tags\":[\"a\",\"b\"],\"note\":\"n\",\"level\":4}}")
+    attempt("reordered", "{{\"tags\":[],\"at\":{{\"y\":5,\"x\":6}},\"on\":false,\"small\":0,\"ratio\":0.25,\"count\":-8,\"name\":\"\"}}")
+    attempt("repeated keys", "{{\"name\":\"first\",\"name\":\"second\",\"count\":1,\"count\":2,\"ratio\":1.0,\"small\":1,\"on\":true,\"at\":{{\"x\":0,\"y\":0}},\"tags\":[\"t\"]}}")
+    attempt("missing scalar", "{{\"name\":\"Ada\",\"ratio\":1.5,\"small\":9,\"on\":true,\"at\":{{\"x\":1,\"y\":2}},\"tags\":[]}}")
+    attempt("missing nested", "{{\"name\":\"Ada\",\"count\":3,\"ratio\":1.5,\"small\":9,\"on\":true,\"tags\":[]}}")
+    attempt("bad scalar", "{{\"name\":\"Ada\",\"count\":\"three\",\"ratio\":1.5,\"small\":300,\"on\":true,\"at\":{{\"x\":1,\"y\":2}},\"tags\":[]}}")
+    attempt("bad nested", "{{\"name\":7,\"count\":3,\"ratio\":1.5,\"small\":9,\"on\":true,\"at\":{{\"x\":\"one\",\"y\":2}},\"tags\":[1]}}")
+    attempt("null optional", "{{\"name\":\"Ada\",\"count\":3,\"ratio\":1.5,\"small\":9,\"on\":true,\"at\":{{\"x\":1,\"y\":2}},\"tags\":[],\"note\":null}}")
+    attempt("bad optional", "{{\"name\":\"Ada\",\"count\":3,\"ratio\":1.5,\"small\":9,\"on\":true,\"at\":{{\"x\":1,\"y\":2}},\"tags\":[],\"note\":5}}")
+    attempt("not an object", "[1,2]")
+    table("good", "region,amount,units\neast,1.5,2\nwest,2.25,3\n")
+    table("bad cell", "region,amount,units\neast,cheap,2\nwest,2.25,x\n")
+    table("missing column", "region,units\neast,2\n")
+}

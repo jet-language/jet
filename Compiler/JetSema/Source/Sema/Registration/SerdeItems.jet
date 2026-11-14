@@ -877,6 +877,7 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
     field_values := [ExprField]{}
     decoded_slots := [String]{}
     decoded_values := [String]{}
+    decoded_flags := [String]{}
     loop field in definition.fields {
         if field.computed != None -> next
         value := Expr.Absent{span: span, id: AST_NODE_GENERATED}
@@ -894,15 +895,31 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
             error_name: "jet_serde_field_errors_{index}"
             seen: "jet_serde_seen_{index}"
             failures: "jet_serde_read_errors_{index}"
-            slot_type: if optional -> field.ty.copy() else -> Type.Option{inner: field.ty.copy()}
-            body.push(sema_serde_items_binding(slot, Val(slot_type), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+            set: "jet_serde_set_{index}"
+            // A required field of a scalar or String type decodes into a
+            // variable of that type, with a flag for "decoded", instead of an
+            // Option that boxes every value it holds.
+            plain: !optional && sema_serde_items_plain_slot(field.ty)
+            slot_type: if optional || plain -> field.ty.copy() else -> Type.Option{inner: field.ty.copy()}
+            slot_init: if plain -> sema_serde_items_zero_expr(field.ty, span) else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
+            body.push(sema_serde_items_binding(slot, Val(slot_type), slot_init, true, span))
+            if plain -> body.push(sema_serde_items_binding(set, Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span))
             body.push(sema_serde_items_binding(seen, Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span))
             body.push(sema_serde_items_binding(failures, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span))
-            stored: if optional -> sema_serde_items_take(ok_value, span) else -> Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}
-            read: [Stmt]{
-                sema_serde_items_assign_local(seen, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span),
-                sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_reader_read(field.ty, span), span), false, span),
-                sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored.copy(), span)}, error_name, [Stmt]{sema_serde_items_assign_local(failures, sema_serde_items_take(error_name, span), span)}, span),
+            read := [Stmt]{sema_serde_items_assign_local(seen, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span)}
+            if optional {
+                // An optional field reads a `T? E!`, whose `??` would take an
+                // absent value for a failure too (and has no `err`): it
+                // matches the Result.
+                read.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_reader_read(field.ty, span), span), false, span))
+                read.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, sema_serde_items_take(ok_value, span), span)}, error_name, [Stmt]{sema_serde_items_assign_local(failures, sema_serde_items_take(error_name, span), span)}, span))
+            } else {
+                // `??` hands the read value over; a match would copy it out
+                // of its Result. A failed read keeps its errors and goes on
+                // to the next key.
+                failed: OrFallback.Block{body: [Stmt]{sema_serde_items_assign_local(failures, sema_serde_items_copy(sema_serde_items_ident("err", span), span), span), Stmt.Continue{span: span}}, value: None, span: span}
+                read.push(sema_serde_items_binding(ok_value, None, Expr.OrFallback{value: sema_serde_items_under(key, sema_serde_items_reader_read(field.ty, span), span), fallback: failed, is_option: false, span: span, id: AST_NODE_GENERATED}, false, span))
+                loop statement in sema_serde_items_keep(slot, ok_value, plain, set, span) -> read.push(statement)
             }
             repeat: [Stmt]{Stmt.Expr{expr: sema_serde_items_reader_call("skip", [Expr]{}, span)}}
             members.push(SwitchArm{cond: sema_serde_items_reader_call("key_is", [Expr]{sema_serde_items_string(key, span)}, span), body: [Stmt]{sema_serde_items_if_else(sema_serde_items_ident(seen, span), repeat, read, span)}, span: span})
@@ -922,11 +939,16 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
                     absent.push(sema_serde_items_binding(missing_name, Val(Type.Bool), Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, false, span))
                 }
                 absent.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(fallback, field.ty, span), span), false, span))
-                absent.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
+                absent.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, sema_serde_items_keep(slot, ok_value, plain, set, span), error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
                 after.push(sema_serde_items_if_else(sema_serde_items_ident(seen, span), forward, absent, span))
-                decoded_slots.push(slot)
-                decoded_values.push(value_name.copy())
-                value = sema_serde_items_take(value_name, span)
+                if plain {
+                    decoded_flags.push(set)
+                    value = sema_serde_items_take(slot, span)
+                } else {
+                    decoded_slots.push(slot)
+                    decoded_values.push(value_name.copy())
+                    value = sema_serde_items_take(value_name, span)
+                }
             }
         }
         field_values.push(ExprField{name: field.name, name_span: span, value: value})
@@ -952,14 +974,41 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
         success.push(sema_serde_items_binding("jet_serde_validated", Val(validated_type), validate, false, span))
         success.push(sema_serde_items_return(sema_serde_items_ident("jet_serde_validated", span), span))
     }
-    position := decoded_slots.len() - 1
-    loop position >= 0 {
-        success = [Stmt]{sema_serde_items_pattern_switch(sema_serde_items_ident(decoded_slots[position], span), "Val", [String]{decoded_values[position]}, success, Val([Stmt]{}), span)}
-        position -= 1
+    // With no errors every required field holds its value; one that does
+    // not (its read failed without an error) returns the errors as they are.
+    // `??` hands each slot's value over; a match would copy it out.
+    complete := [Stmt]{}
+    loop flag in decoded_flags -> complete.push(sema_serde_items_if(sema_serde_items_not(sema_serde_items_ident(flag, span), span), [Stmt]{sema_serde_items_return(sema_serde_items_errors_err(span), span)}, span))
+    loop (position, decoded_slot) in decoded_slots {
+        taken: Expr.OrFallback{value: sema_serde_items_take(decoded_slot, span), fallback: OrFallback.Return{value: Val(sema_serde_items_errors_err(span)), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+        complete.push(sema_serde_items_binding(decoded_values[position], None, taken, false, span))
     }
-    body.push(sema_serde_items_if(sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "is_empty", [Expr]{}, span), success, span))
-    body.push(sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_errors", span), span: span, id: AST_NODE_GENERATED}, span))
+    loop statement in success -> complete.push(statement)
+    body.push(sema_serde_items_if(sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "is_empty", [Expr]{}, span), complete, span))
+    body.push(sema_serde_items_return(sema_serde_items_errors_err(span), span))
     body
+}
+
+// The statements that keep decoded value `ok_value` in field slot `slot`: in
+// a plain slot the value itself, setting the slot's flag `set` too, else the
+// value made present.
+sema_serde_items_keep: fn(slot: String, ok_value: String, plain: Bool, set: String, span: Span) -> [Stmt] Never! {
+    if plain {
+        return [Stmt]{sema_serde_items_assign_local(slot, sema_serde_items_take(ok_value, span), span), sema_serde_items_assign_local(set, Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span)}
+    }
+    [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}
+}
+
+// `Err(jet_serde_errors)`: a struct decode's failure, with its errors.
+sema_serde_items_errors_err: fn(span: Span) -> Expr Never! {
+    Expr.Err{value: sema_serde_items_ident("jet_serde_errors", span), span: span, id: AST_NODE_GENERATED}
+}
+
+// Whether a required field of type `ty` decodes into a variable of that type
+// (its zero value until the field decodes): the scalars and String, whose
+// zero needs no allocation.
+sema_serde_items_plain_slot: fn(ty: Type) -> Bool Never! {
+    ty == .Int || ty == .IntN(_, _) || ty == .Float || ty == .Float32 || ty == .Bool || ty == .String
 }
 
 // `jet_serde_reader.method(args)`.
