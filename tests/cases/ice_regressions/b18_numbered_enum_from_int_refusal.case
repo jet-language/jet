@@ -1,0 +1,13 @@
+# A numbered enum's generated `from_int` refusing a number returned an `Err`
+# whose span indexed the generated fragment, not the file, so in a file
+# shorter than the fragment the build was an ICE ("ir.build unlowered: ...
+# journey site span falls outside its source"). The refusal is no journey
+# hop: the failure joins its journey at the caller's line.
+fixture: fixtures/b18_numbered_enum_from_int_refusal
+env: NO_COLOR=1
+step: jet run source0.jet
+exit: 1
+stdout: = b18_numbered_enum_from_int_refusal.out
+stderr: ~ "7 is not a case number of `Mode`" # the generated refusal's text
+stderr: ~ "source0.jet:7" # the caller's line starts the trail
+stderr: !~ "internal compiler error" # the refusal lowers

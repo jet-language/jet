@@ -44,7 +44,17 @@ sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
             numbers: sema_enum_numbers_checked(definition, backing, diagnostics) ?? next
             methods: sema_enum_numbers_methods(definition, numbers, diagnostics) ?? next
             updated := definition
-            loop method in methods -> updated.methods.push(method)
+            // The methods are the compiler's: they report at the enum, and
+            // their bodies' spans index the generated fragment, not the
+            // user's file, so a refused number is no journey site (JetIR
+            // ir_generated_fragment_function).
+            loop method in methods {
+                generated := method
+                generated.span = definition.span
+                generated.name_span = definition.name_span
+                generated.compiler_generated = true
+                updated.methods.push(generated)
+            }
             items[index] = Item.Enum{value: updated}
         }
     }
