@@ -4,7 +4,7 @@
   "cells": ["netserv.service"],
   "mode": "service",
   "perf": true,
-  "languages": ["jet", "go", "rust", "python", "node"],
+  "languages": ["jet", "go", "rust", "python", "node", "lua", "luajit"],
   "spec": {
     "behavior": "Serve a tiny single-process JSON key-value HTTP service. GET /health returns health, PUT /kv/<key> stores the raw request body, GET /kv/<key> reads it or returns a 404 JSON error, and GET /shutdown returns a goodbye response then exits cleanly. Every response uses Content-Type application/json.",
     "args": ["18080"],
@@ -32,6 +32,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact for this service replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact for this service replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact for this service replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -39,7 +49,9 @@
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses net/http."},
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0502: cannot borrow line as mutable because it is also borrowed as immutable"], "notes": "Std-only TcpListener and hand-written HTTP/1.1; Rust std has no HTTP server."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses http.server.HTTPServer subclass."},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in node:http server with the same JSON bodies, status codes, and clean GET /shutdown path."}
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in node:http server with the same JSON bodies, status codes, and clean GET /shutdown path."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "LuaSocket TCP listener and hand-written HTTP/1.1, as in the Rust rail (LuaSocket has no HTTP server); lua-cjson encodes the JSON bodies. Both modules come from the dev shell's withPackages Lua, since Lua's standard library has no sockets or JSON."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "CorpusHttpService",
