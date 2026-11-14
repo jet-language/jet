@@ -5803,12 +5803,10 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     }
     if ir_failed(b) -> return
     // A returned call that does not return has no value to hand back: the
-    // path ends there. Its checked type is `Never`, or the `Never Never!`
-    // carrier of a callee that hands back its plain success (ir_plain_return),
-    // as `core.process.fail(…)` does as a valued function's tail.
+    // path ends there (ir_returns_never), as `core.process.fail(…)` does as a
+    // valued function's tail or a valued tail `if`'s arm.
     if slot < 0 {
-        returned_ty: ir_ty(p, b, returned)
-        if !ir_never_type(ir_never_carrier_success(returned_ty) ?? returned_ty) -> return ir_fail(b, span, "return of a value without a slot")
+        if !ir_returns_never(p, b, returned) -> return ir_fail(b, span, "return of a value without a slot")
         ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         return
     }
@@ -5835,6 +5833,31 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     owned = ir_masked_result(m, b, owned, span)
     if ir_failed(b) -> return
     ir_return_slot(m, p, b, owned, span)
+}
+
+// Whether returned value `node` is a call that does not return: its checked
+// type is `Never` or a `Never Never!` carrier, or it is an `Ok(…)` or `?`
+// around one, or a call of a function declared to return either. A `Never`
+// value takes the type the return wants where it is checked (an Int
+// function's tail `process.fail(…)` is an Int), so its callee's declared
+// return is the fact that it stops.
+ir_returns_never: fn(p: IRProgram, b: IRBuilder, node: Int) -> Bool Never! {
+    if ir_never_result(ir_ty(p, b, node)) -> return true
+    kind: ir_body_node(p, b, node).kind
+    if kind == .Ok(value) -> return ir_returns_never(p, b, value)
+    if kind == .Try(value, _, _) -> return ir_returns_never(p, b, value)
+    if kind == .TryWithContext(inner, _, _, _, _, _) -> return ir_returns_never(p, b, inner)
+    if kind == .Call(callee, _, _) {
+        row: ir_decl_row(p, callee)
+        if row < 0 -> return false
+        if p.functions[row].ret == .Val(declared) -> return ir_never_result(declared)
+    }
+    false
+}
+
+// `Never`, or a `Never Never!` carrier.
+ir_never_result: fn(ty: Type) -> Bool Never! {
+    ir_never_type(ir_never_carrier_success(ty) ?? ty)
 }
 
 // In compile-time code a function's failure rail stays (a
