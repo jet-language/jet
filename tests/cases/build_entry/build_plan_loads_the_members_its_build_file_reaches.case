@@ -1,0 +1,24 @@
+# #6793: running a package's `build: fn` loads the members its build file
+# reaches by name (here names.jet, for `app_name`), not every member of the
+# package. A member the build never names (test.jet, main.jet) is neither
+# loaded nor checked to run the plan, so a type error in test.jet doesn't stop
+# the plan, while `jet check` and `jet test` of the package still report it.
+# The plan's check nodes still name every member, with the same keys a check
+# of the whole package gives them.
+fixture: build_plan_loads_the_members_its_build_file_reaches.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect explain-build build.jet
+exit: 0
+stdout: = "no build recorded for build.jet yet; planned steps:\ncheck\tab62d719a93a4f9cdb151576125df44183c3e238536db4f46ecb5779a72d3323\tbuild.jet\tbuild.jet\ncheck\t5a4d815d26927b22d8a36a6529d82ac978ae66b00830a1c4a8070d57c69a7d59\tmain.jet\tmain.jet\ncheck\t0487fc939b8d99bc4c54cdea1cd7f24745dc7ddbb01fdae79dd8f8b0af2bf6e2\tnames.jet\tnames.jet\ncheck\tb1fae38ddcf28db6c641db6930a6915cf55b61383e61c4f4eeec55fe6a38ca38\ttest.jet\ttest.jet\ncompile\tc0dd2cb03f8222a93a693c91b9f207c7719dbe62f5d448249b1128a0ca75b6a2\tbuild\tcheck:build.jet,check:main.jet,check:names.jet,check:test.jet\nlink\tb919339e412362ada0e23231ff125affe4e662dc42433fe989c7f798a922f0a8\tbuild\tcompile:build\n"
+copy: test-broken.txt test.jet
+step: jet inspect graph build.jet
+exit: 0
+stdout: = "target\thello\tExecutable\n"
+step: jet check
+exit: 1
+stderr: ~ "Error [jet.ReturnTypeMismatch]: This value is String (text), but `totals` returns Int" # the package check checks test.jet
+stderr: ~ "--> test.jet:4:5" # at the broken return in test.jet
+step: jet test
+exit: 1
+stderr: ~ "Error [jet.ReturnTypeMismatch]: This value is String (text), but `totals` returns Int" # the package's tests check test.jet first

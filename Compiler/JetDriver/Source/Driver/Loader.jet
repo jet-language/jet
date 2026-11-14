@@ -2627,6 +2627,83 @@ jet_driver_namespace_item_names: fn(items: [Item], from: Int) -> [NamedSpan] Nev
     names
 }
 
+// Whether `program` adds to its package more than the top-level names
+// jet_driver_namespace_item_names lists, which no spelling of a name shows
+// a use of: an impl, a conversion, a template, a module, a marker or fact,
+// an effect, a foreign block, a policy, a rule or a script body.
+jet_driver_program_adds_unnamed: fn(program: Program) -> Bool Never! {
+    if program.script_body.len() > 0 || program.policy_declarations.len() > 0 || program.user_policy_declarations.len() > 0 || program.applied_rules.len() > 0 || program.rule_facts.len() > 0 -> return true
+    loop item in program.items {
+        if item == {
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Const(_) | .ProtocolDecl(_) | .Test(_) -> {}
+            .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return true
+        }
+    }
+    false
+}
+
+// The members of the entry's package that the build plan's staging compile
+// loads (JetDriverCompileRequest.build_entry_reach), by source-unit index:
+// the entry, which spells `entry_words`, then each member that declares a
+// top-level name a reached member spells, to a fixed point. A member that
+// adds to the package without a name (jet_driver_program_adds_unnamed),
+// that fails to parse, or that is the package's `package.jet` is always
+// reached. The other members parse here, as one wave, for their names and
+// words; the load parses the reached ones again. None (the entry's parse
+// spelled nothing): every member loads.
+jet_driver_build_entry_members: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], entry: Int, entry_words: JetDriverUnitWords?) -> [Bool]? {
+    entry_spelled: entry_words ?? return None
+    root: source_units[entry].root_index
+    members := [Int]{}
+    loop (index, unit) in source_units {
+        if index != entry && unit.root_index == root && jet_driver_unit_is_namespace_member(unit) -> members.push(index)
+    }
+    reached := [Bool]{}
+    loop _ in source_units -> reached.push(false)
+    reached[entry] = true
+    spelled := [String: Bool]{}
+    loop word in entry_spelled.words -> spelled[word] = true
+    // The members not reached yet, each with its top-level names and the
+    // words it spells.
+    waiting := [Int]{}
+    waiting_names := [[String]]{}
+    waiting_words := [[String]]{}
+    // The wave's results come back last-first: each pop is the next member.
+    parsed := jet_driver_parse_wave(request, source_units, members, 0, -1, -1) ?? return None
+    loop index in members {
+        member: parsed.pop() ?? return None
+        found: member.words.move() ?? {
+            reached[index] = true
+            next
+        }
+        if source_units[index].relative_path == "package.jet" || jet_driver_has_errors(member.parsed.diagnostics) || jet_driver_program_adds_unnamed(member.parsed.program) {
+            reached[index] = true
+            loop word in found.words -> spelled[word] = true
+            next
+        }
+        names := [String]{}
+        loop named in jet_driver_namespace_item_names(member.parsed.program.items, 0) -> names.push(named.name)
+        waiting.push(index)
+        waiting_names.push(names.move())
+        waiting_words.push(found.words.move())
+    }
+    grew := true
+    loop grew {
+        grew = false
+        loop position in 0..<waiting.len() {
+            if reached[waiting[position]] -> next
+            named: loop name in waiting_names[position] {
+                if spelled.get(name) != None -> break true
+            } ?? false
+            if !named -> next
+            reached[waiting[position]] = true
+            loop word in waiting_words[position] -> spelled[word] = true
+            grew = true
+        }
+    }
+    Val(reached.move())
+}
+
 // The first item of `module_row` that declares a name: a file module's
 // leading field lines set its Module record (sema_module_meta_field_lines).
 jet_driver_namespace_first_item: fn(module_row: JetDriverLoadedModule) -> Int Never! {
@@ -5220,22 +5297,26 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         is_runtime_entry: entry_module != "" && source_unit_index == (entry_index ?? 0)
         importer_core: is_core || is_runtime_entry
         deferred := [JetDriverScopedImport]{}
+        parsed_unit := parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
+        jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
+        demand: parsed_unit.demand.move()
+        words := parsed_unit.words.move()
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
         // the packages they use), so each member sees the whole namespace.
+        // The build plan's staging compile (build_entry_reach) loads the
+        // entry package's members its build file reaches by name.
         if jet_driver_unit_is_namespace_member(unit) && !namespace_expanded[unit.root_index] {
             namespace_expanded[unit.root_index] = true
+            reached: if request.build_entry_reach && source_unit_index == (entry_index ?? -1) -> jet_driver_build_entry_members(request, source_units, source_unit_index, words) else -> None
             loop (member_index, member) in source_units {
                 if member.root_index == unit.root_index && !queued[member_index] && jet_driver_unit_is_namespace_member(member) {
+                    if reached == .Val(members) && !members[member_index] -> next
                     queued[member_index] = true
                     pending.push(member_index)
                 }
             }
         }
-        parsed_unit := parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
-        jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
-        demand: parsed_unit.demand.move()
-        words := parsed_unit.words.move()
         // A module the Core record holds loads its finalized row: its imports
         // are final, so none waits on reach and none is added.
         core_record_index: parsed_unit.core_record_index

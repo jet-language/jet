@@ -48,10 +48,7 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
         unit_inputs := [BuildGraphInputDigest]{}
         if unit.source_origin == SemaSourceOrigin.Snapshot {
             digest = sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
-            if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
-            source_files: request.authorized_sources.roots[unit.root_index].files
-            if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
-            subject = jet_driver_display_path(root, source_files[unit.file_index].path).replace("\\", "/")
+            subject = jet_driver_build_source_subject(request, root, unit) ?? return None
         } else {
             // Only exact declared build outputs belong to the user's bundle.
             // Foreign adapter/Core/effect synthetic text is not a source node.
@@ -70,13 +67,65 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
             if owner < 0 || owner >= request.authorized_sources.roots.len() -> return None
             subject = jet_driver_display_path(root, jet_driver_physical_path(request.authorized_sources.roots[owner].canonical_path, generated.relative_path)).replace("\\", "/")
         }
-        // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
-        // input digest needs its own copy of the same text for `name`. Both live in one node.
-        unit_inputs.push({name: subject.copy(), digest: digest})
-        checks.push(build_session_compiler_node("check", subject, unit_inputs))
+        checks.push(jet_driver_build_check_node(subject, digest, unit_inputs))
     }
     checks.sort_by(fn(left: BuildGraphNode, right: BuildGraphNode) { (left.subject <=> right.subject).then(left.key <=> right.key) })
     Val(checks.move())
+}
+
+// The `check` node of the module `subject` names: its bytes' `digest`
+// beside its other `inputs`.
+jet_driver_build_check_node: fn(subject: &&String, digest: &&String, owned_inputs: &&[BuildGraphInputDigest]) -> BuildGraphNode Never! {
+    inputs := owned_inputs.move()
+    // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
+    // input digest needs its own copy of the same text for `name`. Both live in one node.
+    inputs.push({name: subject.copy(), digest: digest.move()})
+    build_session_compiler_node("check", subject.move(), inputs)
+}
+
+// The subject of the check node of the authorized source `unit`: its path
+// from the entry root `root`.
+jet_driver_build_source_subject: fn(request: JetDriverCompileRequest, root: String, unit: JetDriverSourceUnit) -> String? Never! {
+    if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
+    source_files: request.authorized_sources.roots[unit.root_index].files
+    if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
+    Val(jet_driver_display_path(root, source_files[unit.file_index].path).replace("\\", "/"))
+}
+
+// The `check` node of each authorized source outside Core that `load`
+// loaded (jet_driver_build_check_nodes' node for it). The build plan's
+// full load takes them: its staging compile loads only the members the
+// build file reaches (build_entry_reach), and the bundle's graph names
+// every source the bundle compiles (jet_driver_build_bundle_checks).
+jet_driver_build_load_checks: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [BuildGraphNode]? Never! {
+    root: jet_driver_entry_root_path(request.authorized_sources)
+    if root == "" -> return None
+    checks := [BuildGraphNode]{}
+    loop loaded in load.modules {
+        if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() -> return None
+        unit: load.source_units[loaded.source_unit_index]
+        if jet_driver_unit_is_core(unit) || unit.source_origin != SemaSourceOrigin.Snapshot -> next
+        digest: sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
+        subject: jet_driver_build_source_subject(request, root, unit) ?? return None
+        checks.push(jet_driver_build_check_node(subject, digest, [BuildGraphInputDigest]{}))
+    }
+    Val(checks.move())
+}
+
+// The bundle's check nodes: the staging compile's `staged`, and each of
+// the full load's `loaded` the staging compile left unloaded (a member the
+// build file never names, and the packages only it imports), sorted by
+// subject as jet_driver_build_check_nodes sorts them.
+jet_driver_build_bundle_checks: fn(owned_staged: &&[BuildGraphNode], owned_loaded: &&[BuildGraphNode]) -> [BuildGraphNode] Never! {
+    checks := owned_staged.move()
+    staged := [String: Bool]{}
+    loop node in checks -> staged[node.subject] = true
+    loop node in owned_loaded.move() {
+        if staged.get(node.subject) != None -> next
+        checks.push(node)
+    }
+    checks.sort_by(fn(left: BuildGraphNode, right: BuildGraphNode) { (left.subject <=> right.subject).then(left.key <=> right.key) })
+    checks
 }
 
 // `checks` followed by a compile and a link node for each of the request's
@@ -217,7 +266,11 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // staged compile of `build: fn`, its native run, and the final checked
     // compile when it runs (`build.plan.load`, `.stage`, `.run`, `.check`).
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.load")
-    sources: jet_driver_source_query_loaded(jet_driver_load(request), request)
+    plan_load: jet_driver_load(request)
+    // Every authorized source the bundle holds is a check node, also the
+    // members the staging compile below leaves unloaded (build_entry_reach).
+    load_checks: jet_driver_build_load_checks(request, plan_load)
+    sources: jet_driver_source_query_loaded(plan_load, request)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.load", sources.modules.len())
     if !sources.complete -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
@@ -274,9 +327,15 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // with the generated modules reports what generation left unresolved. A
     // build that fails internally is an internal compiler error either way:
     // the staged reports name what it would have generated, not why it failed.
-    // The staging check also takes the bundle's check nodes: a build that
-    // generates nothing checks the same sources finally (see below).
+    // The staging check also takes the check nodes of the sources it loads:
+    // a build that generates nothing checks the same sources finally (see
+    // below). It loads the entry package's members that the build file
+    // reaches by name (JetDriverCompileRequest.build_entry_reach): running
+    // `build: fn` never checks a member it can't reach (a `test.jet` and the
+    // packages only it imports), and `jet check`, `jet test` and the target
+    // compiles still check every member.
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.stage")
+    request.build_entry_reach = true
     selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, true, None)
     errors := [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
@@ -284,6 +343,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         errors = selection.compile.diagnostics.move()
         selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, false, Val(JetDriverKeepGoing{skip: [String]{}}))
     }
+    request.build_entry_reach = false
     jet_driver_trace_step_end(request.trace_sink, "build.plan.stage", if staged_failed -> 2 else -> 1)
     compiled := selection.compile.move()
     staged_checks: jet_driver_build_check_rows(compiled.build_nodes.move())
@@ -387,13 +447,16 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     }
     // A build that generated no module and joins no target's sources to the
     // entry's bundle leaves the final check the sources the staging check
-    // checked: its check nodes stand, only the outputs' compile and link
-    // nodes are new (jet_driver_build_output_nodes), and its reports are the
-    // staging check's, which `errors` holds.
+    // checked: its check nodes stand, with the full load's for the members
+    // it left unloaded (jet_driver_build_bundle_checks), only the outputs'
+    // compile and link nodes are new (jet_driver_build_output_nodes), and
+    // its reports are the staging check's, which `errors` holds.
     if !staged_failed && generated.len() == 0 && request.target_sources.len() == 0 && staged_checks.move() == .Val(checks) {
-        staged_nodes: jet_driver_build_output_nodes(request, checks.move())
-        if selected_outputs -> request.build_output_names = [String]{}
-        return jet_driver_build_query_planned(request, plan, generated, staged_nodes, errors, compiled.authority_policy.move(), tidy)
+        if load_checks.move() == .Val(loaded_checks) {
+            staged_nodes: jet_driver_build_output_nodes(request, jet_driver_build_bundle_checks(checks.move(), loaded_checks.move()))
+            if selected_outputs -> request.build_output_names = [String]{}
+            return jet_driver_build_query_planned(request, plan, generated, staged_nodes, errors, compiled.authority_policy.move(), tidy)
+        }
     }
     // As above: the plan reads the user modules' diagnostics and build nodes
     // alone, so Core bodies are checked on demand.

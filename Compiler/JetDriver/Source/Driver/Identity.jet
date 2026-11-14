@@ -302,6 +302,13 @@ JetDriverCompileRequest: struct {
     // compile's are (CoreDemand.jet). `jet doc` and the other Doc readers
     // check every body.
     doc_core_on_demand: Bool{false}
+    // The build plan's staging compile of `build: fn` (BuildQueries.jet):
+    // the entry package loads the members the build file reaches by name,
+    // not every member (Loader.jet jet_driver_build_entry_members), so a
+    // member the build never names (a heavy `test.jet`) is neither loaded
+    // nor checked to run the build. `jet check`, `jet test` and the target
+    // compiles load every member.
+    build_entry_reach: Bool{false}
     // `jet check --prelude`: the entry unit is a Compiler/Prelude source,
     // parsed and checked as the compiler embeds it (Loader.jet
     // jet_driver_parse_prelude_source), not as an ordinary user module.
