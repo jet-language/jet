@@ -568,11 +568,12 @@ delimiter_at: fn(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
 // quote, CR or LF, or around a whole match of the delimiter's complete UTF-8
 // encoding (plus `""` escapes as ASCII quotes). UTF-8 is self-synchronizing,
 // as a lead byte never equals a continuation byte, so every cut is a scalar
-// boundary and the bytes are complete UTF-8.
-field_text: fn(&&bytes: [U8]) -> String Never! {
-    #Unsafe("a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8") {
-        return rt.bytes_into_text(bytes)
-    }
+// boundary and the bytes are complete UTF-8. They are still checked rather
+// than taken under `#Unsafe`: a field is short, and the check (a word of
+// ASCII at a time) costs less than entering and leaving an unsafe scope for
+// every field.
+field_text: fn(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("internal: a CSV field was cut inside a UTF-8 scalar")
 }
 
 // An unquoted field is the bytes from its start to its delimiter or line
