@@ -11029,8 +11029,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     sema_target_denial_check(modules, final_graph, diagnostics)
     // `#Target(OS.…)` impls: the axis conflict and ungated signature uses.
     sema_os_target_check(final_graph, diagnostics)
-    // Typestate flow reads each body's checked receiver types.
-    sema_typestate_check(modules, final_graph, diagnostics)
+    // Typestate flow reads each body's checked receiver types, one module
+    // per thread.
+    final_graph = sema_typestate_check(final_graph, modules, threads, diagnostics)
     outputs := sema_output_publish_solved_effects(final_graph, modules)
     compute_work := SemaComputeValidationWork{}
     compute_diagnostics := sema_compute_validate_autodiff_purity(modules, compute_work)

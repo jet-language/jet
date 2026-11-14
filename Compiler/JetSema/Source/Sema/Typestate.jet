@@ -15,7 +15,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[BodyTree, Diagnostic, EnumLitArg, Expr, ForKind, Func, Item, LValue, OrFallback, Pattern, Span, Stmt, StrPart, SwitchArm, Type, TypedLitBody, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span]
+use jet_foundation.[BodyTree, CompilerThreads, Diagnostic, EnumLitArg, Expr, ForKind, Func, Item, LValue, OrFallback, Pattern, Span, Stmt, StrPart, SwitchArm, Type, TypedLitBody, body_tree_new, checked_expr_type_id, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, expr_binary_operands, expr_span]
 
 SEMA_STATE_TASK: "Task"
 SEMA_STATE_TASK_RUNNING: "Running"
@@ -82,55 +82,130 @@ SemaStateSplit: struct {
     other: String
 }
 
-sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+// Each module's walk reads the program's state table, the graph and its own
+// checked module and writes only its own findings, so the walks run on
+// compiler threads, claimed heaviest first, and join in module order: the
+// diagnostics are the same for any thread count.
+sema_typestate_check: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic]) -> SemaRegistrationGraph {
+    owned := graph.move()
     table := SemaStateTable{task_moves: [String:String]{}}
-    loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)
+    loop registered in owned.modules -> sema_state_table_add_items(table, registered.program.items)
     table.task_moves["join"] = SEMA_STATE_TASK_JOINED
     table.task_moves["detach"] = SEMA_STATE_TASK_DETACHED
-    loop module_index in 0..<modules.len() {
-        registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-        open_switches := [Span]{}
-        loop diagnostic in modules[module_index].diagnostics {
-            if diagnostic.code == "E0307" && diagnostic.span == .Val(span) -> open_switches.push(span.copy())
-        }
-        walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, mixed: [String:[String]]{}, ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
-        loop item in graph.modules[registration].program.items {
-            if item == {
-                .Func(function) -> sema_state_check_function(walk, function, modules[module_index].functions)
-                .Impl(implementation) -> {
-                    loop method in implementation.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
-                }
-                .Struct(definition) -> {
-                    loop method in definition.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
-                    loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
-                    }
-                }
-                .Enum(definition) -> {
-                    loop method in definition.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
-                }
-                .Test(test) -> {
-                    sema_state_start(walk)
-                    walk.typed = false
-                    tree := body_tree_new()
-                    loop function in modules[module_index].functions {
-                        if function.source_span == test.span {
-                            tree = function.tree
-                            walk.typed = true
-                            break
-                        }
-                    }
-                    sema_state_block(walk, tree, test.body)
-                }
-                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-            }
-        }
-        if walk.diagnostics.len() > 0 {
-            found := walk.diagnostics
-            sema_attach_diagnostic_source_locations(found, 0, graph.modules[registration].source_segments)
-            loop diagnostic in found -> diagnostics.push(diagnostic)
+    workers: compiler_threads_admit(threads, modules.len(), modules.len(), SEMA_TYPESTATE_MIN_MODULES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop module_index in 0..<modules.len() -> diagnostics.extend(sema_typestate_check_module(owned, table, modules[module_index]))
+        return owned
+    }
+    weights := [Int]{}
+    loop module_row in modules -> weights.push(module_row.functions.len())
+    found := [[Diagnostic]]{}
+    loop _ in 0..<modules.len() -> found.push([Diagnostic]{})
+    jobs: Shared{SemaTypestateJobs{table: table.move(), order: compiler_threads_heaviest_first(weights)}}
+    shared_state: Shared{SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}}
+    sema_finalize_side_fill(shared_state, owned, modules)
+    queue: Shared{SemaFinalizeCoreQueue{next: 0}}
+    sema_typestate_walkers(shared_state, jobs, queue, 0, workers, found)
+    returned := sema_finalize_side_take(shared_state, modules)
+    found.reverse()
+    loop found.len() > 0 {
+        module_found := found.pop() ?? break
+        diagnostics.extend(module_found.move())
+    }
+    returned
+}
+
+// A program of fewer modules per admitted thread walks them on the calling
+// thread.
+SEMA_TYPESTATE_MIN_MODULES_PER_THREAD: 16
+
+// What every typestate thread reads besides the graph and the modules: the
+// program's state table and the module claim order, heaviest first.
+SemaTypestateJobs: struct {
+    table: SemaStateTable
+    order: [Int]
+}
+
+// One module's findings, from the thread that walked it.
+SemaTypestateFound: struct {
+    module_index: Int
+    diagnostics: [Diagnostic]
+}
+
+// Runs typestate threads `from..<workers`, one task each, and moves each
+// module's findings a thread returned into its slot of `found`.
+sema_typestate_walkers: fn(shared_state: Shared<SemaFinalizeSideShared>, jobs: Shared<SemaTypestateJobs>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, found: &[[Diagnostic]]) {
+    if from >= workers -> return
+    task.group sema_typestate_threads {
+        head: task sema_typestate_claimed(shared_state, jobs, queue)
+        sema_typestate_walkers(shared_state, jobs, queue, from + 1, workers, found)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := claimed.pop() ?? break
+            found[done.module_index] = done.diagnostics.move()
         }
     }
+}
+
+// One thread: walks the modules it claims.
+sema_typestate_claimed: fn(shared_state: Shared<SemaFinalizeSideShared>, jobs: Shared<SemaTypestateJobs>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaTypestateFound] {
+    inputs: shared_state.guard_read()
+    rows: jobs.guard_read()
+    claimed := [SemaTypestateFound]{}
+    ranks: queue.guard_read()
+    loop {
+        rank: sema_finalize_core_claim(ranks.value)
+        if rank >= rows.value.order.len() -> break
+        module_index: rows.value.order[rank]
+        // Passed straight through: a local binding of a guarded row would copy it.
+        claimed.push(SemaTypestateFound{module_index: module_index, diagnostics: sema_typestate_check_module(inputs.value.graphs[0], rows.value.table, inputs.value.modules[module_index])})
+    }
+    claimed
+}
+
+// One checked module's walk: every function, method and test body of its
+// registered program, with the source locations attached to its findings.
+sema_typestate_check_module: fn(graph: SemaRegistrationGraph, table: SemaStateTable, module_row: SemaGraphModuleResult) -> [Diagnostic] Never! {
+    registration: sema_registration_module_index(graph, module_row.module_identity) ?? return [Diagnostic]{}
+    open_switches := [Span]{}
+    loop diagnostic in module_row.diagnostics {
+        if diagnostic.code == "E0307" && diagnostic.span == .Val(span) -> open_switches.push(span.copy())
+    }
+    walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, mixed: [String:[String]]{}, ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
+    loop item in graph.modules[registration].program.items {
+        if item == {
+            .Func(function) -> sema_state_check_function(walk, function, module_row.functions)
+            .Impl(implementation) -> {
+                loop method in implementation.methods -> sema_state_check_function(walk, method, module_row.functions)
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods -> sema_state_check_function(walk, method, module_row.functions)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> sema_state_check_function(walk, method, module_row.functions)
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> sema_state_check_function(walk, method, module_row.functions)
+            }
+            .Test(test) -> {
+                sema_state_start(walk)
+                walk.typed = false
+                tree := body_tree_new()
+                loop function in module_row.functions {
+                    if function.source_span == test.span {
+                        tree = function.tree
+                        walk.typed = true
+                        break
+                    }
+                }
+                sema_state_block(walk, tree, test.body)
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    found := walk.diagnostics.move()
+    if found.len() > 0 -> sema_attach_diagnostic_source_locations(found, 0, graph.modules[registration].source_segments)
+    found
 }
 
 // A body starts with no facts, on a path that has not left it.

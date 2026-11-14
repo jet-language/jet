@@ -1,0 +1,13 @@
+# Typestate walks each checked module on its own compiler thread
+# (Typestate.jet sema_typestate_check) and joins the findings in module order,
+# so two modules that each call a move on a `CheckedIn` reservation report
+# both E0150s, exactly as the serial walk did.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: model.jet = "Reservation: struct {\n    state {\n        Pending -> Confirmed\n        Confirmed -> CheckedIn\n        CheckedIn\n    }\n    guest: String\n\n    book: fn(guest: String) -[]> Reservation.Pending {\n        return Reservation{ guest: guest.copy() }\n    }\n    pay: fn(self: &&Reservation.Pending) -[]> Reservation.Confirmed {\n        return self\n    }\n    check_in: fn(self: &&Reservation.Confirmed) -[]> Reservation.CheckedIn {\n        return self\n    }\n}\n"
+write: first.jet = "use {\n    model: \"./model\"\n}\n\nearly: fn() {\n    r := model.Reservation.book(\"a\").pay()\n    r = r.check_in()\n    r = r.pay()\n}\n"
+write: second.jet = "use {\n    model: \"./model\"\n}\n\nlate: fn() {\n    r := model.Reservation.book(\"b\")\n    r = r.pay()\n    r = r.check_in()\n    r = r.check_in()\n}\n"
+write: main.jet = "use {\n    first: \"./first\"\n    second: \"./second\"\n}\n\nrun: fn() {\n    first.early()\n    second.late()\n}\n"
+step: jet check main.jet
+exit: nonzero
+stderr: = wrong_state_calls_in_two_modules_report_in_module_order.stderr

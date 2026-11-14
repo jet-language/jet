@@ -1,0 +1,20 @@
+Error [jet.TypestateWrongState]: `pay` needs `Reservation.Pending`, but `r` is `Reservation.CheckedIn`
+  --> first.jet:8:11
+    |
+  8 |     r = r.pay()
+    |           ^^^
+ Why: Typestate: `pay` takes only `Reservation.Pending`; calling it with `Reservation` in another state is the out-of-order bug the state list rules out
+ Fix: Bring `r` to `Reservation.Pending` before calling `pay`
+More: jet-lang.dev/e/E0150
+
+Error [jet.TypestateWrongState]: `check_in` needs `Reservation.Confirmed`, but `r` is `Reservation.CheckedIn`
+  --> second.jet:9:11
+    |
+  9 |     r = r.check_in()
+    |           ^^^^^^^^
+ Why: Typestate: `check_in` takes only `Reservation.Confirmed`; calling it with `Reservation` in another state is the out-of-order bug the state list rules out
+ Fix: Bring `r` to `Reservation.Confirmed` before calling `check_in`
+More: jet-lang.dev/e/E0150
+
+2 problems found
+run `jet explain E0150` to learn more
