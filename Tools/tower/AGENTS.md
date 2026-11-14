@@ -412,6 +412,22 @@ tower board check                 # exit 1 (E_BOARD_STALE) when the committed
                                   # one batch
 ```
 
+## Gauntlet standings (#6834)
+
+The Gauntlet page opens with the standings from the newest gauntlet results
+file (`Tools/gauntlet/harness/run.mjs`; a full-matrix run is preferred over
+partial runs). Each entry gets a row for every peer and the hand-written asm
+ceiling, and each metric gets a column showing Jet/peer, the peer-floor
+verdict and the gap to the ceiling. Rows that are uncovered, not applicable,
+unavailable or failed keep their reason. The status matrix follows below them.
+`config.gauntletResults` (default `Tools/gauntlet/results`) is the results
+directory.
+
+```
+tower gauntlet standings [--results PATH] [--json]   # same table as text;
+                                  # PATH is a results file or a directory
+```
+
 ## HTTP API (when `tower serve` is up, default :7878)
 
 ```
@@ -428,6 +444,8 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      picker; claims only when agent= AND
                                      claim=1 are both given
 GET  /api/events?limit=50           audit trail
+GET  /api/gauntlet                  Tools/gauntlet/status.json (status matrix)
+GET  /api/gauntlet/standings        newest results file's standings section
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen

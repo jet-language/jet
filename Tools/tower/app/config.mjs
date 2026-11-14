@@ -44,6 +44,9 @@ export const DEFAULTS = {
   // committed board to within one batch of the working copy. 0 turns it off.
   boardBranch: 'master',
   boardBatch: 25,
+  // #6834: where the Gauntlet page and `tower gauntlet standings` find the
+  // harness's dated results files (relative to the project root, or absolute).
+  gauntletResults: 'Tools/gauntlet/results',
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

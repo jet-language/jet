@@ -8,7 +8,7 @@ import { applyIndexDelta } from './live-delta.js';
 import { renderNowReports, refreshRelativeTimes, briefingBody } from './now.js';
 import { renderBallotIntro, lossText } from './ballot.js';
 
-import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp } from './gauntlet.js';
+import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp, projectGauntletStandings, renderGauntletStandings } from './gauntlet.js';
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
 // milestones → cards). The beacon on the left edge carries one lit segment
@@ -2614,11 +2614,20 @@ function gauntletMeasuredRange(matrix) {
   return first === last ? `measured ${last}` : `measured ${first} → ${last}`;
 }
 
+// The standings (the newest results file, #6834) and the status matrix
+// (status.json) load independently: either can be missing without hiding the
+// other.
 async function loadGauntlet() {
-  const r = await fetch('/api/gauntlet');
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.message || 'Gauntlet fetch failed');
-  gauntletCache = j;
+  const read = async (path, what) => {
+    const r = await fetch(path);
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? { data: j, error: null } : { data: null, error: j.message || `${what} fetch failed` };
+  };
+  const [status, standings] = await Promise.all([
+    read('/api/gauntlet', 'Gauntlet status'),
+    read('/api/gauntlet/standings', 'Gauntlet standings'),
+  ]);
+  gauntletCache = { status, standings };
 }
 
 // One shared card for every cell. It stays open while the pointer is on the
@@ -2697,19 +2706,29 @@ async function viewGauntlet() {
       return;
     }
   }
-  const status = gauntletCache || {};
-  const matrix = projectGauntletMatrix(status);
+  const { status: statusLoad, standings: standingsLoad } = gauntletCache;
+  const standingsView = standingsLoad.data ? projectGauntletStandings(standingsLoad.data) : null;
+  const standings = standingsView ? renderGauntletStandings(standingsView)
+    : `<section class="standings" aria-label="Gauntlet standings"><div class="empty">Standings unavailable: ${esc(standingsLoad.error || 'the results file has no standings section')}</div></section>`;
+  const matrix = projectGauntletMatrix(statusLoad.data || {});
   const summary = matrix.summary;
   const summaryPills = [['win', summary.win], ['loss', summary.loss], ['unmeasured', summary.unmeasured]]
     .map(([value, count]) => `<span class="gauntlet__pill">${gauntletBadge(value)} <b>${esc(gauntletCount(count))}</b></span>`)
     .join('');
   const details = [];
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · ratio is Jet / peer · shown primary metrics</span>
+      <span class="viewhead__sub">ratio is Jet / peer</span>
+    </div>${standings}
+    <div class="standings__head"><h2 class="standings__title">Status matrix</h2>
+      <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · shown primary metrics</span>
       <div class="gauntlet__summary" aria-label="Gauntlet summary">${summaryPills}</div>
     </div>
     <p class="gauntlet__policy">AOT vs Rust, C, Zig, Go. Run and dev vs Python and JS. Web development vs Node, Bun, Vite.
       <span>Recorded samples, not a fresh full-gate result. Cross-group measurements remain in the details as non-blocking references.</span></p>`;
+  if (!statusLoad.data) {
+    v.innerHTML += `<div class="empty">Gauntlet status unavailable: ${esc(statusLoad.error)}</div>`;
+    return;
+  }
   const width = Math.max(matrix.columns.length, matrix.axisColumns.length);
   const axisBand = matrix.axisRows.length ? `<tbody class="gauntlet__axes">
       ${gauntletHeader('Web dev / tools', matrix.axisColumns, width)}

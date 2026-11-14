@@ -20,6 +20,8 @@ import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
+import { readGauntletStandings, standingsLocation } from './gauntlet-standings.mjs';
+import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -166,6 +168,7 @@ const COMMAND_FLAGS = {
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
   board: { verbs: { commit: by(), check: [] } },
+  gauntlet: { verbs: { standings: ['results'] } },
 };
 
 const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
@@ -207,7 +210,7 @@ const FLAG_VALUE = {
   readyAcrossEpochs: null, scratch: null, note: '"…"',
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
-  hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
+  hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE', results: 'PATH',
   merge: 'G1=G14,G7=G14', renumber: 'G14=G1,G15=G2',
 };
 
@@ -1446,6 +1449,19 @@ function cmdBoard(store, { pos, flags }) {
   }
 }
 
+// #6834: the standings table of the newest gauntlet results file, the same
+// projection the Gauntlet page renders. --results names a results file or a
+// directory of them; config `gauntletResults` is the default directory.
+function cmdGauntlet(store, { pos, flags }) {
+  const [verb] = pos;
+  if (verb !== 'standings') throw new TowerError('E_USAGE', `unknown gauntlet verb "${verb}" — standings`);
+  if (flags.results === true) throw new TowerError('E_USAGE', 'gauntlet standings --results needs a PATH');
+  const root = projectRoot(store.dataDir);
+  const location = standingsLocation(root, store.config.gauntletResults, flags.results === undefined ? undefined : resolve(String(flags.results)));
+  const view = projectGauntletStandings(readGauntletStandings(root, location));
+  return out(flags, gauntletStandingsText(view), view);
+}
+
 // Installs a post-commit hook that appends any commit mentioning #<num> to
 // that card's log. Silent + always exit 0, so it can never break a commit.
 function cmdGithookInstall(store) {
@@ -1614,6 +1630,7 @@ export async function run(argv) {
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);
+      case 'gauntlet':  return cmdGauntlet(store, sub);
       case 'githook':
         if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);
         return cmdGithookInstall(store);

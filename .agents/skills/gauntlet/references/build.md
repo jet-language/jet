@@ -61,6 +61,22 @@ on PATH, run in place beside its runtime pack. Run and dev tiers execute inside 
 compiler process, so measure an optimized self-hosted build, not a debug one. A tool
 entry's cases run with that compiler's directory first on PATH and as `$JET`, so the
 `jet` an original or its twin starts is the one measured.
+
+Every run also writes the results file's `standings` section (#6834,
+`Tools/gauntlet/harness/standings.mjs`). Each comparison entry is measured
+against every peer in `matrix.json` `rails.standings` (Rust, C, Zig, Go,
+Python, Bun, Node, Vite) and its hand-written asm ceiling
+(`Tools/perf/asm-parity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
+The metrics are startup, run wall, run cycles (`perf stat -e cycles:u`), peak
+RSS and size; interpreted peers count script plus runtime. Each metric gets
+Jet/peer with a floor verdict (pass below 1.00) and, for asm, a ceiling verdict
+(meet at 1.00 or below, gap = ratio − 1). A peer with no program is
+`uncovered`; one the manifest's `standings.not_applicable` excludes is
+`not_applicable` with its reason; a missing toolchain is `unavailable`. Failed
+and mismatched runs stay rows too. `--dry-run` lists every entry × peer ×
+metric cell and the toolchains without running anything. Tower's Gauntlet page
+and `tower gauntlet standings` show the newest results file's section.
+
 Use snapshot-only history unless the owner approves a different policy.
 
 ## Seed and close

@@ -394,3 +394,172 @@ export function buildGauntletTooltip(detail = {}) {
 }
 
 export { metricLabel, metricValue, ratioVerdict };
+
+// ---- standings --------------------------------------------------------------
+// A results file's `standings` section (Tools/gauntlet/harness/standings.mjs):
+// every comparison entry against every peer and the hand-written asm ceiling
+// on startup, run time and size. Jet/peer below 1.00 passes the peer floor;
+// Jet/asm at most 1.00 meets the ceiling, and the gap is ratio − 1. The
+// Gauntlet page and `tower gauntlet standings` render this one projection.
+export const STANDINGS_SCHEMA = 'jet.gauntlet.standings.v1';
+const STANDING_PEER_LABELS = Object.freeze({
+  rust: 'Rust', c: 'C', zig: 'Zig', go: 'Go', python: 'Python', bun: 'Bun', node: 'Node', vite: 'Vite', asm: 'asm ceiling',
+});
+const STANDING_UNIT_SCALES = Object.freeze({
+  s: SCALES.seconds,
+  ms: SCALES.ms,
+  kB: SCALES.kb,
+  bytes: SCALES.bytes,
+  cycles: [['G', 1e9], ['M', 1e6], ['k', 1e3], ['', 1]],
+});
+const standingPeerLabel = (peer) => STANDING_PEER_LABELS[peer] ?? String(peer);
+const standingWords = (value) => String(value).replaceAll('_', ' ');
+const count = (value) => finite(value) ? value : 0;
+
+function standingPair(unit, jet, peer) {
+  const scale = STANDING_UNIT_SCALES[unit] ?? SCALES.count;
+  const floor = Math.min(...[jet, peer].filter((value) => finite(value) && value > 0));
+  const chosen = Number.isFinite(floor) ? scale.find(([, factor]) => floor / factor >= 1) ?? scale.at(-1) : scale.at(-1);
+  const suffix = unit === 'cycles' ? `${chosen[0]} cycles`.trim() : chosen[0];
+  return { jet: formatIn(jet, [suffix, chosen[1]]), peer: formatIn(peer, [suffix, chosen[1]]) };
+}
+
+function standingCell(role, metric, cell) {
+  const source = object(cell);
+  const verdict = typeof source.verdict === 'string' ? source.verdict : 'unmeasured';
+  const ratio = finite(source.ratio) ? source.ratio : null;
+  const gap = role === 'ceiling' && ratio !== null ? ratio - 1 : null;
+  const gapText = gap === null ? null : `${gap > 0 ? '+' : gap < 0 ? '−' : '±'}${Math.round(Math.abs(gap) * 100)}%`;
+  const pair = standingPair(source.unit, source.jet, source.peer);
+  const measured = ratio !== null;
+  const basis = metric === 'size' && (source.jet_basis || source.peer_basis)
+    ? `Jet ${source.jet_basis ?? '?'}, peer ${source.peer_basis ?? '?'}` : null;
+  return {
+    metric,
+    verdict,
+    ratio,
+    gap,
+    jet: pair.jet,
+    peer: pair.peer,
+    reason: source.reason ?? null,
+    basis,
+    text: measured ? `${ratio.toFixed(2)} ${verdict}${gapText ? ` ${gapText}` : ''}` : standingWords(verdict),
+    detail: measured
+      ? `Jet ${pair.jet} / ${pair.peer}${basis ? ` (${basis})` : ''}`
+      : source.reason ?? standingWords(verdict),
+  };
+}
+
+function standingRow(peer, item, metrics) {
+  const source = object(item);
+  const role = source.role === 'ceiling' ? 'ceiling' : 'peer';
+  const status = typeof source.status === 'string' ? source.status : 'failed';
+  const cells = metrics.map((metric) => standingCell(role, metric.id, object(source.metrics)[metric.id]));
+  return {
+    peer,
+    label: standingPeerLabel(peer),
+    role,
+    status,
+    reason: item ? source.reason ?? null : 'the results file has no row for this peer',
+    reference: source.reference ?? null,
+    cells,
+  };
+}
+
+// `payload` is { file, scope, standings } as the server and the CLI read it
+// from a results file; null when it holds no standings section.
+export function projectGauntletStandings(payload) {
+  const section = object(payload?.standings);
+  if (section.schema !== STANDINGS_SCHEMA) return null;
+  const metrics = array(section.metrics).filter(isObject).map((metric) => ({ id: metric.id, label: metric.label ?? standingWords(metric.id), what: metric.what ?? null }));
+  const order = [...array(section.peers), ...(section.ceiling ? [section.ceiling] : [])];
+  const entries = array(section.entries).filter(isObject).map((entry) => ({
+    entry: entry.entry,
+    mode: entry.mode ?? null,
+    jet: object(entry.jet),
+    rows: order.map((peer) => standingRow(peer, object(entry.peers)[peer] ?? null, metrics)),
+  }));
+  const summary = object(section.summary);
+  const floor = object(summary.floor);
+  const ceiling = object(summary.ceiling);
+  return {
+    file: payload.file ?? null,
+    scope: payload.scope ?? null,
+    generated: section.generated ?? null,
+    peers: order.map((peer) => ({ peer, label: standingPeerLabel(peer) })),
+    metrics,
+    entries,
+    summary: {
+      floor: { pass: count(floor.pass), fail: count(floor.fail), other: count(floor.other) },
+      ceiling: { meet: count(ceiling.meet), miss: count(ceiling.miss), other: count(ceiling.other) },
+    },
+    losses: { floor: array(object(section.losses).floor), ceiling: array(object(section.losses).ceiling) },
+  };
+}
+
+const standingHeading = (view) => [
+  view.file ? `results ${view.file}` : null,
+  view.scope ? standingWords(view.scope) : null,
+  view.generated ? `generated ${view.generated}` : null,
+].filter(Boolean).join(' · ');
+const STANDING_RULE = 'ratio is Jet / peer: the peer floor passes below 1.00; the asm ceiling is met at 1.00 or below, gap = ratio − 1';
+const standingSummary = ({ floor, ceiling }) =>
+  `floor ${floor.pass} pass, ${floor.fail} fail, ${floor.other} other · ceiling ${ceiling.meet} meet, ${ceiling.miss} miss, ${ceiling.other} other (other = uncovered, not applicable, unavailable, failed, mismatched or unmeasured)`;
+
+// The plain-text table `tower gauntlet standings` prints: one block per entry,
+// one line per peer, one column per metric. A row that measured nothing names
+// its status and reason once instead of five times.
+export function gauntletStandingsText(view) {
+  const lines = [`Gauntlet standings · ${standingHeading(view)}`, STANDING_RULE, standingSummary(view.summary)];
+  const labelWidth = Math.max(4, ...view.peers.map((peer) => peer.label.length));
+  const widths = view.metrics.map((metric) => Math.max(metric.label.length,
+    ...view.entries.flatMap((entry) => entry.rows.filter((row) => row.status === 'ok').map((row) => row.cells.find((cell) => cell.metric === metric.id).text.length))));
+  for (const entry of view.entries) {
+    lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})${entry.jet.status && entry.jet.status !== 'ok' ? ` · Jet ${entry.jet.status}: ${entry.jet.reason ?? ''}` : ''}`);
+    lines.push(`  ${'peer'.padEnd(labelWidth)}  ${view.metrics.map((metric, index) => metric.label.padEnd(widths[index])).join('  ')}`.trimEnd());
+    const notes = [];
+    for (const row of entry.rows) {
+      if (row.status !== 'ok') {
+        lines.push(`  ${row.label.padEnd(labelWidth)}  ${standingWords(row.status)}: ${row.reason ?? 'no reason recorded'}`);
+        continue;
+      }
+      lines.push(`  ${row.label.padEnd(labelWidth)}  ${row.cells.map((cell, index) => cell.text.padEnd(widths[index])).join('  ')}`.trimEnd());
+      for (const cell of row.cells) {
+        if (cell.ratio === null) notes.push(`  · ${row.label} ${cell.metric}: ${cell.reason ?? standingWords(cell.verdict)}`);
+      }
+    }
+    lines.push(...notes);
+  }
+  return lines.join('\n');
+}
+
+const standingTone = (verdict) => ({ pass: 'pass', meet: 'pass', fail: 'fail', miss: 'fail', not_applicable: 'na' }[verdict] ?? 'open');
+
+// The standings section of the Gauntlet page: the same projection as a table,
+// one body per entry, every peer and the asm ceiling a row, every metric a
+// column; a cell's title carries both values and any reason.
+export function renderGauntletStandings(view) {
+  const pills = [
+    ['floor pass', view.summary.floor.pass, 'pass'], ['floor fail', view.summary.floor.fail, 'fail'],
+    ['ceiling meet', view.summary.ceiling.meet, 'pass'], ['ceiling miss', view.summary.ceiling.miss, 'fail'],
+    ['other', view.summary.floor.other + view.summary.ceiling.other, 'open'],
+  ].map(([label, value, tone]) => `<span class="gauntlet__pill standings__pill--${tone}">${esc(label)} <b>${esc(value)}</b></span>`).join('');
+  const head = `<tr><th scope="col">entry · peer</th>${view.metrics.map((metric) => `<th scope="col" title="${esc(metric.what ?? metric.label)}">${esc(metric.label)}</th>`).join('')}</tr>`;
+  const bodies = view.entries.map((entry) => {
+    const jetNote = entry.jet.status && entry.jet.status !== 'ok' ? ` · Jet ${standingWords(entry.jet.status)}: ${entry.jet.reason ?? ''}` : '';
+    const rows = entry.rows.map((row) => {
+      const label = `<th scope="row"><div><strong>${esc(row.label)}</strong>${row.reference ? `<small>${esc(row.reference)}</small>` : ''}</div></th>`;
+      if (row.status !== 'ok') {
+        return `<tr class="standings__row standings__row--${standingTone(row.status)}">${label}<td colspan="${view.metrics.length}" class="standings__cell standings__cell--${standingTone(row.status)}"><b>${esc(standingWords(row.status))}</b> <span>${esc(row.reason ?? 'no reason recorded')}</span></td></tr>`;
+      }
+      return `<tr class="standings__row${row.role === 'ceiling' ? ' standings__row--ceiling' : ''}">${label}${row.cells.map((cell) =>
+        `<td class="standings__cell standings__cell--${standingTone(cell.verdict)}" title="${esc(`${entry.entry} vs ${row.label}, ${cell.metric}: ${cell.detail}`)}"><b>${esc(cell.text)}</b>${cell.ratio !== null ? `<span><i>${esc(cell.jet)}</i><i>${esc(cell.peer)}</i></span>` : ''}</td>`).join('')}</tr>`;
+    }).join('');
+    return `<tbody><tr class="standings__entry"><th scope="rowgroup" colspan="${view.metrics.length + 1}">${esc(entry.entry)} <small>${esc(entry.mode ?? '')}${esc(jetNote)}</small></th></tr>${rows}</tbody>`;
+  }).join('');
+  return `<section class="standings" aria-label="Gauntlet standings">
+    <div class="standings__head"><h2 class="standings__title">Standings vs every peer and the asm ceiling</h2><div class="gauntlet__summary">${pills}</div></div>
+    <p class="gauntlet__policy">${esc(STANDING_RULE)}<span>${esc(standingHeading(view))}</span></p>
+    <div class="standings__scroll"><table class="gauntlet__table standings__table"><thead>${head}</thead>${bodies}</table></div>
+  </section>`;
+}
