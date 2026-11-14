@@ -1,18 +1,18 @@
 # Generic code moves a value of its type parameter into a task without
 # knowing its type, so the call that settles the type argument answers for
-# it: a closure the caller never gave away can't cross into the task (E1102 at
-# the call), and neither can one passed on through another generic function.
+# it: a thread-confined `Cell<Int>` can't cross into the task (E1102 at the
+# call), and neither can one passed on through another generic function.
 # The program never builds, so nothing prints on any tier; a plain owned
 # list crosses and runs.
 fixture: generic_code_cannot_move_a_thread_confined_value_into_a_task.fixture
 env: NO_COLOR=1
 step check: jet check spawn.jet
 exit: 1
-stderr: ~ "E1102" # the closure cannot cross into the task
+stderr: ~ "E1102" # the cell cannot cross into the task
 stderr: ~ "`spawn_with` moves its `T` into a task" # reported at the call that settles `T`
 step forward: jet check forward.jet
 exit: 1
-stderr: ~ "E1102" # the closure passed on cannot cross either
+stderr: ~ "E1102" # the cell passed on cannot cross either
 stderr: ~ "`forward` moves its `U` into a task" # reported at the call that settles `U`
 step o0: jet run --optimize=none spawn.jet
 exit: 1
