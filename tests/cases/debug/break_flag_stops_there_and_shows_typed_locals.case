@@ -1,0 +1,18 @@
+# `jet debug --break file:line` runs the program to that line before the
+# console reads a command; `locals` there lists each local with its Jet type,
+# `s` steps into the call on the line, `f` finishes it and `n` steps over.
+requires: tool:lldb
+fixture: break_flag_stops_there_and_shows_typed_locals.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:7
+stdin: break_flag_stops_there_and_shows_typed_locals.stdin
+exit: any
+stdout+stderr: ~ "Breakpoint set  prog.jet:7"
+stdout+stderr: ~ "Breakpoint hit  prog.jet:7  in run()"
+stdout+stderr: ~ "a: Int = 5"
+stdout+stderr: ~ "2 |"
+stdout+stderr: ~ "x: Int = 5"
+stdout+stderr: ~ "8 |"
+stdout+stderr: ~ "10"
+stdout+stderr: ~ "Program finished"
+stdout+stderr: !~ "Program started"

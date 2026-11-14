@@ -9,13 +9,15 @@ package: {
 //
 // Run it normally:              jet run Examples/Tooling/Debugging/DebugNative.jet
 // Step through it (native):     jet debug Examples/Tooling/Debugging/DebugNative.jet
+// Stop first in word_count:     jet debug Examples/Tooling/Debugging/DebugNative.jet --break DebugNative.jet:25
+// From an editor (VS Code):     jet debug --dap Examples/Tooling/Debugging/DebugNative.jet
 //
 // `use core.files` touches the host file system. At the `(Jet)` prompt
 // (step/next/finish/continue/break/print/locals/backtrace/quit) every stop
-// shows the Jet source line, the Jet frames and the locals as Jet values.
-// `--dap` (the Debug Adapter Protocol for editors) and `--raw-frames` (the
-// native frames as LLDB sees them) are not ported yet; `jet debug` says so
-// when given either.
+// shows the Jet source line, the Jet frames and the locals as Jet values;
+// `locals` lists each with its Jet type. `--dap` speaks the Debug Adapter
+// Protocol over stdio to the same session. `--raw-frames` (the native frames
+// as LLDB sees them) is not ported yet; `jet debug` says so when given it.
 use fs: core.files
 
 word_count: fn(text: String) -> Int {

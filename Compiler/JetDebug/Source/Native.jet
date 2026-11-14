@@ -76,6 +76,13 @@ NativeStop: struct {
     frame: NativeFrame?
 }
 
+// A breakpoint `jet debug --break` asks for: a Jet source file's base name,
+// as the line table names it, and a line of it.
+NativeBreak: struct {
+    file: String
+    line: Int
+}
+
 NativeSession: struct {
     child: ProcessChild
     output_path: String
@@ -270,6 +277,25 @@ NativeSession: struct {
         Ok(Val(NativeDebugStep{text: text, stop: first}))
     }
 
+    // Place a breakpoint on each of `breaks`, then run the program to the
+    // first it reaches, or to its end: the first stop of
+    // `jet debug --break`. A break on a line with no code is named and left
+    // out.
+    run_to: fn(&self, breaks: [NativeBreak], file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
+        text := ""
+        loop wanted in breaks {
+            placed := -1
+            if self.break_at(wanted.file, wanted.line) == {
+                .Ok(found) -> placed = found ?? -1
+                .Err(failure) -> return Err(failure)
+            }
+            text = if placed < 0 -> "{text}No code on {wanted.file}:{wanted.line}\n" else -> "{text}Breakpoint set  {wanted.file}:{wanted.line}\n"
+        }
+        first: self.launch([String]{}) ?? return Err(err)
+        shown: self.report(first, file, lines) ?? return Err(err)
+        Ok(NativeDebugStep{text: "{text}{shown}", stop: first})
+    }
+
     // One console command at `stop`. `quit` is the caller's: only it knows
     // how its session ends.
     command: fn(&self, command: String, stop: NativeStop, file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
@@ -299,8 +325,9 @@ NativeSession: struct {
                 }
             }
             "locals" -> {
-                locals: self.locals() ?? return Err(err)
-                text = "{native_debug_locals_line(locals)}\n"
+                locals := self.locals() ?? return Err(err)
+                locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
+                text = native_debug_locals_typed(locals)
             }
             "p" | "print" -> {
                 locals: self.locals() ?? return Err(err)
@@ -451,6 +478,14 @@ native_debug_locals_line: fn(locals: [NativeLocal]) -> String Never! {
     "{NATIVE_DEBUG_LOCALS_LABEL}  {shown.join("   ")}"
 }
 
+// The frame's locals, one a line with its Jet type (`total: Int = 6`).
+native_debug_locals_typed: fn(locals: [NativeLocal]) -> String Never! {
+    if locals.len() == 0 -> return "No locals here\n"
+    text := ""
+    loop local in locals -> text = "{text}{local.name}: {local.type_name} = {local.value}\n"
+    text
+}
+
 native_debug_print: fn(locals: [NativeLocal], name: String) -> String Never! {
     if name == "" -> return "Print needs a local's name, as `print total`"
     loop local in locals {
@@ -512,6 +547,13 @@ native_debug_breakpoint_number: fn(output: String) -> Int? Never! {
         }
     }
     None
+}
+
+// The breakpoint a `breakpoint N.M` stop reason names.
+native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
+    if !stop.reason.starts_with("breakpoint ") -> return None
+    number: Int.parse(stop.reason.after("breakpoint ").before(".")) ?? return None
+    Val(number)
 }
 
 // The stop a run-control command reports: `Process N exited with status = C`,

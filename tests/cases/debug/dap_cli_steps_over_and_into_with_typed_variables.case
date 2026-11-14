@@ -1,0 +1,63 @@
+# VS Code's launch sequence over `jet debug --dap`: a breakpoint stops the
+# program, `variables` lists the frame's locals with their Jet types, and
+# `stepIn`, `next` and `stepOut` move through the call on the line.
+requires: tool:lldb
+fixture: dap_cli_steps_over_and_into_with_typed_variables.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.success = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":7}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.breakpoints[0].verified = true
+json: stdout doc $.body.breakpoints[0].line = 7
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.stackFrames[0].name = "run"
+json: stdout doc $.body.stackFrames[0].line = 7
+capture: run_frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:run_frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.body.scopes[0].name = "Locals"
+capture: run_scope stdout doc $.body.scopes[0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:run_scope}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="a"][0].value = "5"
+json: stdout doc $.body.variables[?name="a"][0].type = "Int"
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"stepIn\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "double"
+json: stdout doc $.body.stackFrames[0].line = 2
+json: stdout doc $.body.stackFrames[1].name = "run"
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 11 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "double"
+json: stdout doc $.body.stackFrames[0].line = 3
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"stepOut\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 13 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "run"
+send dap: "{\"seq\":14,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.event = "terminated" timeout 30s every 100ms
+send dap: "{\"seq\":15,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 15 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0
+stdout: ~ "\"event\":\"exited\""
+stdout: ~ "\"output\":\"10"
+stdout: !~ "__jet_"

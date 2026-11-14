@@ -4,7 +4,7 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeDebugError, NativeMemory, NativeRead, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_locals_of, native_debug_parse_frame, native_debug_parse_memory, native_debug_parse_stop, native_debug_parse_values]
+    jet_debug.[NativeBreak, NativeDebugError, NativeLocal, NativeMemory, NativeRead, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_hit_breakpoint, native_debug_locals_of, native_debug_locals_typed, native_debug_parse_frame, native_debug_parse_memory, native_debug_parse_stop, native_debug_parse_values]
     jet_foundation.[DeepChecks]
     jet_testkit.[kit_require_tool]
 }
@@ -44,6 +44,20 @@ use {
     assert(signaled.kind == NativeStopKind.Signaled)
     assert_eq(signaled.reason, "SIGSEGV")
     assert(native_debug_parse_stop("error: invalid process") == None)
+}
+
+#Test("a_breakpoint_stop_names_its_breakpoint") {
+    hit: native_debug_parse_stop("Process 7 stopped\n* thread #1, name = 'prog', stop reason = breakpoint 12.1\n    frame #0: 0x00000000004030e7 prog`run at prog.jet:10") ?? panic("pause")
+    assert_eq(native_debug_hit_breakpoint(hit), Int?{Val(12)})
+    stepped: native_debug_parse_stop("Process 7 stopped\n* thread #1, name = 'prog', stop reason = step over\n    frame #0: 0x00000000004030e7 prog`run at prog.jet:11") ?? panic("step")
+    assert_eq(native_debug_hit_breakpoint(stepped), Int?{None})
+}
+
+#Test("typed_locals_list_one_a_line_with_the_jet_type") {
+    memory := NativeMemory{}
+    locals: native_debug_locals_of(native_debug_parse_values("(Int) count = 3\n(bool) ok = true"), memory)
+    assert_eq(native_debug_locals_typed(locals), "count: Int = 3\nok: Bool = true\n")
+    assert_eq(native_debug_locals_typed([NativeLocal]{}), "No locals here\n")
 }
 
 #Test("locals_keep_only_values_the_image_describes") {
@@ -143,17 +157,24 @@ native_test_toolchain_root: fn() -> String Never! {
     }
 }
 
-#Test("a_session_pauses_steps_and_reads_the_native_image") {
-    _: kit_require_tool("lldb") ?? return
+// A session over `NATIVE_TEST_PROGRAM` built at -O0 in `root`.
+native_test_session: fn(root: String) -> NativeSession {
     jet: native_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
-    scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
-    root: scratch.path
     source: native_test_files.join(root, "prog.jet")
-    native_test_files.write(source, "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n") ?? panic("source: {err}")
+    native_test_files.write(source, NATIVE_TEST_PROGRAM) ?? panic("source: {err}")
     out: native_test_files.join(root, "out")
     built: native_test_process.cmd([String]{jet, "build", "-O0", "--output-dir={out}", source}).env("JET_TOOLCHAIN_ROOT", native_test_toolchain_root()).stdout(.Capture).stderr(.Capture).run() ?? panic("jet build: {err}")
     if !built.success -> panic("jet build failed: {built.output}{built.errors}")
-    session := NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
+    NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
+}
+
+NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
+
+#Test("a_session_pauses_steps_and_reads_the_native_image") {
+    _: kit_require_tool("lldb") ?? return
+    scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root)
     resolved := -1
     if session.break_at("prog.jet", 2) == {
         .Ok(number) -> resolved = number ?? -1
@@ -176,6 +197,23 @@ native_test_toolchain_root: fn() -> String Never! {
     assert(finished.kind == NativeStopKind.Exited)
     assert_eq(finished.code, 0)
     assert_eq(session.take_output(), "count 2\n")
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+#Test("run_to_stops_first_at_the_first_breakpoint_reached") {
+    _: kit_require_tool("lldb") ?? return
+    scratch: native_test_files.temp_dir("jet-debug-run-to") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root)
+    lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 40}, {file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("No code on prog.jet:40\n"))
+    assert(first.text.contains("Breakpoint set  prog.jet:9\n"))
+    assert(first.text.contains("Breakpoint hit  prog.jet:9  in run()"))
+    assert(native_debug_hit_breakpoint(first.stop) != None)
+    shown: session.command("locals", first.stop, "prog.jet", lines) ?? panic("locals: {err.detail}")
+    assert(shown.text.contains("count: Int = 0\n"))
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
