@@ -507,3 +507,50 @@ host_pixels_padded: fn(pair: I64, layout: I64) -> I64 {
     if (index < total) -> net_store_uint(wrapping(base + index * I64{4}), I64{4}, pixel)
     I64{1}
 }
+
+// The address of the 8-byte word at `offset` of `token`'s mapping when
+// `offset` is a multiple of 8 and the word lies inside it, else 0. The
+// mapping is page-aligned, so the word is aligned for the atomic mappings.
+host_shared_word: fn(token: I64, offset: I64) -> I64 {
+    if (offset.bit_and(I64{7}) != I64{0}) -> return I64{0}
+    host_shared_span(token, offset, I64{8})
+}
+
+// The SeqCst atomic accesses to one word of shared memory, in the same
+// mappings as core.mem's Atomic (Atomic.jet): every process that maps the
+// memory and uses these sees one order of them, and a store publishes the
+// plain writes made before it to a load that reads it.
+#Export(c) jet_sys_shared_load_raw: fn(token: I64, offset: I64, output: I64, error: I64) -> I64 {
+    native: host_native_int(token)
+    at: host_native_int(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    place: host_shared_word(native, at)
+    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    rt_text_store(output, jet_int_owned_from_i64(atomic_word_load(place)))
+    I64{1}
+}
+
+#Export(c) jet_sys_shared_store_raw: fn(token: I64, offset: I64, value: I64, error: I64) -> I64 {
+    native: host_native_int(token)
+    at: host_native_int(offset)
+    word: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    place: host_shared_word(native, at)
+    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    atomic_word_store(place, word)
+    I64{1}
+}
+
+// 1 when the word held `expected` and now holds `replacement`, else 0.
+#Export(c) jet_sys_shared_compare_exchange_raw: fn(token: I64, offset: I64, expected: I64, replacement: I64, output: I64, error: I64) -> I64 {
+    native: host_native_int(token)
+    at: host_native_int(offset)
+    old: host_native_int(expected)
+    fresh: host_native_int(replacement)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    place: host_shared_word(native, at)
+    if (place == I64{0}) -> return host_descriptor_range(HOST_IO_OP_WRITE, error)
+    swapped: if atomic_word_cas(place, old, fresh) -> I64{1} else -> I64{0}
+    rt_text_store(output, jet_int_owned_from_i64(swapped))
+    I64{1}
+}

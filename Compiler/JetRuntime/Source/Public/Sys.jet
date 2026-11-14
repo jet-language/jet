@@ -71,6 +71,17 @@ sys: module {
     // `value`.
     #Import(c) priv shared_fill: fn(token: Int, offset: Int, count: Int, value: Int) -[Env]> IOError! = "jet_sys_shared_fill_raw"
 
+    // The 8-byte word at byte `offset` of the shared memory `token`, read
+    // atomically (SeqCst).
+    #Import(c) priv shared_load: fn(token: Int, offset: Int) -[Env]> Int IOError! = "jet_sys_shared_load_raw"
+
+    // Stores `value` atomically (SeqCst) in the 8-byte word at byte `offset`.
+    #Import(c) priv shared_store: fn(token: Int, offset: Int, value: Int) -[Env]> IOError! = "jet_sys_shared_store_raw"
+
+    // 1 when the word at byte `offset` held `expected` and now holds
+    // `replacement`, else 0 (SeqCst).
+    #Import(c) priv shared_compare_exchange: fn(token: Int, offset: Int, expected: Int, replacement: Int) -[Env]> Int IOError! = "jet_sys_shared_compare_exchange_raw"
+
     // The working directory, or an Err with the reason it can't be read.
     #Import(c) priv current_dir: fn() -[Env]> String Err! = "jet_sys_current_dir_raw"
 
