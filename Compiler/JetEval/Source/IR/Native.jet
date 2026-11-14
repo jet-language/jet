@@ -21,11 +21,12 @@
 // the same addresses (each batch has its own, above the last one).
 use {
     math: core.math
-    jet_foundation.[CompilerThreads, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_rows_set, name_rows_value]
+    jet_foundation.[CompilerThreads, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_find, name_intern, name_rows_set, name_rows_value, name_table_sized]
     jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_lint_module, ir_lint_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
     jet_backend.[
         X64ComptimeChild,
         X64ComptimeCode,
+        X64ComptimeSymbols,
         X64Segment,
         X64_COMPTIME_ALLOC,
         X64_COMPTIME_CALL,
@@ -62,7 +63,9 @@ use {
         x64_comptime_send,
         x64_comptime_settle,
         x64_comptime_spawn,
+        x64_comptime_symbol_address,
         x64_comptime_symbols,
+        x64_comptime_symbols_none,
         x64_comptime_word,
         x64_image_segments,
         x64_link_with_runtime_image,
@@ -116,7 +119,7 @@ JetEvalNativeImageReader: trait {
 JetEvalNativeChild: struct {
     child: X64ComptimeChild
     stub: [U8]
-    defined: [String:Int]
+    defined: X64ComptimeSymbols
     base: Int
     generation: Int
     failure: String
@@ -216,7 +219,7 @@ jet_eval_native_image_present: fn(session: JetEvalNativeSession) -> Bool Never! 
 }
 
 jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
-    Shared{JetEvalNativeChild{child: X64ComptimeChild{}, stub: [U8]{}, defined: [String:Int]{}, base: 0, generation: 0, failure: ""}}
+    Shared{JetEvalNativeChild{child: X64ComptimeChild{}, stub: [U8]{}, defined: x64_comptime_symbols_none(), base: 0, generation: 0, failure: ""}}
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +435,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
     addresses: x64_comptime_symbols(bound.bytes, JET_EVAL_NATIVE_PREFIX, false)
     loop (index, name) in names {
         if name == "" -> next
-        entries[index] = addresses.get(name) ?? 0
+        entries[index] = x64_comptime_symbol_address(addresses, name) ?? 0
         if entries[index] == 0 {
             program.failure = "the bound batch has no `{name}`"
             program.entries = entries.move()
@@ -486,18 +489,18 @@ jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int
 // (`defined`) nor the batch defines calls a stub of its own instead, which
 // asks the compiler (HOST_MISSING): such a call is unsupported where it
 // runs, as it was before the batch ran, and the rest of the batch binds.
-jet_eval_native_missing: fn(code: &IRModule, defined: [String:Int]) {
-    own := [String:Bool]{}
+jet_eval_native_missing: fn(code: &IRModule, defined: X64ComptimeSymbols) {
+    own := name_table_sized(64)
     loop id in 0..<code.functions.len() {
-        own[code.functions[id].symbol.copy()] = true
-        own[code.functions[id].name.copy()] = true
+        _ := name_intern(own, code.functions[id].symbol)
+        _ := name_intern(own, code.functions[id].name)
     }
     sites := [Int]{}
     loop id in 0..<code.functions.len() {
         loop at in 0..<code.functions[id].op.len() {
             if code.functions[id].op[at] != .CallRuntime -> next
             symbol: code.names[code.functions[id].a[at]]
-            if defined.get(symbol) != None || own.get(symbol) != None -> next
+            if x64_comptime_symbol_address(defined, symbol) != None || name_find(own, symbol) != None -> next
             sites.push(id)
             sites.push(at)
         }

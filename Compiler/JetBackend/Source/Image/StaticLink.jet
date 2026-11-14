@@ -54,7 +54,7 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, sha256_bytes]
+use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
 
 LINK_BASE: 0x400000
 LINK_RUN_BASE: 0x200000000000
@@ -166,9 +166,16 @@ LinkContext: struct {
     archives: [LinkArchive]
     // archive_buffer[i] is the buffer of archives[i].
     archive_buffer: [Int]
-    // Every archive symbol to archive * LINK_MEMBER_SCALE + member, the
-    // first archive (and the first entry in it) winning.
-    lookup: [String:Int]
+    // Every symbol name the link meets (archive symbols, globals, COMDAT
+    // signatures), each with a row in the per-name columns (link_name).
+    names: NameTable
+    // Per name: the archive symbol's archive * LINK_MEMBER_SCALE + member,
+    // the first archive (and the first entry in it) winning; -1: none.
+    name_member: [Int]
+    // Per name: its global symbol, or -1.
+    name_global: [Int]
+    // Per name: whether a COMDAT group with that signature is loaded.
+    name_comdat: [Bool]
     // Keys of the archive members already loaded.
     pulled: [Int:Bool]
     // Objects: the name for reports, the buffer and absolute offsets of the
@@ -208,9 +215,9 @@ LinkContext: struct {
     // Global symbol of each file symbol, by its index across the loaded
     // files (obj_first_symbol); -1 for a local one.
     sym_global: [Int]
-    // Global symbols by name.
-    g_index: [String:Int]
+    // Global symbols: the name and its id in `names` (name_global).
     g_name: [String]
+    g_name_id: [Int]
     g_kind: [Int]
     // The definition (LINK_G_FILE): section (or LINK_ABS), value and size.
     g_section: [Int]
@@ -225,7 +232,6 @@ LinkContext: struct {
     g_addr: [Int]
     g_common_size: [Int]
     g_common_align: [Int]
-    comdats: [String:Bool]
     pending: [Int]
     pending_head: Int
     // Live sections: the row of each section id (-1: not live; sized by
@@ -287,14 +293,15 @@ LinkContext: struct {
 
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
-        bufs: bufs.move(), archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
+        bufs: bufs.move(), archives: [LinkArchive]{}, archive_buffer: [Int]{}, pulled: [Int:Bool]{},
+        names: name_table(), name_member: [Int]{-1}, name_global: [Int]{-1}, name_comdat: [Bool]{false},
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
         obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
         obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
         cond_roots: [Int]{}, cond_guards: [Int]{}, init_code: [Int:Int]{},
-        g_index: [String:Int]{}, g_name: [String]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
+        g_name: [String]{}, g_name_id: [Int]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
         g_obj: [Int]{}, g_weak_def: [Bool]{}, g_strong_ref: [Bool]{}, g_alias: [Int]{}, g_addr: [Int]{},
-        g_common_size: [Int]{}, g_common_align: [Int]{}, comdats: [String:Bool]{}, pending: [Int]{}, pending_head: 0,
+        g_common_size: [Int]{}, g_common_align: [Int]{}, pending: [Int]{}, pending_head: 0,
         live: [Int]{}, live_secs: [Int]{}, live_class: [Int]{}, live_addr: [Int]{},
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
@@ -479,11 +486,38 @@ link_sec_addr: fn(c: LinkContext, s: Int) -> Int Never! {
 // ---------------------------------------------------------------------------
 // Symbols. Locals are read from the symbol table; globals have rows.
 
+// The id of symbol name `name`, interned when new, with its row in the
+// per-name columns.
+link_name: fn(c: &LinkContext, name: String) -> Int Never! {
+    id: name_index(name_intern(c.names, name))
+    loop c.name_global.len() <= id {
+        c.name_member.push(-1)
+        c.name_global.push(-1)
+        c.name_comdat.push(false)
+    }
+    id
+}
+
+// The id of `name` when the link has met it; -1 otherwise.
+link_name_found: fn(c: LinkContext, name: String) -> Int Never! {
+    found: name_find(c.names, name) ?? return -1
+    name_index(found)
+}
+
+// The global symbol named `name`, or -1.
+link_global_named: fn(c: LinkContext, name: String) -> Int Never! {
+    id: link_name_found(c, name)
+    if id < 0 -> return -1
+    c.name_global[id]
+}
+
 link_intern: fn(c: &LinkContext, name: String) -> Int Never! {
-    if c.g_index.get(name) == .Val(found) -> return found
+    name_id: link_name(c, name)
+    if c.name_global[name_id] >= 0 -> return c.name_global[name_id]
     id: c.g_name.len()
-    c.g_index.add(name.copy(), id).drop("checked absent above")
+    c.name_global[name_id] = id
     c.g_name.push(name.copy())
+    c.g_name_id.push(name_id)
     c.g_kind.push(LINK_G_NONE)
     c.g_section.push(LINK_UNDEF)
     c.g_value.push(0)
@@ -693,9 +727,10 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         h: shoff + 64 * k
         at: base + link_u64(c.bufs, b, h + 24)
         if (link_u32(c.bufs, b, at).bit_and(1)) == 0 -> next
-        signature: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
-        if c.comdats.get(signature) == None {
-            c.comdats.add(signature, true).drop("checked absent above")
+        text: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
+        signature: link_name(c, text)
+        if !c.name_comdat[signature] {
+            c.name_comdat[signature] = true
             next
         }
         members: link_u64(c.bufs, b, h + 32).div_euclid(4)
@@ -850,16 +885,23 @@ link_resolve: fn(c: &LinkContext) Never! {
         c.pending_head += 1
         f: link_final(c, g)
         if c.g_kind[f] != LINK_G_NONE -> next
-        key: c.lookup.get(c.g_name[f]) ?? -1
+        key: c.name_member[c.g_name_id[f]]
         if key >= 0 -> link_pull(c, key)
     }
 }
 
 link_resolvable: fn(c: LinkContext, name: String) -> Bool Never! {
-    if c.g_index.get(name) == .Val(g) {
-        if c.g_kind[link_final(c, g)] != LINK_G_NONE -> return true
-    }
-    c.lookup.get(name) != None
+    id: link_name_found(c, name)
+    if id < 0 -> return false
+    g: c.name_global[id]
+    if g >= 0 && c.g_kind[link_final(c, g)] != LINK_G_NONE -> return true
+    c.name_member[id] >= 0
+}
+
+// Whether an archive's symbol index names `name`.
+link_archived: fn(c: LinkContext, name: String) -> Bool Never! {
+    id: link_name_found(c, name)
+    id >= 0 && c.name_member[id] >= 0
 }
 
 // glibc's large-file names with the same x86-64 ABI as their base names,
@@ -929,11 +971,10 @@ LinkSynth: struct {
     rel_names: [String]
     rel_types: [Int]
     rel_addends: [Int]
-    names: [String:Bool]
 }
 
 link_synth: fn() -> LinkSynth Never! {
-    LinkSynth{text: [U8]{}, data: [U8]{}, bss: 0, def_names: [String]{}, def_sections: [Int]{}, def_values: [Int]{}, rel_at: [Int]{}, rel_names: [String]{}, rel_types: [Int]{}, rel_addends: [Int]{}, names: [String:Bool]{}}
+    LinkSynth{text: [U8]{}, data: [U8]{}, bss: 0, def_names: [String]{}, def_sections: [Int]{}, def_values: [Int]{}, rel_at: [Int]{}, rel_names: [String]{}, rel_types: [Int]{}, rel_addends: [Int]{}}
 }
 
 link_synth_code: fn(s: &LinkSynth, bytes: [Int]) Never! {
@@ -964,7 +1005,6 @@ link_synth_define: fn(s: &LinkSynth, name: String, section: Int, value: Int) Nev
     s.def_names.push(name.copy())
     s.def_sections.push(section)
     s.def_values.push(value)
-    s.names.add(name.copy(), true).drop("a synthetic object defines each name once")
 }
 
 link_synth_function: fn(s: &LinkSynth, name: String) Never! {
@@ -980,7 +1020,11 @@ link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
     loop _ in 0..<24 -> symtab.push(U8{0})
-    indexes := [String:Int]{}
+    // Each name's symbol index (0: none yet) by its id in `names`, and the
+    // id of each relocation's name.
+    names := name_table_sized(64)
+    index_of := [Int]{0}
+    rel_ids := [Int]{}
     loop (k, name) in s.def_names {
         elf64_u32(symtab, elf64_string(strtab, name))
         symtab.push(U8{if s.def_sections[k] == 1 -> 0x12 else -> 0x11})
@@ -988,11 +1032,16 @@ link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
         elf64_u16(symtab, s.def_sections[k])
         elf64_u64(symtab, s.def_values[k])
         elf64_u64(symtab, 0)
-        indexes.add(name.copy(), k + 1).drop("defined names are unique")
+        id: name_index(name_intern(names, name))
+        loop index_of.len() <= id -> index_of.push(0)
+        index_of[id] = k + 1
     }
     loop name in s.rel_names {
-        if indexes.get(name) != None -> next
-        indexes.add(name.copy(), symtab.len().div_euclid(24)).drop("checked absent above")
+        id: name_index(name_intern(names, name))
+        loop index_of.len() <= id -> index_of.push(0)
+        rel_ids.push(id)
+        if index_of[id] > 0 -> next
+        index_of[id] = symtab.len().div_euclid(24)
         elf64_u32(symtab, elf64_string(strtab, name))
         symtab.push(U8{0x10})
         symtab.push(U8{0})
@@ -1003,7 +1052,7 @@ link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
     rela := [U8]{}
     loop (k, at) in s.rel_at {
         elf64_u64(rela, at)
-        elf64_u64(rela, ((indexes.get(s.rel_names[k]) ?? 0) << 32).bit_or(s.rel_types[k]))
+        elf64_u64(rela, (index_of[rel_ids[k]] << 32).bit_or(s.rel_types[k]))
         elf64_u64(rela, s.rel_addends[k])
     }
     shstrtab := [U8]{U8{0}}
@@ -1379,12 +1428,14 @@ link_eh_shims: fn(c: LinkContext, s: &LinkSynth) Never! {
 // Whether `name` is strongly referenced and still undefined: a shim would
 // be written for it this round.
 link_shim_wanted: fn(c: LinkContext, name: String) -> Bool Never! {
-    g: c.g_index.get(name) ?? return false
+    g: link_global_named(c, name)
+    if g < 0 -> return false
     c.g_strong_ref[g] && c.g_alias[g] < 0 && c.g_kind[g] == LINK_G_NONE
 }
 
 link_defined_name: fn(c: LinkContext, name: String) -> Bool Never! {
-    g: c.g_index.get(name) ?? return false
+    g: link_global_named(c, name)
+    if g < 0 -> return false
     link_defined(c, g)
 }
 
@@ -1440,7 +1491,14 @@ link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Ne
 // conditional init/fini array once the section it links to is live, to a
 // fixpoint; then keep exactly the FDEs of live sections. Each live section's
 // relocations are scanned once, for marking and for link_scan_reloc.
-link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Never! {
+link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String]) Never! {
+    // Whether each name id is one of `linker_names` (link_scan_reloc).
+    linker := [Bool]{}
+    loop _ in 0..<name_count(c.names) -> linker.push(false)
+    loop name in linker_names {
+        id: link_name_found(c, name)
+        if id >= 0 -> linker[id] = true
+    }
     last: c.obj_first_section.len() - 1
     sections: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
     loop _ in 0..<sections {
@@ -1488,7 +1546,7 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) N
                     t: link_target_section(c, obj, symbol)
                     link_mark(c, work, t)
                     if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 -> c.fault_report_caller = s
-                    slot: link_scan_reloc(c, reported, linker_names, obj, s, at, symbol)
+                    slot: link_scan_reloc(c, reported, linker, obj, s, at, symbol)
                     c.rel_slot.push(slot)
                 }
             }
@@ -1523,7 +1581,10 @@ link_share_cies: fn(c: &LinkContext) Never! {
         if c.ep_cie[piece] < 0 -> c.ep_keep[piece] = false
     }
     chosen := [Int:Int]{}
-    by_bytes := [String:Int]{}
+    // Each CIE record's text by its id in `records`, and the first CIE
+    // with that text.
+    records := name_table_sized(64)
+    record_cie := [Int]{-1}
     loop piece in 0..<c.ep_sec.len() {
         cie: c.ep_cie[piece].copy()
         if cie < 0 || !c.ep_keep[piece] -> next
@@ -1531,9 +1592,10 @@ link_share_cies: fn(c: &LinkContext) Never! {
         if shared < 0 {
             shared = cie
             if c.ep_reloc_count[cie] == 0 {
-                key: link_eh_record_key(c, cie)
-                shared = by_bytes.get(key) ?? cie
-                if shared == cie -> by_bytes.add(key, cie).drop("a new record")
+                key: name_index(name_intern(records, link_eh_record_key(c, cie)))
+                loop record_cie.len() <= key -> record_cie.push(-1)
+                if record_cie[key] < 0 -> record_cie[key] = cie
+                shared = record_cie[key]
             }
             chosen.add(cie, shared).drop("each CIE is chosen once")
             c.ep_keep[shared] = true
@@ -1603,13 +1665,13 @@ link_is_got_reloc: fn(kind: Int) -> Bool Never! {
 
 // For the relocation at `at` (symbol `symbol`) of live section `s`: report a
 // strong reference to a symbol nothing defines (references from collected
-// code do not count, as with `ld --gc-sections`; `linker_names` are defined
-// after layout), and when it is GOT-relative and not relaxed, return its GOT
-// slot (assigned on first use); otherwise -1.
-link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [String:Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
+// code do not count, as with `ld --gc-sections`; the names `linker` marks by
+// their id in `names` are defined after layout), and when it is GOT-relative
+// and not relaxed, return its GOT slot (assigned on first use); otherwise -1.
+link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker: [Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
     b: c.obj_buffer[obj].copy()
     g: link_global_of(c, obj, symbol)
-    if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
+    if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && (c.g_name_id[g] >= linker.len() || !linker[c.g_name_id[g]]) {
         reported.add(g, true).drop("checked absent above")
         c.undefined.push(c.g_name[g].copy())
         site: link_section_label(c, s)
@@ -1755,7 +1817,7 @@ LinkLayout: struct {
     // the image has none.
     note_at: Int
     // Keeps the layout from deriving comparisons over its nested lists.
-    notes: [String:Int]
+    notes: [Int:Int]
 }
 
 // The image's layout at the link base, with a build-id note when `note`,
@@ -1820,7 +1882,7 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
         file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
         has_rw: has_rw, has_tls: has_tls, tdata_end: tdata_end, init_start: init_start, init_end: init_end,
         fini_start: fini_start, fini_end: fini_end, preinit_start: preinit_start, preinit_end: preinit_end,
-        bss_start: file_end, note_at: note_at, notes: [String:Int]{}, packed: packed, rw_shift: if packed -> rw_start - r_end else -> 0,
+        bss_start: file_end, note_at: note_at, notes: [Int:Int]{}, packed: packed, rw_shift: if packed -> rw_start - r_end else -> 0,
     }
 }
 
@@ -1845,7 +1907,8 @@ link_place_eh: fn(c: &LinkContext, addr: Int) -> Int Never! {
 // Give every referenced linker-defined name its address.
 link_define_names: fn(c: &LinkContext, l: LinkLayout, startup: Bool) Never! {
     loop name in link_linker_names() {
-        g: c.g_index.get(name) ?? next
+        g: link_global_named(c, name)
+        if g < 0 -> next
         if c.g_kind[g] != LINK_G_NONE && c.g_kind[g] != LINK_G_LINKER -> next
         value: if name == {
             "__jet_init_array_start" -> l.init_start
@@ -2651,7 +2714,9 @@ LinkSectionHeader: struct {
 link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
     debug := LinkDebug{names: [String]{}, rows: [[Int]]{}, sizes: [Int]{}}
     if !debug_info -> return debug
-    groups := [String:Int]{}
+    // Each section name's group (-1: none yet) by its id in `group_names`.
+    group_names := name_table_sized(64)
+    group_of := [Int]{-1}
     loop obj in 0..<c.obj_name.len() {
         if c.obj_base[obj] != 0 -> next
         b: c.obj_buffer[obj].copy()
@@ -2662,10 +2727,12 @@ link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
             name_at: link_sec_name(c, obj, s)
             if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
             name: link_cstr(c.bufs, b, name_at)
-            group := groups.get(name) ?? -1
+            name_id: name_index(name_intern(group_names, name))
+            loop group_of.len() <= name_id -> group_of.push(-1)
+            group := group_of[name_id]
             if group < 0 {
                 group = debug.names.len()
-                groups.add(name.copy(), group).drop("checked absent above")
+                group_of[name_id] = group
                 debug.names.push(name)
                 debug.rows.push([Int]{})
                 debug.sizes.push(0)
@@ -2832,7 +2899,8 @@ link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8
 // no live jet_rt_context_trace or no table. The side debug file gets its
 // own copy: the rows' bytes are copied, not taken.
 link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: LinkLayout) -> [U8] Never! {
-    global: c.g_index.get("jet_rt_context_trace") ?? return [U8]{}
+    global: link_global_named(c, "jet_rt_context_trace")
+    if global < 0 -> return [U8]{}
     final: link_final(c, global)
     if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 || link_live_row(c, c.g_section[final]) < 0 -> return [U8]{}
     loop (group, name) in debug.names {
@@ -2945,7 +3013,8 @@ link_load_inputs: fn(c: &LinkContext, names: [String]) Never! {
         loop error in archive.errors -> link_error(c, error)
         index: c.archives.len()
         loop (k, symbol) in archive.symbol_names {
-            if c.lookup.get(symbol) == None -> c.lookup.add(symbol, index * LINK_MEMBER_SCALE + archive.symbol_members[k]).drop("checked absent above")
+            id: link_name(c, symbol)
+            if c.name_member[id] < 0 -> c.name_member[id] = index * LINK_MEMBER_SCALE + archive.symbol_members[k]
         }
         c.archives.push(archive)
         c.archive_buffer.push(b)
@@ -2963,8 +3032,8 @@ link_resolve_program: fn(c: &LinkContext) -> Int Never! {
     entry := "_start"
     if {
         link_defined_name(c, "_start") -> {}
-        c.lookup.get("__libc_start_main") != None -> {
-            frames: c.lookup.get("__register_frame_info") != None
+        link_archived(c, "__libc_start_main") -> {
+            frames: link_archived(c, "__register_frame_info")
             startup: link_startup(c, frames)
             link_load_synth(c, startup, "<linker startup>")
         }
@@ -2996,8 +3065,8 @@ link_entry_section: fn(c: &LinkContext, entry_g: Int) -> Int Never! {
 // link, or carried in a runtime pack (Image/RuntimePack.jet), which exports
 // its `__jet_link_main`.
 link_has_startup: fn(c: LinkContext) -> Bool Never! {
-    if c.g_index.get("__jet_link_main") == .Val(g) -> return c.g_kind[link_final(c, g)] == LINK_G_FILE
-    false
+    g: link_global_named(c, "__jet_link_main")
+    g >= 0 && c.g_kind[link_final(c, g)] == LINK_G_FILE
 }
 
 // Descriptive canonical linker facts only. The verified held-output producer
@@ -3083,9 +3152,7 @@ x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined
         entry_g: link_resolve_program(c)
         entry_section: link_entry_section(c, entry_g)
         if entry_section >= 0 {
-            linker_names := [String:Bool]{}
-            loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
-            link_collect(c, [Int]{entry_section}, linker_names)
+            link_collect(c, [Int]{entry_section}, link_linker_names())
         }
     }
     inputs := c.bufs.move()
@@ -3131,10 +3198,10 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     link_load_inputs(c, names)
     if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
     if request == .Val(wanted) {
-        seen := [String:Bool]{}
+        seen := name_table_sized(64)
         loop symbol in wanted.callable_exports {
-            if symbol == "" || seen.get(symbol) != None -> return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
-            seen.add(symbol.copy(), true).drop("checked absent above")
+            if symbol == "" || name_find(seen, symbol) != None -> return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
+            _ := name_intern(seen, symbol)
             global: link_intern(c, symbol)
             link_reference(c, global, false)
         }
@@ -3145,7 +3212,8 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
         loop symbol in wanted.callable_exports {
-            global: c.g_index.get(symbol) ?? return link_resident_failure([String]{"unresolved resident runtime export `{symbol}`"})
+            global: link_global_named(c, symbol)
+            if global < 0 -> return link_resident_failure([String]{"unresolved resident runtime export `{symbol}`"})
             final: link_final(c, global)
             if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure([String]{"resident export `{symbol}` is not a concrete file definition"})
             object: c.g_obj[final]
@@ -3159,9 +3227,7 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
             entries.push(section)
         }
     }
-    linker_names := [String:Bool]{}
-    loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
-    link_collect(c, entries, linker_names)
+    link_collect(c, entries, link_linker_names())
     if c.errors.len() > 0 {
         failed := link_resident_failure(c.errors.move())
         failed.image.undefined = c.undefined.move()
@@ -3207,7 +3273,8 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     if request == .Val(wanted) {
         symbols := [X64ResidentSymbol]{}
         loop symbol in wanted.callable_exports {
-            global: c.g_index.get(symbol) ?? return link_resident_failure([String]{"resident runtime export disappeared after resolution"})
+            global: link_global_named(c, symbol)
+            if global < 0 -> return link_resident_failure([String]{"resident runtime export disappeared after resolution"})
             final: link_final(c, global)
             section: c.g_section[final]
             row: link_live_row(c, section)

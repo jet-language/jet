@@ -261,7 +261,7 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
         file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
         has_rw: has_rw, has_tls: false, tdata_end: rw_start, init_start: rw_start, init_end: rw_start,
         fini_start: rw_start, fini_end: rw_start, preinit_start: rw_start, preinit_end: rw_start,
-        bss_start: file_end, note_at: 0, notes: [String:Int]{}, packed: false, rw_shift: 0,
+        bss_start: file_end, note_at: 0, notes: [Int:Int]{}, packed: false, rw_shift: 0,
     }
 }
 
@@ -523,7 +523,7 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
     c.base = view.base
     link_load_inputs(c, [String]{name})
     if c.errors.len() > 0 -> return link_bind_failure(c)
-    main_g: c.g_index.get("main") ?? -1
+    main_g: link_global_named(c, "main")
     if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_FILE || c.g_section[link_final(c, main_g)] < 0 {
         link_error(c, "{name}: the program does not define `main`")
         return link_bind_failure(c)
@@ -546,28 +546,27 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
             }
         }
         else -> {
-            imports := [String:Int]{}
-            loop g in 0..<c.g_name.len() {
-                if c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0 -> imports.add(c.g_name[g], g).drop("global names are unique")
-            }
+            // Whether each global was undefined before binding; a name the
+            // image's symbols repeat binds to the last of them.
+            imports := [Bool]{}
+            loop g in 0..<c.g_name.len() -> imports.push(c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0)
             loop k in view.first_global..<view.symtab_count {
                 at: view.symtab_at + 24 * k
                 if link_u16(c.bufs, 1, at + 6) == 0 -> next
-                g: imports.get(link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at))) ?? next
+                g: link_global_named(c, link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at)))
+                if g < 0 || !imports[g] -> next
                 c.g_kind[g] = LINK_G_LINKER
                 c.g_addr[g] = link_s64(c.bufs, 1, at + 8)
             }
         }
     }
-    start_g: c.g_index.get("__jet_bind_main") ?? -1
+    start_g: link_global_named(c, "__jet_bind_main")
     if start_g < 0 {
         link_error(c, "runtime image binding: no `__jet_bind_main`")
         return link_bind_failure(c)
     }
-    linker_names := [String:Bool]{}
-    linker_names.add("__jet_bind_eh", true).drop("a fresh map")
     entries: [Int]{c.g_section[link_final(c, main_g)], c.g_section[start_g]}
-    link_collect(c, entries, linker_names)
+    link_collect(c, entries, [String]{"__jet_bind_eh"})
     if c.errors.len() > 0 -> return link_bind_failure(c)
     order: link_order(c)
     loop class in ([Int]{LINK_TDATA, LINK_TBSS, LINK_PREINIT, LINK_INIT, LINK_FINI}) {
@@ -577,7 +576,7 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
         }
     }
     layout: link_bind_layout(c, view)
-    eh_g: c.g_index.get("__jet_bind_eh") ?? -1
+    eh_g: link_global_named(c, "__jet_bind_eh")
     if eh_g >= 0 {
         c.g_kind[eh_g] = LINK_G_LINKER
         c.g_addr[eh_g] = c.eh_start

@@ -5,6 +5,8 @@
 // refused effect or a crash never reaches the compiler; seccomp refuses its
 // effects.
 
+use jet_foundation.[NameTable, name_find, name_index, name_intern_bytes, name_table_sized]
+
 // The child's descriptors are kept above every descriptor the child is given
 // (0..4), so moving them into place never collides.
 X64_COMPTIME_FD_FLOOR: 100
@@ -456,11 +458,30 @@ x64_comptime_ask: fn(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> In
     Val(x64_comptime_word(reply, 8))
 }
 
+// Symbols by name: each name's address by its id in `names` (-1: no such
+// symbol).
+X64ComptimeSymbols: struct {
+    names: NameTable
+    address: [Int]
+}
+
+x64_comptime_symbols_none: fn() -> X64ComptimeSymbols Never! {
+    X64ComptimeSymbols{names: name_table_sized(16), address: [Int]{-1}}
+}
+
+// The address of the symbol `name`, when `symbols` holds one.
+x64_comptime_symbol_address: fn(symbols: X64ComptimeSymbols, name: String) -> Int? Never! {
+    id: name_find(symbols.names, name) ?? return None
+    at: symbols.address[name_index(id)]
+    if at < 0 -> return None
+    Val(at)
+}
+
 // The defined symbols of the executable `image` (its `.symtab`) whose names
-// start with `prefix`, by name: their addresses. `globals` keeps only the
+// start with `prefix`, with their addresses. `globals` keeps only the
 // global and weak ones, which are what a bound program's imports resolve to.
-x64_comptime_symbols: fn(image: [U8], prefix: String, globals: Bool) -> [String:Int] Never! {
-    found := [String:Int]{}
+x64_comptime_symbols: fn(image: [U8], prefix: String, globals: Bool) -> X64ComptimeSymbols Never! {
+    found := X64ComptimeSymbols{names: name_table_sized(1024), address: [Int]{-1}}
     if image.len() < 64 -> return found
     start: prefix.bytes()
     sections: x64_comptime_unsigned(image, 40, 8)
@@ -484,20 +505,19 @@ x64_comptime_symbols: fn(image: [U8], prefix: String, globals: Bool) -> [String:
             if x64_comptime_unsigned(image, entry + 6, 2) == 0 -> next
             // STB_LOCAL
             if globals && image[entry + 4] < (U8{16}) -> next
-            at := strings + x64_comptime_unsigned(image, entry, 4)
+            at: strings + x64_comptime_unsigned(image, entry, 4)
             matches := at + start.len() <= image.len()
             loop (index, byte) in start {
                 if !matches -> break
                 if image[at + index] != byte -> matches = false
             }
             if !matches -> next
-            name := [U8]{}
-            loop at < image.len() && image[at] != (U8{0}) {
-                name.push(image[at])
-                at += 1
-            }
-            text: String.from_bytes(name) ?? { next }
-            found[text] = x64_comptime_unsigned(image, entry + 8, 8)
+            end := at
+            loop end < image.len() && image[end] != (U8{0}) -> end += 1
+            // A name that is not UTF-8 gets an id that no String finds.
+            id: name_index(name_intern_bytes(found.names, image, at, end))
+            loop found.address.len() <= id -> found.address.push(-1)
+            found.address[id] = x64_comptime_unsigned(image, entry + 8, 8)
         }
     }
     found

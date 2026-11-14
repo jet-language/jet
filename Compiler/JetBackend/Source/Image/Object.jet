@@ -34,7 +34,7 @@
 // functions and data a program reaches. Its data exports (X64DataExport)
 // are global symbols of their data objects.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, NameTable, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_find, name_index, name_intern, name_table_sized]
 
 ELF64_SECTION_HEADER_SIZE: 64
 ELF64_SYMBOL_SIZE: 24
@@ -272,7 +272,9 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     runtime_at := [Int]{}
     runtime_local := [Int]{}
     imports := [String]{}
-    import_rows := [String:Int]{}
+    // Each import's row in `imports` (-1: none yet) by its id in `import_names`.
+    import_names := name_table_sized(64)
+    import_of := [Int]{-1}
     errors := [String]{}
     function_rows: reads.value.function_rows
     data_offsets: reads.value.data_offsets
@@ -301,8 +303,8 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                         else -> x64_patch_rel32(text, at - base, reads.value.offsets[row] - base)
                     }
                 }
-                .Runtime(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
-                .RuntimeData(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
+                .Runtime(symbol) -> x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
+                .RuntimeData(symbol) -> x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
                 .Data(id) -> {
                     if id.value < 0 || id.value >= data_offsets.len() {
                         errors.push("{function.name}: data {id.value} is not in the module")
@@ -325,16 +327,28 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
 // The `.rela.text` entry of a runtime import at `at`, a call (PLT32) or a
 // data address (PC32), with symbol 0 until the merge names its symbol
 // (X64ObjectTextRows).
-x64_object_import: fn(imports: &[String], import_rows: &[String:Int], runtime_at: &[Int], runtime_local: &[Int], relas: &[U8], at: Int, symbol: String, kind: Int) Never! {
-    local := import_rows.get(symbol) ?? -1
-    if local < 0 {
-        local = imports.len()
+x64_object_import: fn(imports: &[String], import_names: &NameTable, import_of: &[Int], runtime_at: &[Int], runtime_local: &[Int], relas: &[U8], at: Int, symbol: String, kind: Int) Never! {
+    id: name_index(name_intern(import_names, symbol))
+    loop import_of.len() <= id -> import_of.push(-1)
+    if import_of[id] < 0 {
+        import_of[id] = imports.len()
         imports.push(symbol.copy())
-        import_rows.add(symbol.copy(), local).drop("checked absent above")
     }
+    local: import_of[id]
     runtime_at.push(relas.len())
     runtime_local.push(local)
     x64_object_rela_put(relas, at, 0, kind, -4)
+}
+
+// The id of symbol name `name` in `names`, interned when new, with its rows
+// in `import_of` and `export_of` (x64_object_functions_threads).
+x64_object_symbol: fn(names: &NameTable, import_of: &[Int], export_of: &[Int], name: String) -> Int Never! {
+    id: name_index(name_intern(names, name))
+    loop import_of.len() <= id {
+        import_of.push(-1)
+        export_of.push(-1)
+    }
+    id
 }
 
 // A part's rows, after its thread joined.
@@ -426,12 +440,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     loop (index, function) in functions {
         if function_rows[function.id.value + 1] < 0 -> function_rows[function.id.value + 1] = index
     }
-    export_names := [String:Bool]{}
+    export_names := name_table_sized(64)
     loop entry_row in exports {
         id: entry_row.function.value
         if id < -1 || id > max_id || function_rows[id + 1] < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: function {id} is not in the object"}}
-        if entry_row.symbol == "" || export_names.get(entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
-        export_names.add(entry_row.symbol, true).drop("checked absent above")
+        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        _ := name_intern(export_names, entry_row.symbol)
         exported[id + 1] = true
     }
     // Per export, the header indices of its hook's guard data sections
@@ -460,8 +474,8 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
             if object.id.value == entry_row.data -> at = index
         }
         if at < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"data export {entry_row.symbol}: data {entry_row.data} is not in the object"}}
-        if entry_row.symbol == "" || export_names.get(entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
-        export_names.add(entry_row.symbol, true).drop("checked absent above")
+        if entry_row.symbol == "" || name_find(export_names, entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        _ := name_intern(export_names, entry_row.symbol)
         data_rows.push(at)
     }
     if own_sections {
@@ -617,18 +631,25 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // section and that section's relocations, then the same per data object.
     own := [X64ObjectSection]{}
     imports := [String]{}
-    import_rows := [String:Int]{}
+    // Per symbol name, by its id in `symbol_names`: its row in `imports` and
+    // the global of the export it names (-1: none).
+    symbol_names := name_table_sized(256)
+    import_of := [Int]{-1}
+    export_of := [Int]{-1}
     errors := [String]{}
     first_import: first_global + exports.len() + data_exports.len()
     // A runtime import of a name this object exports (the runtime's own
     // compiler-inserted calls, such as jet_rt_string_drop, and its inline
     // code's data addresses) binds to that export's global: one symbol per
     // name, never also an undefined one.
-    export_rows := [String:Int]{}
     loop (index, entry_row) in exports {
-        if (export_rows.get(entry_row.symbol) ?? -1) < 0 -> export_rows.add(entry_row.symbol, first_global + index).drop("checked absent above")
+        id: x64_object_symbol(symbol_names, import_of, export_of, entry_row.symbol)
+        if export_of[id] < 0 -> export_of[id] = first_global + index
     }
-    loop (index, entry_row) in data_exports -> export_rows.add(entry_row.symbol, first_global + exports.len() + index).drop("export symbols are unique")
+    loop (index, entry_row) in data_exports {
+        id: x64_object_symbol(symbol_names, import_of, export_of, entry_row.symbol)
+        export_of[id] = first_global + exports.len() + index
+    }
     loop part in parts {
         rows := x64_object_text_part_take(part)
         errors.extend(rows.errors)
@@ -638,17 +659,16 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         }
         globals := [Int]{}
         loop symbol in rows.imports {
-            export_symbol: export_rows.get(symbol) ?? -1
-            if export_symbol >= 0 {
-                globals.push(export_symbol)
+            id: x64_object_symbol(symbol_names, import_of, export_of, symbol)
+            if export_of[id] >= 0 {
+                globals.push(export_of[id])
                 next
             }
-            found := import_rows.get(symbol) ?? -1
-            if found < 0 {
-                found = imports.len()
+            if import_of[id] < 0 {
+                import_of[id] = imports.len()
                 imports.push(symbol.copy())
-                import_rows.add(symbol, found).drop("checked absent above")
             }
+            found: import_of[id]
             globals.push(first_import + found)
         }
         base: if own_sections -> 0 else -> rela_text.len()
@@ -841,14 +861,15 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: 
     }
     // Section names, each written once (own sections share theirs).
     shstrtab := [U8]{U8{0}}
-    name_at := [String:Int]{}
+    // Each name's offset by its id in `names` (-1: not written yet).
+    names := name_table_sized(64)
+    name_at := [Int]{-1}
     name_offsets := [Int]{}
     loop section in sections {
-        at := name_at.get(section.name) ?? -1
-        if at < 0 {
-            at = elf64_string(shstrtab, section.name)
-            name_at.add(section.name, at).drop("checked absent above")
-        }
+        id: name_index(name_intern(names, section.name))
+        loop name_at.len() <= id -> name_at.push(-1)
+        if name_at[id] < 0 -> name_at[id] = elf64_string(shstrtab, section.name)
+        at: name_at[id]
         name_offsets.push(at)
     }
 
