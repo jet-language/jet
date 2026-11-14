@@ -21,7 +21,7 @@ step pastnone: jet run --optimize=none past.jet
 exit: 70
 stdout: = "1\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
-stderr: ~ "past.jet:8:9, in #Unsafe gate" # the fault is located at the fill call
+stderr: ~ "past.jet:8:13, in #Unsafe gate" # the fault is located at the call's `fill`
 stderr: ~ "raw `fill` outside" # the gate's audit text follows
 stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
 stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int fill overruns
@@ -29,7 +29,7 @@ step pastfull: jet run --optimize=full past.jet
 exit: 70
 stdout: = "1\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
-stderr: ~ "past.jet:8:9, in #Unsafe gate" # the fault is located at the fill call
+stderr: ~ "past.jet:8:13, in #Unsafe gate" # the fault is located at the call's `fill`
 stderr: ~ "raw `fill` outside" # the gate's audit text follows
 stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
 stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int fill overruns

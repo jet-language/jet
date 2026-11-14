@@ -2466,12 +2466,12 @@ sema_expression_typed_literal_float_exact_applies: fn(head: Type, offered: Type)
 }
 
 // The exact number type (`Decimal`, `Fraction`) whose whole value `Int{x}`
-// converts (sema_expression_typed_literal_precise_int), or None.
-sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> String? Never! {
+// converts (sema_expression_typed_literal_precise_int), or None. The root
+// name and Core's `core.math::Fraction` identity are one type.
+sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> String? {
     if head != Type.Int -> return None
-    source: sema_expr_unwrap_tag(offered)
-    if source == (Type.Named{name: "Decimal"}) -> return Val("Decimal")
-    if source == (Type.Named{name: "Fraction"}) -> return Val("Fraction")
+    name: sema_expr_precise_name(sema_expr_unwrap_tag(offered)) ?? return None
+    if name == "Decimal" || name == "Fraction" -> return Val(name)
     None
 }
 

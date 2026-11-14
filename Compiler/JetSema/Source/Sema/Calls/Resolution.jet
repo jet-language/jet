@@ -677,8 +677,7 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
 // call is and each parameter taking the access the row gives it (`buffer:
 // &[U8]` is a Write argument). The reference names the trait, so IR
 // dispatches each instance's call to its receiver's implementation
-// (ir_method_key), and the call exposes the declared success value as a
-// registered trait method's does.
+// (ir_method_key).
 sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: SymbolID, receiver_type: Type, method: String, type_args: [Type], caller_module: ModuleID, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     // A builtin bound is a row of the builtin range; its key ends in the
     // trait's name.
@@ -706,14 +705,10 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
         diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
-    declared_return: if found.returns == {
-        .Val(returned) -> if returned == {
-            .Result(ok, _) -> Val(ok.copy())
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(returned.copy())
-        }
-        .None -> None
-    }
-    ret: if declared_return == {
+    // The row's return is the written one, a `T E!` included, as a registered
+    // trait method's declared return is (sema_call_trait_dispatch_signature),
+    // so `source.read(n) ?? ...` takes the read's IOError.
+    ret: if found.returns == {
         .Val(returned) -> Val(sema_type_resolve_declared_with_generics(graph, returned, caller_module, generic_params))
         .None -> None
     }

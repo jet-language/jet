@@ -89,9 +89,12 @@ jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
     out
 }
 
-// The inlining choices: one per inlined call site, at the call's line.
+// The inlining choices: one per inlined call site, at the call's line. A
+// caller with no source file is Core's or generated, and the report lists
+// the program's own code, as the copies and placement choices do.
 jet_cli_inline_choices: fn(rows: [IROptInlined], out: &[JetCLIChoice]) Never! {
     loop row in rows {
+        if row.file == "" -> next
         choice: JetCLIChoice{kind: "inlining", file: row.file.copy(), line: row.line, function: row.caller.copy(), choice: "{row.callee} inlined: {row.reason}"}
         if !jet_cli_choice_seen(out, choice) -> out.push(choice)
     }
