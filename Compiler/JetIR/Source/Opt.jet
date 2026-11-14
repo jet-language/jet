@@ -234,7 +234,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     loop f in functions -> keys.push(f.key.copy())
     // Before the call graph: the `#unique<..>` calls this moves into callers
     // are edges of it.
-    if ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, functions, keys, report.steps)
+    if ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, functions, keys, report.steps, threads)
     weights := [Int]{}
     loop f in functions -> weights.push(1 + f.op.len())
     glue: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}

@@ -1,4 +1,4 @@
-use jet_foundation.[name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_value]
 
 // Uniqueness hoisting (O1, O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
@@ -346,14 +346,23 @@ ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
 // Returns the calls ir_opt_hoist_unique moved on the way. Each walk over the
 // bodies finds a Call's candidates by its callee (`by_callee`), so the pass
 // costs the module's size, not its size times the candidates.
-ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [String], notes: &[String]) -> Int Never! {
+// Every walk reads one body and the module-wide columns the walk before it
+// merged, so the functions split into consecutive parts
+// (compiler_threads_partition by size), one thread each, as many as
+// `threads` admits. The threads read the module, the keys and the merged
+// columns, which none writes, and each owns its part; the merges go in
+// function order, so every body, note and candidate is the same for any
+// thread count.
+ir_opt_unique_to_callers: fn(m: &IRModule, functions: &[IRFunction], keys: &[String], notes: &[String], threads: CompilerThreads) -> Int Never! {
     count: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
-    unique := [Bool]{}
-    loop _ in 0..<count {
+    weights := [Int]{}
+    total := 0
+    loop f in functions {
         addressed.push(false)
-        unique.push(false)
+        weights.push(1 + f.op.len())
+        total += 1 + f.op.len()
     }
     addressed[m.entry] = true
     loop ty in m.types {
@@ -362,66 +371,219 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
         clone: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
         if clone >= 0 && clone < count -> addressed[clone] = true
     }
+    workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    bounds: compiler_threads_partition(weights, if workers < 1 -> 1 else -> workers)
+    // Parts leave the list last-first: the last part pops first.
+    parts := [IROptUniquePart]{}
+    part := bounds.len() - 2
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        loop functions.len() > bounds[part] {
+            row: functions.pop() ?? panic("the IR optimizer lost a function to unique calls")
+            rows.push(row)
+        }
+        rows.reverse()
+        parts.push(IROptUniquePart{functions: rows.move(), start: bounds[part], addressed: [Int]{}, unique: [Bool]{}, notes: [String]{}, hoisted: 0, callees: [Int]{}, params: [Int]{}, sites: [Int]{}, helpers: [Int]{}, arity: [Int]{}, types: [Int]{}, calling: [Bool]{}, bad: [Int]{}})
+        part -= 1
+    }
+    parts.reverse()
+    view := IROptUniqueView{addressed: addressed.move(), unique: [Bool]{}, by_callee: [[Int]]{}, params: [Int]{}, sites: [Int]{}, helpers: [Int]{}, arity: [Int]{}, types: [Int]{}, ok: [Bool]{}}
     // One walk finds the functions a FunctionAddress names and those that
     // make a parameter unique anywhere.
-    id := 0
-    loop f in functions {
+    parts = ir_opt_unique_walks(m, keys, view, parts.move(), 1)
+    ir_opt_unique_scanned(parts, view)
+    // The candidates, in function order: callee, parameter, the call's
+    // index and its helper, with the callee's arity and parameter type.
+    parts = ir_opt_unique_walks(m, keys, view, parts.move(), 2)
+    hoisted: ir_opt_unique_candidates(parts, view, notes)
+    if view.ok.len() > 0 {
+        // Whether each function calls a candidate (only those take
+        // uniques), and the candidates some Call of their callee rules out.
+        parts = ir_opt_unique_walks(m, keys, view, parts.move(), 3)
+        ir_opt_unique_judged(parts, view)
+        parts = ir_opt_unique_walks(m, keys, view, parts.move(), 4)
+    }
+    loop at in 0..<parts.len() -> functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+    hoisted
+}
+
+// The functions of one thread of ir_opt_unique_to_callers, in order, from
+// function `start`, and what its walks found: the functions a
+// FunctionAddress names and per function whether it makes a parameter
+// unique (walk 1); its notes, hoisted calls and candidate columns (walk 2);
+// per function whether it calls a candidate, and the candidates a Call rules
+// out (walk 3).
+IROptUniquePart: struct {
+    functions: [IRFunction]
+    start: Int
+    addressed: [Int]
+    unique: [Bool]
+    notes: [String]
+    hoisted: Int
+    callees: [Int]
+    params: [Int]
+    sites: [Int]
+    helpers: [Int]
+    arity: [Int]
+    types: [Int]
+    calling: [Bool]
+    bad: [Int]
+}
+
+// The module-wide columns of ir_opt_unique_to_callers, merged after each
+// walk in function order.
+IROptUniqueView: struct {
+    addressed: [Bool]
+    unique: [Bool]
+    by_callee: [[Int]]
+    params: [Int]
+    sites: [Int]
+    helpers: [Int]
+    arity: [Int]
+    types: [Int]
+    ok: [Bool]
+}
+
+// Walk `phase` over `parts`, in part order: the last part on its own
+// thread, the ones before it the same way, and the first on this one.
+ir_opt_unique_walks: fn(m: IRModule, keys: [String], view: IROptUniqueView, parts: &&[IROptUniquePart], phase: Int) -> [IROptUniquePart] Never! {
+    rest := parts.move()
+    last: rest.pop() ?? return rest
+    if rest.len() == 0 {
+        rest.push(ir_opt_unique_part(m, keys, view, last.move(), phase))
+        return rest
+    }
+    done := [IROptUniquePart]{}
+    task.group ir_opt_unique_group {
+        head: task ir_opt_unique_part(m, keys, view, last.move(), phase)
+        done = ir_opt_unique_walks(m, keys, view, rest.move(), phase)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
+}
+
+// One part's walk `phase` over its functions.
+ir_opt_unique_part: fn(m: IRModule, keys: [String], view: IROptUniqueView, part: &&IROptUniquePart, phase: Int) -> IROptUniquePart Never! {
+    walked := part.move()
+    if phase == {
+        1 -> ir_opt_unique_scan(walked, keys, view)
+        2 -> ir_opt_unique_entries(m, keys, walked, view)
+        3 -> ir_opt_unique_judge(walked, view)
+        else -> ir_opt_unique_put(walked, view)
+    }
+    walked
+}
+
+// Walk 1 over one part: the functions a FunctionAddress names, and per
+// function whether it makes a parameter unique anywhere.
+ir_opt_unique_scan: fn(part: &IROptUniquePart, keys: [String], view: IROptUniqueView) Never! {
+    total: view.addressed.len()
+    loop f in part.functions {
+        unique := false
         loop at in 0..<f.op.len() {
-            if f.op[at] == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> addressed[f.a[at]] = true
-            if !unique[id] && ir_opt_unique_param(f, keys, at) >= 0 -> unique[id] = true
+            callee: f.a[at]
+            if f.op[at] == .FunctionAddress && callee >= 0 && callee < total -> part.addressed.push(callee)
+            if !unique && ir_opt_unique_param(f, keys, at) >= 0 -> unique = true
         }
-        id += 1
+        part.unique.push(unique)
     }
-    // The candidates: callee, parameter, the call's index and its helper.
-    hoisted := 0
-    callees := [Int]{}
-    params := [Int]{}
-    sites := [Int]{}
-    helpers := [Int]{}
-    loop row in 0..<count {
-        if addressed[row] || !unique[row] -> next
-        hoisted += ir_opt_hoist_unique(m, functions[row], keys, notes)
-        ir_opt_entry_uniques(m, functions[row], keys, row, callees, params, sites, helpers)
+}
+
+// Walk 2 over one part: each function only direct Calls reach that makes a
+// parameter unique hoists its own unique calls, then lists its candidates
+// with its arity and the parameter's type row.
+ir_opt_unique_entries: fn(m: IRModule, keys: [String], part: &IROptUniquePart, view: IROptUniqueView) Never! {
+    loop row in 0..<part.functions.len() {
+        id: part.start + row
+        if view.addressed[id] || !view.unique[id] -> next
+        part.hoisted += ir_opt_hoist_unique(m, part.functions[row], keys, part.notes)
+        first: part.callees.len()
+        ir_opt_entry_uniques(m, part.functions[row], keys, id, part.callees, part.params, part.sites, part.helpers)
+        loop k in first..<part.callees.len() {
+            part.arity.push(part.functions[row].param_count)
+            part.types.push(part.functions[row].slot_type[part.params[k]])
+        }
     }
-    if callees.len() == 0 -> return hoisted
-    // Each function's candidates, in candidate order.
-    by_callee := [[Int]]{}
-    loop _ in 0..<count -> by_callee.push([Int]{})
-    loop k in 0..<callees.len() -> by_callee[callees[k]].push(k)
-    ok := [Bool]{}
-    loop _ in callees -> ok.push(true)
-    // Whether each function calls a candidate: only those take uniques.
-    calling := [Bool]{}
-    loop g in functions {
+}
+
+// Walk 3 over one part: per function whether it calls a candidate, and the
+// candidates a Call rules out (an arity or argument type row that differs).
+ir_opt_unique_judge: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
+    total: view.addressed.len()
+    loop g in part.functions {
         found := false
         loop at in 0..<g.op.len() {
             callee: g.a[at]
-            if g.op[at] != .Call || callee < 0 || callee >= count -> next
-            loop k in by_callee[callee] {
+            if g.op[at] != .Call || callee < 0 || callee >= total -> next
+            loop k in view.by_callee[callee] {
                 found = true
-                if !ok[k] -> next
-                if g.c[at] != functions[callee].param_count {
-                    ok[k] = false
+                if g.c[at] != view.arity[k] {
+                    part.bad.push(k)
                     next
                 }
-                arg: g.args[g.b[at] + params[k]]
-                if arg < 0 || g.slot_type[arg] != functions[callee].slot_type[params[k]] -> ok[k] = false
+                arg: g.args[g.b[at] + view.params[k]]
+                if arg < 0 || g.slot_type[arg] != view.types[k] -> part.bad.push(k)
             }
         }
-        calling.push(found)
+        part.calling.push(found)
     }
-    loop k in 0..<callees.len() {
-        if ok[k] -> ir_opt_kill(functions[callees[k]], sites[k])
-    }
-    loop row in 0..<count {
+}
+
+// Walk 4 over one part: each accepted candidate's own call goes, and each
+// Call of an accepted candidate's callee gets the unique call before it.
+ir_opt_unique_put: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
+    loop row in 0..<part.functions.len() {
         killed := false
-        loop k in by_callee[row] {
-            if ok[k] -> killed = true
+        loop k in view.by_callee[part.start + row] {
+            if !view.ok[k] -> next
+            ir_opt_kill(part.functions[row], view.sites[k])
+            killed = true
         }
-        put: calling[row] && ir_opt_put_uniques(functions[row], by_callee, params, helpers, ok)
-        if put || killed -> ir_opt_compact(functions[row])
+        put: part.calling[row] && ir_opt_put_uniques(part.functions[row], view.by_callee, view.params, view.helpers, view.ok)
+        if put || killed -> ir_opt_compact(part.functions[row])
     }
+}
+
+// Merges walk 1: the functions a FunctionAddress names, and per function
+// whether it makes a parameter unique.
+ir_opt_unique_scanned: fn(parts: &[IROptUniquePart], view: &IROptUniqueView) Never! {
+    loop at in 0..<parts.len() {
+        loop target in parts[at].addressed -> view.addressed[target] = true
+        compiler_transfer_rows<Bool>(view.unique, parts[at].unique)
+    }
+}
+
+// Merges walk 2 in function order: the notes go to `notes`, the candidate
+// columns to the view, with each function's candidates (`by_callee`).
+// Returns the calls ir_opt_hoist_unique moved.
+ir_opt_unique_candidates: fn(parts: &[IROptUniquePart], view: &IROptUniqueView, notes: &[String]) -> Int Never! {
+    loop _ in 0..<view.addressed.len() -> view.by_callee.push([Int]{})
+    hoisted := 0
+    loop at in 0..<parts.len() -> hoisted += ir_opt_unique_take(view, parts[at], notes)
     hoisted
+}
+
+// Moves one part's walk 2 results onto the view and `notes`; returns its
+// hoisted calls.
+ir_opt_unique_take: fn(view: &IROptUniqueView, part: &IROptUniquePart, notes: &[String]) -> Int Never! {
+    compiler_transfer_rows<String>(notes, part.notes)
+    loop callee in part.callees {
+        view.by_callee[callee].push(view.ok.len())
+        view.ok.push(true)
+    }
+    compiler_transfer_rows<Int>(view.params, part.params)
+    compiler_transfer_rows<Int>(view.sites, part.sites)
+    compiler_transfer_rows<Int>(view.helpers, part.helpers)
+    compiler_transfer_rows<Int>(view.arity, part.arity)
+    compiler_transfer_rows<Int>(view.types, part.types)
+    part.hoisted
+}
+
+// Merges walk 3: a candidate any Call of its callee rules out is not taken.
+ir_opt_unique_judged: fn(parts: [IROptUniquePart], view: &IROptUniqueView) Never! {
+    loop part in parts {
+        loop k in part.bad -> view.ok[k] = false
+    }
 }
 
 // The parameter instruction `at` makes unique by a `#unique<..>` call, else -1.
@@ -610,9 +772,9 @@ ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     m.entry = 0
     functions := [IRFunction]{main.move(), helper.move(), fill.move()}
     loop id in 0..<functions.len() -> ir_opt_compact(functions[id])
-    keys: [String]{"test:main.jet::main", "#unique<Aggregate:24:64:false:[I64]>", "test:main.jet::fill"}
+    keys := [String]{"test:main.jet::main", "#unique<Aggregate:24:64:false:[I64]>", "test:main.jet::fill"}
     notes := [String]{}
-    _ := ir_opt_unique_to_callers(m, functions, keys, notes)
+    _ := ir_opt_unique_to_callers(m, functions, keys, notes, compiler_threads_single())
     counts := [Int]{}
     rows: [Int]{0, 2}
     loop id in rows {
