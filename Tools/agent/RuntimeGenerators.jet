@@ -3186,10 +3186,20 @@ read_exit_codes: fn() -[FS]> [GeneratedFile] GeneratorError! {
     })
 }
 
-// Whether `text` names an exit; with `code`, an exit code too.
+// Whether `text` names an exit; with `code`, an exit code too. A name counts
+// by its words, the runs of letters and digits, so `trap_exit`, `rt.exit` and
+// `exit_code` name one while `decode_error` and `unicode` name none.
 names_exit: fn(text: String, code: Bool) -> Bool Never! {
     lower: text.lower()
-    lower.contains("exit") || (code && lower.contains("code"))
+    bytes: lower.bytes()
+    start := 0
+    loop at in 0..<(bytes.len() + 1) {
+        if at < bytes.len() && is_name_byte(Int{bytes[at]}) && (Int{bytes[at]}) != 95 -> next
+        word: byte_slice(lower, start, at)
+        if word.starts_with("exit") || (code && (word == "code" || word == "codes")) -> return true
+        start = at + 1
+    }
+    false
 }
 
 // The offset of the innermost `(` still open at the end of `text`, or -1.
@@ -3334,7 +3344,7 @@ exit_guard: fn() -[FS]> [String] GeneratorError! {
     assert_eq(found.len(), 6)
     assert(found[0].starts_with("p:2: a bare 70 fills an exit position"))
     assert(found[5].starts_with("p:8: a bare 101 fills an exit position"))
-    fine: "a: fn() {{\n    rt_text_push_word(target, I64{{101}}, I64{{1}})\n    if (rt_text_byte(base) == I64{{70}}) -> x()\n    scheduler_text_new(I64{{70}})\n    trap_exit(EXIT_RUNTIME_PANIC)\n    // exit 101\n    say(\"exit 70\")\n    say(``exit(101) ` and exit(70)``)\n    trap_exit(I64{{1701}})\n    (code == I64{{101}}) -> rt_static_text(\"NetworkUnreachable\")\n    out.push(if code == 69 -> U8{{101}} else -> byte)\n    hex: (code >= 65 && code <= 70) || (code >= 97 && code <= 102)\n    if reply.status == 101 -> x()\n}}\n{EXIT_CODES_BEGIN}\nEXIT_ICE: 101\n{EXIT_CODES_END}\n"
+    fine: "a: fn() {{\n    rt_text_push_word(target, I64{{101}}, I64{{1}})\n    if (rt_text_byte(base) == I64{{70}}) -> x()\n    scheduler_text_new(I64{{70}})\n    trap_exit(EXIT_RUNTIME_PANIC)\n    // exit 101\n    say(\"exit 70\")\n    say(``exit(101) ` and exit(70)``)\n    trap_exit(I64{{1701}})\n    (code == I64{{101}}) -> rt_static_text(\"NetworkUnreachable\")\n    out.push(if code == 69 -> U8{{101}} else -> byte)\n    hex: (code >= 65 && code <= 70) || (code >= 97 && code <= 102)\n    if reply.status == 101 -> x()\n    assert(__decode_error([U8]{{71, 73, 70, 56}}, limits) == .Unsupported)\n    glyph: unicode_name(101)\n}}\n{EXIT_CODES_BEGIN}\nEXIT_ICE: 101\n{EXIT_CODES_END}\n"
     assert_eq(exit_literal_problems("p", fine) ?? panic(err.message), [String]{})
 }
 
