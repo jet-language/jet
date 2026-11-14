@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102160,
+    "rev": 102166,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27096,48 +27096,48 @@
         },
         {
           "n": 3,
-          "text": "T.$values preserves nominal T and lists every accessible payload-free leaf once in declaration order; groups add paths and sparse discriminants create no gaps (a golden EnumValues example; `jet test Compiler --profile golden EnumValues` passes on O0, O1 and O2).",
+          "text": "T.reflect().values preserves nominal T and lists every accessible payload-free leaf once in declaration order; groups add paths and sparse discriminants create no gaps (a golden EnumValues example; `jet test Compiler --profile golden EnumValues` passes on O0, O1 and O2).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:03.265Z"
+          "at": "2026-11-14T04:00:03.731Z"
         },
         {
           "n": 4,
-          "text": "T.$values on a payload-bearing, non-enum or inaccessible type is a registered compile error with a UI snapshot, without filtering, fabricated payloads, integer casts or a heap collection.",
+          "text": "T.reflect().values on a payload-bearing, non-enum or inaccessible type is a registered compile error with a UI snapshot, without filtering, fabricated payloads, integer casts or a heap collection.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:04.785Z"
+          "at": "2026-11-14T04:00:05.519Z"
         },
         {
           "n": 5,
-          "text": "A/C automatically include a newly declared case. A proves compile-time count and normal runtime collection use; independent iterations do not share cursor state.",
+          "text": "Under D-ENUM-CASEVALUES1=A, T.reflect().values automatically includes a newly declared case, and proves compile-time count and normal runtime collection use; independent iterations do not share cursor state.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-12T13:26:35.846Z"
+          "at": "2026-11-14T04:00:11.144Z"
         },
         {
           "n": 6,
-          "text": "T.$values uses the registered $ compiler-fact namespace and reserves no unmarked method; a user `cases` method is unaffected (UI or golden proof).",
+          "text": "T.reflect().values reads through the compiler-fact projection T.reflect() and reserves no unmarked method; a user `cases` or `values` method is unaffected (UI or golden proof).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:06.168Z"
+          "at": "2026-11-14T04:00:09.217Z"
         },
         {
           "n": 7,
-          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.$values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.reflect().values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:19:53.795Z"
+          "at": "2026-11-14T04:00:07.344Z"
         },
         {
           "n": 8,
@@ -27227,7 +27227,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-13T01:55:59.063Z",
+      "updated": "2026-11-14T04:00:11.144Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
@@ -70552,12 +70552,12 @@
         },
         {
           "n": 51,
-          "text": "(was #6175) Every enum dispatch form (if-tables, multi-head, Result/optional handlers, value tables, comptime and $build.os dispatch) enforces it, each pinned by a UI snapshot; open-set matches still accept `else`.",
+          "text": "(was #6175) Every enum dispatch form whose arms are all pattern tests of a closed subject (if-tables, multi-head, Result and optional handlers, value tables, comptime and #build.target.os dispatch) refuses `else` with E0641, each pinned by a UI snapshot. A table with a Bool or comparison arm, and a match over an open set, keep `else` (Docs/spec/spec.md:832-837).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:38:32.879Z"
+          "at": "2026-11-14T04:00:13.023Z"
         },
         {
           "n": 52,
@@ -71505,7 +71505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-14T01:24:53.484Z",
+      "updated": "2026-11-14T04:00:13.023Z",
       "updatedBy": "Main",
       "criteriaLastN": 191
     },
@@ -204653,6 +204653,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:00:13.023Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oev2ib",
+      "note": "#51: Reconciled with spec.md:832-837 and #3067 (Boolean guards keep else); $build.os is now #build.target.os (syntax-decisions.md:5994).; was: (was #6175) Every enum dispatch form (if-tables, multi-head, Result/optional handlers, value tables, comptime and $build.os dispatch) enforces it, each pinned by a UI snapshot; open-set matches still "
+    },
+    {
+      "at": "2026-11-14T04:00:11.144Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#5: Respelled: D-META-HASH1=A and D-COMPILER-NS1=A retired the `$` and `@` fact spellings; a compiler fact read is `T.reflect().<fact>` (Docs/spec/syntax-decisions.md:58, 2741). D-ENUM-CASEVALUES1 ratified A, not C.; was: A/C automatically include a newly declared case. A proves compile-time count and normal runtime collection use; independent iterations do not share cursor state."
+    },
+    {
+      "at": "2026-11-14T04:00:09.217Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#6: Respelled: D-META-HASH1=A and D-COMPILER-NS1=A retired the `$` and `@` fact spellings; a compiler fact read is `T.reflect().<fact>` (Docs/spec/syntax-decisions.md:58, 2741). D-ENUM-CASEVALUES1 ratified A, not C.; was: T.$values uses the registered $ compiler-fact namespace and reserves no unmarked method; a user `cases` method is unaffected (UI or golden proof)."
+    },
+    {
+      "at": "2026-11-14T04:00:07.344Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#7: Respelled: D-META-HASH1=A and D-COMPILER-NS1=A retired the `$` and `@` fact spellings; a compiler fact read is `T.reflect().<fact>` (Docs/spec/syntax-decisions.md:58, 2741). D-ENUM-CASEVALUES1 ratified A, not C.; was: Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.$values`, and grows by one when a ca"
+    },
+    {
+      "at": "2026-11-14T04:00:05.519Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#4: Respelled: D-META-HASH1=A and D-COMPILER-NS1=A retired the `$` and `@` fact spellings; a compiler fact read is `T.reflect().<fact>` (Docs/spec/syntax-decisions.md:58, 2741). D-ENUM-CASEVALUES1 ratified A, not C.; was: T.$values on a payload-bearing, non-enum or inaccessible type is a registered compile error with a UI snapshot, without filtering, fabricated payloads, integer casts or a heap collection."
+    },
+    {
+      "at": "2026-11-14T04:00:03.732Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xb6zik",
+      "note": "#3: Respelled: D-META-HASH1=A and D-COMPILER-NS1=A retired the `$` and `@` fact spellings; a compiler fact read is `T.reflect().<fact>` (Docs/spec/syntax-decisions.md:58, 2741). D-ENUM-CASEVALUES1 ratified A, not C.; was: T.$values preserves nominal T and lists every accessible payload-free leaf once in declaration order; groups add paths and sparse discriminants create no gaps (a golden EnumValues example; `jet test C"
+    },
     {
       "at": "2026-11-14T03:50:12.310Z",
       "by": "Main",
