@@ -9,17 +9,53 @@
 use jet_foundation.[
     Func,
     Item,
+    Name,
+    NameTable,
     Param,
     StateDecl,
     StateTypeUse,
-    Span,
     Type,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
+    name_text,
 ]
 
 // One owner's list: its states, and each group with its members.
 SemaStateTypeOwner: struct {
     states: [String]
-    groups: [String:[String]]
+    groups: [SemaStateTypeGroup]
+}
+
+SemaStateTypeGroup: struct {
+    name: String
+    members: [String]
+}
+
+// The owners in view, by name: `owners[id]` is the list of the type whose
+// name has that id in `names` (None: no owner, or one dropped). NameTable id
+// 0 is the empty name, which no type has, so `owners` starts with its row.
+SemaStateTypeOwners: struct {
+    names: NameTable
+    owners: [SemaStateTypeOwner?]
+}
+
+sema_state_types_owners: fn() -> SemaStateTypeOwners Never! {
+    SemaStateTypeOwners{names: name_table_sized(16), owners: [SemaStateTypeOwner?]{None}}
+}
+
+// The id of `name` in `owners`, its row grown to it.
+sema_state_types_owner_id: fn(owners: &SemaStateTypeOwners, name: String) -> Int Never! {
+    id: name_index(name_intern(owners.names, name))
+    loop owners.owners.len() <= id -> owners.owners.push(None)
+    id
+}
+
+// The list of the type named `name`, if it has one in view.
+sema_state_types_owner_named: fn(owners: SemaStateTypeOwners, name: String) -> SemaStateTypeOwner? Never! {
+    found: name_find(owners.names, name) ?? return None
+    owners.owners[name_index(found)]
 }
 
 // Rewrites state types in every module input in place. The owner a name
@@ -27,38 +63,51 @@ SemaStateTypeOwner: struct {
 // that name across all modules. Inputs whose items name no owner are left
 // untouched.
 sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Never! {
-    local := [[String:SemaStateTypeOwner]]{}
-    global := [String:SemaStateTypeOwner]{}
-    repeated := [String:Bool]{}
+    local := [SemaStateTypeOwners]{}
     loop index in 0..<inputs.len() {
-        owners := [String:SemaStateTypeOwner]{}
+        owners := sema_state_types_owners()
         sema_state_types_collect(inputs[index].program.items, owners)
-        loop name in owners.keys() {
-            if global.get(name) != None {
-                repeated[name] = true
-            } else {
-                global[name] = owners.get(name) ?? next
-            }
-        }
         local.push(owners.move())
     }
-    if global.len() == 0 -> return
-    loop name in repeated.keys() -> _ := global.remove(name)
+    // The one owner of each name across all modules; a name more than one
+    // module declares has none.
+    global := sema_state_types_owners()
+    repeated := [Bool]{}
+    loop module_owners in local {
+        loop id in 1..<module_owners.owners.len() {
+            owner: module_owners.owners[id] ?? next
+            global_id: sema_state_types_owner_id(global, name_text(module_owners.names, Name{id: U32{id}}))
+            loop repeated.len() <= global_id -> repeated.push(false)
+            if global.owners[global_id] != None {
+                repeated[global_id] = true
+                next
+            }
+            global.owners[global_id] = Val(owner)
+        }
+    }
+    if repeated.len() == 0 -> return
+    loop id in 0..<repeated.len() {
+        if repeated[id] -> global.owners[id] = None
+    }
     loop index in 0..<inputs.len() {
+        // copy: each input sees the global owners under its own.
         visible := global.copy()
-        loop name in local[index].keys() -> visible[name] = local[index].get(name) ?? next
+        loop id in 1..<local[index].owners.len() {
+            owner: local[index].owners[id] ?? next
+            visible.owners[sema_state_types_owner_id(visible, name_text(local[index].names, Name{id: U32{id}}))] = Val(owner)
+        }
         if !sema_state_types_items_name_owner(inputs[index].program.items, visible) -> next
         inputs[index].program.items = sema_state_types_rewrite_items(inputs[index].program.items, visible)
     }
 }
 
-sema_state_types_collect: fn(items: [Item], owners: &[String:SemaStateTypeOwner]) Never! {
+sema_state_types_collect: fn(items: [Item], owners: &SemaStateTypeOwners) Never! {
     loop item in items {
         if item == .Struct(definition) {
-            if definition.state == .Val(state) -> owners[definition.name] = sema_state_types_owner(state)
+            if definition.state == .Val(state) -> owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
         }
         if item == .Enum(definition) {
-            if definition.state == .Val(state) -> owners[definition.name] = sema_state_types_owner(state)
+            if definition.state == .Val(state) -> owners.owners[sema_state_types_owner_id(owners, definition.name)] = Val(sema_state_types_owner(state))
         }
     }
 }
@@ -66,18 +115,28 @@ sema_state_types_collect: fn(items: [Item], owners: &[String:SemaStateTypeOwner]
 sema_state_types_owner: fn(state: StateDecl) -> SemaStateTypeOwner Never! {
     states := [String]{}
     loop entry in state.states -> states.push(entry.name.copy())
-    groups := [String:[String]]{}
+    groups := [SemaStateTypeGroup]{}
     loop group in state.groups {
         members := [String]{}
         loop member in group.members -> members.push(member.name.copy())
-        groups[group.name.name] = members.move()
+        sema_state_types_group_put(groups, group.name.name, members)
     }
     SemaStateTypeOwner{states: states, groups: groups}
 }
 
+// A group named twice keeps its last members.
+sema_state_types_group_put: fn(groups: &[SemaStateTypeGroup], name: String, members: [String]) Never! {
+    loop index in 0..<groups.len() {
+        if groups[index].name != name -> next
+        groups[index].members = members
+        return
+    }
+    groups.push(SemaStateTypeGroup{name: name.copy(), members: members})
+}
+
 // Whether any function signature in `items` names a state type, so inputs
 // without one are not copied.
-sema_state_types_items_name_owner: fn(items: [Item], owners: [String:SemaStateTypeOwner]) -> Bool Never! {
+sema_state_types_items_name_owner: fn(items: [Item], owners: SemaStateTypeOwners) -> Bool Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -104,7 +163,7 @@ sema_state_types_items_name_owner: fn(items: [Item], owners: [String:SemaStateTy
     false
 }
 
-sema_state_types_fn_names_owner: fn(function: Func, owners: [String:SemaStateTypeOwner]) -> Bool Never! {
+sema_state_types_fn_names_owner: fn(function: Func, owners: SemaStateTypeOwners) -> Bool Never! {
     loop param in function.params {
         if sema_state_types_split(param.ty, owners) != None -> return true
     }
@@ -112,7 +171,7 @@ sema_state_types_fn_names_owner: fn(function: Func, owners: [String:SemaStateTyp
     false
 }
 
-sema_state_types_rewrite_items: fn(items: [Item], owners: [String:SemaStateTypeOwner]) -> [Item] Never! {
+sema_state_types_rewrite_items: fn(items: [Item], owners: SemaStateTypeOwners) -> [Item] Never! {
     out := [Item]{}
     loop item in items {
         if item == {
@@ -138,7 +197,7 @@ sema_state_types_rewrite_items: fn(items: [Item], owners: [String:SemaStateTypeO
     out
 }
 
-sema_state_types_rewrite_fn: fn(function: Func, owners: [String:SemaStateTypeOwner]) -> Func Never! {
+sema_state_types_rewrite_fn: fn(function: Func, owners: SemaStateTypeOwners) -> Func Never! {
     updated := function
     params := [Param]{}
     loop position in 0..<function.params.len() {
@@ -177,12 +236,12 @@ SemaStateTypeFound: struct {
 // itself be dotted (`Payment.Client.S0`). A union is one when every member is
 // one of the same owner. A group expands to its members; a name that is
 // neither a state nor a group is kept as written.
-sema_state_types_split: fn(ty: Type, owners: [String:SemaStateTypeOwner]) -> SemaStateTypeFound? Never! {
+sema_state_types_split: fn(ty: Type, owners: SemaStateTypeOwners) -> SemaStateTypeFound? Never! {
     if ty == .Named(name) {
         parts: name.split(".").to_list()
         if parts.len() < 2 -> return None
         owner_name: (loop index in 0..<(parts.len() - 1) -> parts[index]).join(".")
-        owner: owners.get(owner_name) ?? return None
+        owner: sema_state_types_owner_named(owners, owner_name) ?? return None
         states := [String]{}
         sema_state_types_expand(owner, parts[parts.len() - 1], states)
         return Val(SemaStateTypeFound{owner: owner_name, states: states})
@@ -205,8 +264,9 @@ sema_state_types_split: fn(ty: Type, owners: [String:SemaStateTypeOwner]) -> Sem
 }
 
 sema_state_types_expand: fn(owner: SemaStateTypeOwner, name: String, states: &[String]) Never! {
-    if owner.groups.get(name) == .Val(members) {
-        loop member in members {
+    loop group in owner.groups {
+        if group.name != name -> next
+        loop member in group.members {
             if !states.contains(member) -> states.push(member.copy())
         }
         return

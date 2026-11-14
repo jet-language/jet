@@ -37,7 +37,7 @@ sema_protocols_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
                 sema_protocol_mark_generated(generated, declaration.name)
                 // Written state types are rewritten before any module
                 // registers; the generated handles name theirs here.
-                owners := [String:SemaStateTypeOwner]{}
+                owners := sema_state_types_owners()
                 sema_state_types_collect(generated, owners)
                 loop value in sema_state_types_rewrite_items(generated, owners) -> expanded.push(value)
             }
