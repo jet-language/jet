@@ -515,7 +515,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:761 | the type leaves out `#DenyUnknownFields` |
 | E2414 | DefaultNotConstant | Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet:232 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:4108 | members have distinct wire shapes |
-| E2416 | EnvDecodeFailed | Core/Web/Web.jet:610 | the environment variable is fixed |
+| E2416 | EnvDecodeFailed | Core/Web/Web.jet:619 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:519 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:531 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:535 | one route per pair |
@@ -554,7 +554,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:202 | the route binds decodable inputs by name |
 | E2806 | MissingPageFunction | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1272 | declare `page: fn`, or start the file name with `_` |
 | E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:456 | a standard method, or an RFC 9110 token |
-| E2809 | AppPortUnavailable | Core/Web/Web.jet:655 | free the port or choose another |
+| E2809 | AppPortUnavailable | Core/Web/Web.jet:664 | free the port or choose another |
 | E2811 | ImageSettingNotLiteral | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1414 | each setting is written where the app sets it |
 | E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:163 | a method is an endpoint only where its own marker says so |
 | E2903 | InvalidPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:377 | the budget follows the grammar |

@@ -353,10 +353,19 @@ App: struct {
     // names an account, the count is per network address.
     __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         counted: __app_remote_limit(limit, window_ns)
-        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) {
-            if __app_remote_limited(counted, request) == .Val(wait_ns) -> return Ok(__app_limited(wait_ns))
-            Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller")))
-        }), "", at)
+        http_server.__route_add(
+            __app_table(self),
+            "POST",
+            path,
+            http_server.__handler(fn(request: HTTPRequest) {
+                if __app_remote_limited(counted, request) == .Val(wait_ns) {
+                    return Ok(__app_limited(wait_ns))
+                }
+                Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller")))
+            }),
+            "",
+            at,
+        )
         self.copy()
     }
 
@@ -1224,7 +1233,7 @@ __AppRemote: struct {
 __AppRemoteLimit: struct {
     calls: Int
     window_ns: Int
-    windows: Shared<[String: __AppRemoteWindow]>
+    windows: Shared<[String:__AppRemoteWindow]>
 }
 
 // One address's window: when it began, and the calls counted in it.
@@ -1238,7 +1247,7 @@ __AppRemoteWindow: struct {
 APP_REMOTE_LIMIT_ADDRESSES: 65536
 
 __app_remote_limit: fn(calls: Int, window_ns: Int) -> __AppRemoteLimit Never! {
-    __AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String: __AppRemoteWindow]{}}}
+    __AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String:__AppRemoteWindow]{}}}
 }
 
 // How long until `request`'s address may call again when its window's calls
@@ -1248,11 +1257,13 @@ __app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? 
     now: rt.clock_mono_ns()
     guard := limit.windows.guard_edit()
     window := guard.value.get(request.__peer) ?? __AppRemoteWindow{start_ns: now, calls: 0}
-    if now - window.start_ns >= limit.window_ns -> window = __AppRemoteWindow{start_ns: now, calls: 0}
+    if now - window.start_ns >= limit.window_ns {
+        window = __AppRemoteWindow{start_ns: now, calls: 0}
+    }
     if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
     window.calls += 1
     if guard.value.len() >= APP_REMOTE_LIMIT_ADDRESSES {
-        kept := [String: __AppRemoteWindow]{}
+        kept := [String:__AppRemoteWindow]{}
         loop address in guard.value.keys() {
             held: guard.value.get(address) ?? next
             if now - held.start_ns < limit.window_ns -> kept[address] = held
@@ -1296,7 +1307,9 @@ __RemoteArgs: struct {
 // errors (`__app_invalid_json`) when the body is no JSON array of arguments
 // the method takes.
 __app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if __app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return __app_limited(wait_ns)
+    if __app_remote_limited(endpoint.limit, request) == .Val(wait_ns) {
+        return __app_limited(wait_ns)
+    }
     text: request.text() ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     tree: live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     reply: endpoint.answer(__RemoteArgs{tree: tree}) ?? return __app_json(422, __app_invalid_json(err))
