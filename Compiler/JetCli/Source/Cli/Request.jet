@@ -1659,6 +1659,14 @@ jet_cli_prepare_refusal: fn(what: String, fix: String, color: Bool) -> JetDriver
     jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
+// The E2105 headline for a file Jet couldn't read. A path that names nothing
+// says so; anything else (a directory, a permission, a link the snapshot
+// refuses) keeps the secure-read wording.
+jet_cli_unread_file_what: fn(file: String) -[FS]> String Never! {
+    if !cli_files.exists(file) -> return "there's no file `{file}`"
+    "can't securely read the file `{file}`"
+}
+
 // The checked sources under `anchor`'s source root with `overlays` laid over
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
@@ -1958,7 +1966,7 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 // snapshot is the whole folder. An anchor no file holds yet is read from its
 // overlay (an editor's unsaved buffer).
 jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}, target: Bool{false}) -> JetCLISnapshotted {
-    anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
+    anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused(jet_cli_unread_file_what(anchor), "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
     script: alone || jet_cli_entry_is_script(entry_path, overlays)
     root: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)

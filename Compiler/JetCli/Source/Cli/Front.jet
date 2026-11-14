@@ -1163,7 +1163,7 @@ jet_cli_read_entry: fn(file: String, command: String, color: Bool, quiet: Bool, 
         parent: jet_cli_parent(file) ?? "."
         default_entry: file == "run.jet" || file.ends_with("/run.jet")
         fix: if default_entry && jet_cli_has_manifest_above(parent) -> "create `run.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
-        return jet_cli_report_done(notice, "E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_report_done(notice, "E2105", jet_cli_unread_file_what(file), jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
     JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}, profile: "", style: false, target: ""}
 }
@@ -1173,7 +1173,7 @@ jet_cli_read_entry: fn(file: String, command: String, color: Bool, quiet: Bool, 
 jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() != 2 -> return jet_cli_fail("E2104", "`jet check --prelude` checks one Compiler/Prelude `.jet` file", jet_cli_why("E2104"), "run `jet check --prelude Compiler/Prelude/<name>.jet`", color, JET_DRIVER_EXIT_USAGE)
     file: args[1]
-    source: cli_files.read(file) ?? return jet_cli_fail("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
+    source: cli_files.read(file) ?? return jet_cli_fail("E2105", jet_cli_unread_file_what(file), jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     JetCLIPlan.CheckPrelude{file: file, source: source, color: color, quiet: quiet, threads: threads, json: json}
 }
 
