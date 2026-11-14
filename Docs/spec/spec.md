@@ -5996,7 +5996,9 @@ query `core.compiler.query` (see Compiler and package model APIs).
 Runtime calls to `core.compiler` are E0956.
 
 Diagnostics are value records with code, severity, message, why, fix, and span.
-Semantic facts reuse the existing index schema. The API does not return
+Semantic facts reuse the existing index schema: the `semantic_index` that
+`check` returns carries the semantic-index `schema_version` (20, see Semantic
+index and codemods), not the envelope's 1. The API does not return
 `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
 internals, and modified syntax cannot be fed back into compilation
 (D-FRONTENDAPI1).

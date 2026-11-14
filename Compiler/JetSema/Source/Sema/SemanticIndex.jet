@@ -250,7 +250,9 @@ sema_compiler_index_symbol_kind: fn(registration: SemaRegistrationGraph, caller:
     kind := "type"
     params := TComptimeValue.List{values: [TComptimeValue]{}}
     ret := sema_compiler_index_type_id_option(registration, caller, None)
-    parent := symbol.owner
+    // The owner as the index names definitions (`type:app.Shape` for a
+    // variant), never as the checker's internal key.
+    parent: if symbol.owner == .Val(owner) -> Val(sema_compiler_identity(registration, owner)) else -> String?{None}
     fields := [TComptimeValue]{}
     variants := [String]{}
     mutable := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Bool}}
@@ -1633,7 +1635,7 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, structu
         content_id := "sha256:{sha256_hex(normalized)}"
         record := derivation_record(
             stable_id,
-            definition_key,
+            sema_compiler_identity(registration, definition_key),
             "jet-sema",
             DerivationMethod.StaticDerivation,
             "checked-definition",

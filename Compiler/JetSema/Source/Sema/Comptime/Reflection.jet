@@ -76,6 +76,7 @@ use jet_foundation.[
     type_identity,
     ast_comptime_value_show,
     type_name,
+    type_unqualified_nominals,
     foundation_named_type,
     module_is_core,
     module_text,
@@ -1295,10 +1296,12 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // A type's TypeId. Its `identity` names each declared type by its module, as
 // TypeInfo.identity does (`shapes.Point`, `[shapes.Point]`), so two
 // reflected types are one type exactly when their identities are equal; its
-// `name` is the type as the checker prints it (`Point`, `[Point]`). `caller`
-// is the row of the module the type is written in, -1 for none.
+// `name` is the type as the checker prints it (`Point`, `[Point]`), with no
+// declaring module's internal `module::` qualifier (a Core type a corelib
+// signature names reads `SourceLocation`). `caller` is the row of the module
+// the type is written in, -1 for none.
 sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
-    sema_comptime_reflection_type_id_record(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(ty))
+    sema_comptime_reflection_type_id_record(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(type_unqualified_nominals(ty)))
 }
 
 // A type's TypeId when a registration `graph` may be absent: with none, the
