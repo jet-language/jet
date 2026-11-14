@@ -1665,6 +1665,21 @@ sema_call_declares_static_method: fn(receiver: Type, method: String, program: Se
     false
 }
 
+// Whether every declaration a nominal receiver names lives in a Core source
+// module (`<corelib>/core.db`), so its method surface is Core's to change.
+sema_call_core_nominal: fn(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+    if program.registration_graph == .Val(graph) {
+        rows: sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name))
+        if rows.len() == 0 -> return false
+        loop nominal_row in rows {
+            if !sema_module_is_core_source(sema_scope_module_text(environment, program, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.module_identity)) -> return false
+        }
+        return true
+    }
+    false
+}
+
 sema_call_local_method_names: fn(environment: SemaScopeEnvironment, owner: String) -> [String] Never! {
     names := [String]{}
     loop declaration_index in 0..<environment.declarations.len() {
@@ -1864,7 +1879,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         if sema_call_builtin_method_arities(Type.List{element: element}, method).len() > 0 -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list", "materialize it first with `.to_list()`; this consumes the source and allocates a list")
     }
     suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
-    protected: !source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/"))
+    protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/")))
     if protected {
         fix: sema_call_method_fix(suggestion, "use a documented method on `{display}`")
         return sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a protected Core type with a closed method surface", fix, suggestion)
