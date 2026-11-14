@@ -1,0 +1,12 @@
+// math.f32_to_bits and math.f32_from_bits copy an F32's binary32 bits to and
+// from a U32: 1.0 and -0.0 have their IEEE 754 words, -2.5 is the F32 of its
+// word, and a signaling NaN's word comes back unchanged.
+use math: core.math
+
+run: fn() {
+    print(math.f32_to_bits(F32{1.0}))
+    print(math.f32_to_bits(F32{-0.0}))
+    print(math.f32_from_bits(U32{0xC0200000}) == F32{-2.5})
+    signaling: U32{0x7FA00001}
+    print(math.f32_to_bits(math.f32_from_bits(signaling)) == signaling)
+}

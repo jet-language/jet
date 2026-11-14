@@ -1,0 +1,19 @@
+# math.f32_to_bits and math.f32_from_bits are one bit copy each way between
+# an F32 and a U32: 1.0 and -0.0 give their IEEE 754 words, a word gives its
+# F32, and a signaling NaN keeps its word through both. The same output on O0,
+# O1 and O2.
+fixture: f32_bits_cross_a_u32_unchanged_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "1065353216\n2147483648\ntrue\ntrue\n"
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "1065353216\n2147483648\ntrue\ntrue\n"
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "1065353216\n2147483648\ntrue\ntrue\n"
+stderr: empty

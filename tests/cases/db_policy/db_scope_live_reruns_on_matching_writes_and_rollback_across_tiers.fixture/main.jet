@@ -51,4 +51,10 @@ run: fn() {
         .Err(failure) -> print("join live: rejected")
     }
     print(app.live_stats())
+    // Closing an open transaction rolls it back, as dropping it would.
+    closing: alice.begin() ?? panic("begin again")
+    _: alice.execute(SQL{"DELETE FROM tasks"}) ?? panic("delete again")
+    print("in closing tx {titles(app.state(mine))}")
+    closing.close()
+    print("after close {titles(app.state(mine))}")
 }

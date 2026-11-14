@@ -38,11 +38,17 @@ SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
 // The typed-literal kinds (`Regex{"…"}`, `Sh{"…"}`, `SQL{"…"}`, `HTML{"…"}`): a
 // user names each unqualified, though each lives in its own module.
 LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
+// The built-in scalar types. A user names each unqualified, and a Core module's
+// `impl Float.Roundable` gives it methods in that module (core.math.Float).
+BUILTIN_SCALARS: [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "Bool", "String", "Char"}
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
 // A host literal holds a Jet program when it declares a function or imports
 // from core or app.
 EMBEDDED_PROGRAM: Regex{"\b\w+:\s*fn\b|\buse\s+(?:\x7B\s*)?(?:\w+\s*:\s*)?(?:core|app)\b"}
 PRIVATE_MODULE: "priv module"
+// The token the lexer ends each interpolation expression with: no source token
+// holds a space, and the value an interpolation ends with is displayed.
+INTERPOLATION_END: "interpolation end"
 DOCTESTS: 0
 EXAMPLES: 1
 TESTS: 2
@@ -127,6 +133,9 @@ Table: struct {
     by_id: [String: Int]
     returns: [String]
     types: [String: Bool]
+    // Each owner type's last name and the one owner type of that name, or ""
+    // when two modules declare one.
+    tails: [String: String]
     units: [String]
     names: [String]
 }
@@ -376,6 +385,7 @@ lex_range: fn(source: [U8], start: Int, end: Int) -> [Token] Never! {
                         i = interpolation_end(source, inner_start, end)
                         inner_end: if i - 1 < end -> i - 1 else -> end
                         tokens.extend(lex_range(source, inner_start, inner_end))
+                        tokens.push(Token{value: INTERPOLATION_END, offset: inner_end})
                     }
                     b == OPEN_BRACE && byte_at(source, i + 1, end) == OPEN_BRACE -> i += 2
                     else -> i += 1
@@ -556,6 +566,16 @@ result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_t
     spelling
 }
 
+// The token where the result type of a function whose parameters close just
+// before `at` starts (after `->` or `-[…]>`), or -1 when it declares none.
+result_start: fn(tokens: [Token], at: Int) -> Int Never! {
+    if token(tokens, at) == "->" -> return at + 1
+    if token(tokens, at) != "-" || token(tokens, at + 1) != "[" -> return -1
+    close := at
+    loop close < tokens.len() && tokens[close].value != "]" -> close += 1
+    if token(tokens, close + 1) == ">" -> close + 2 else -> -1
+}
+
 // One past the bracketed type starting at token `start`.
 compound_end: fn(tokens: [Token], start: Int) -> Int Never! {
     at := start
@@ -674,14 +694,8 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         // The ratchet's signature: generics and parameters as written, comments
         // and layout removed, then the declared result type.
         parameters: signature_text(bytes_between(source, tokens[i + 1].offset, close.offset + close.value.bytes().len()))
-        result := ""
-        if {
-            token(tokens, at) == "->" -> result = result_type(source, tokens, at + 1, unit, local_types)
-            token(tokens, at) == "-" && token(tokens, at + 1) == "[" -> {
-                loop at < tokens.len() && tokens[at].value != "]" -> at += 1
-                if token(tokens, at + 1) == ">" -> result = result_type(source, tokens, at + 2, unit, local_types)
-            }
-        }
+        starts: result_start(tokens, at)
+        result: if starts >= 0 -> result_type(source, tokens, starts, unit, local_types) else -> ""
         qualified_name: if owner != "" -> "{owner}.{name}" else -> name.copy()
         id: "{unit}.{qualified_name}"
         // Operator overloads (`impl Vec2.Mul` and `impl Vec2.Mul(Float)`) share one
@@ -708,7 +722,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
 
 // Call resolution's view of the inventory.
 table_of: fn(functions: [Function]) -> Table Never! {
-    table := Table{ids: [String]{}, by_id: [String: Int]{}, returns: [String]{}, types: [String: Bool]{}, units: [String]{}, names: [String]{}}
+    table := Table{ids: [String]{}, by_id: [String: Int]{}, returns: [String]{}, types: [String: Bool]{}, tails: [String: String]{}, units: [String]{}, names: [String]{}}
     loop index in 0..<functions.len() {
         row: functions[index]
         table.ids.push(row.id.copy())
@@ -718,28 +732,29 @@ table_of: fn(functions: [Function]) -> Table Never! {
         if !table.by_id.has_key(row.id) -> table.by_id[row.id.copy()] = index
         if row.name.contains(".") -> table.types[row.id.rpartition(".").head.copy()] = true
     }
+    loop (owner, _) in table.types {
+        tail: owner.rpartition(".").tail
+        if table.tails.has_key(tail) && table.tails[tail] != owner -> table.tails[tail.copy()] = "" else -> table.tails[tail.copy()] = owner.copy()
+    }
     table
 }
 
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
 // The aliases a program starts with: `core`, `app`, every prelude function and
-// type and every typed-literal kind (a user names them unqualified) and, for a
-// doctest, the names of its own module.
+// type, every typed-literal kind and every built-in scalar a Core module gives
+// methods (a user names them unqualified) and, for a doctest, the names of its
+// own module.
 initial_aliases: fn(table: Table, context: String) -> [String: String] Never! {
     aliases := [String: String]{"core": "core", "app": "app"}
     loop kind in LITERAL_KINDS {
         if table.types.has_key(kind) -> aliases[kind.rpartition(".").tail.copy()] = kind.copy()
     }
     loop index in 0..<table.ids.len() {
-        if table.units[index] == "core.prelude" {
-            head: first_part(table.names[index])
-            aliases[head.copy()] = "core.prelude.{head}"
-        }
-        if context != "" && table.units[index] == context {
-            head: first_part(table.names[index])
-            aliases[head.copy()] = "{context}.{head}"
-        }
+        head: first_part(table.names[index])
+        if table.units[index] == "core.prelude" -> aliases[head.copy()] = "core.prelude.{head}"
+        if context != "" && table.units[index] == context -> aliases[head.copy()] = "{context}.{head}"
+        if head != table.names[index] && BUILTIN_SCALARS.contains(head) && !aliases.has_key(head) -> aliases[head.copy()] = "{table.units[index]}.{head}"
     }
     aliases
 }
@@ -760,8 +775,9 @@ with_head: fn(head: String, parts: [String]) -> String Never! {
 // The type a binding initialized by a call of `row` holds, for crediting the
 // methods later called on it: the declared result without its type arguments
 // or `?` (a binding that keeps the option calls none of the type's methods),
-// qualified by the declaring module when it declares that type. Otherwise the
-// result as declared.
+// qualified by the declaring module when it declares that type, or else by the
+// one module that declares a type of that name (a result type the declaring
+// module imports). Otherwise the result as declared.
 bound_type: fn(table: Table, row: Int) -> String Never! {
     spelled: table.returns[row]
     head: spelled.partition("<").head
@@ -769,7 +785,32 @@ bound_type: fn(table: Table, row: Int) -> String Never! {
     if table.types.has_key(base) -> return base
     qualified: "{table.units[row]}.{base}"
     if table.types.has_key(qualified) -> return qualified
+    unique: table.tails.get(base) ?? ""
+    if unique != "" -> return unique
     spelled.copy()
+}
+
+// The type of a value built by the call whose `(` is at `open` and then by each
+// method chained on its result (`web.app().get(…).bind(…)`), starting from the
+// first call's type `typed`; "" when a chained method is not a method of the
+// type before it.
+chained_type: fn(tokens: [Token], table: Table, typed: String, open: Int) -> String Never! {
+    current := typed.copy()
+    at := open
+    loop {
+        close := at + 1
+        depth := 1
+        loop close < tokens.len() && depth > 0 {
+            depth += paren_step(tokens[close].value)
+            close += 1
+        }
+        if token(tokens, close) != "." -> return current
+        next_open: after_generics(tokens, close + 2)
+        if token(tokens, next_open) != "(" -> return ""
+        row: table.by_id.get("{current}.{token(tokens, close + 1)}") ?? return ""
+        current = bound_type(table, row)
+        at = next_open
+    }
 }
 
 bind: fn(map: &[String: String], undo: &[Undo], binding: Binding, key: String, value: String) {
@@ -839,6 +880,22 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
     return_at := [Int: Int]{}
     return_closes := [Int]{}
     return_types := [String]{}
+    // The result type each function the program declares spells (`next_of:
+    // fn(…) -> browser.BrowserEvent`), so a binding to its call is typed too.
+    results := [String: [String]]{}
+    loop at in 0..<tokens.len() {
+        if !is_identifier(tokens[at].value) || token(tokens, at + 1) != ":" || token(tokens, at + 2) != "fn" -> next
+        open: after_generics(tokens, at + 3)
+        if token(tokens, open) != "(" -> next
+        close := open + 1
+        depth := 1
+        loop close < tokens.len() && depth > 0 {
+            depth += paren_step(tokens[close].value)
+            close += 1
+        }
+        spelled: chain(tokens, result_start(tokens, close))
+        if spelled.found -> results[tokens[at].value.copy()] = spelled.parts.copy() // copy: the map keeps its own parts
+    }
     i := 0
     loop i < tokens.len() {
         value: tokens[i].value
@@ -859,6 +916,15 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
             }
             else -> {}
         }
+        // An interpolation displays its value: one that ends in a typed
+        // binding (`{server}`) calls that type's `display`.
+        if value == INTERPOLATION_END {
+            shown: receivers.get(token(tokens, i - 1)) ?? ""
+            row: if shown != "" && token(tokens, i - 2) != "." -> table.by_id.get("{shown}.display") ?? -1 else -> -1
+            if row >= 0 -> calls.push(Call{index: row, offset: tokens[i - 1].offset})
+            i += 1
+            next
+        }
         // Explicit parameter/local types and constructor/function initializers make
         // receiver calls attributable without guessing by the method's spelling.
         // After `(` or `,` a name and colon is a parameter, which binds only to
@@ -876,8 +942,17 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
                 owner: receivers.get(rhs.parts[0]) ?? ""
                 target: if owner != "" && rhs.parts.len() > 1 -> with_head(owner, rhs.parts) else -> expand(rhs.parts, aliases)
                 typed := ""
+                open: after_generics(tokens, rhs.end)
+                called: token(tokens, open) == "("
+                // A function the program declares, called, holds its declared
+                // result; it shadows a Core name it shares.
+                declared: if rhs.parts.len() == 1 && results.has_key(rhs.parts[0]) -> expand(results[rhs.parts[0]], aliases) else -> ""
                 if {
+                    !listed && declared != "" -> {
+                        if called && table.types.has_key(declared) -> typed = chained_type(tokens, table, declared, open)
+                    }
                     table.types.has_key(target) -> typed = target.copy()
+                    !listed && table.by_id.get(target) == .Val(row) && called -> typed = chained_type(tokens, table, bound_type(table, row), open)
                     !listed && table.by_id.get(target) == .Val(row) -> typed = bound_type(table, row)
                 }
                 if typed != "" -> bind(receivers, undo, .Receiver, value, typed)
@@ -946,6 +1021,12 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
     }
     loop slot in 0..<return_closes.len() {
         close: return_closes[slot]
+        // A call an interpolation ends with displays what it returns.
+        if token(tokens, close + 1) == INTERPOLATION_END {
+            shown: table.by_id.get("{return_types[slot]}.display") ?? -1
+            if shown >= 0 -> calls.push(Call{index: shown, offset: tokens[close].offset})
+            next
+        }
         if token(tokens, close + 1) != "." -> next
         member: token(tokens, close + 2)
         at: after_generics(tokens, close + 3)
@@ -1621,10 +1702,10 @@ coverage_main: fn(args: [String], root: String) -[FS, IO]> Int CoverageError! {
 fixture_rows: fn() -> [Function] Never! {
     rows := [Function]{}
     rows.extend(public_functions("Core/Text/Text.jet", "trim: fn(x: String) -> String Never! {{ x }}\n    split: fn<T>(x: T) -> String Never! {{ \"\" }}\n    unused: fn() {{}}"))
-    rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}"))
+    rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}\n    impl Float.Roundable {{ rounded: fn(self) -> Float Never! {{ self }} }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
-    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}"))
-    rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(&self) -> Block? Never! {{ None }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
+    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}\n  block: fn() -> Block Never! {{ panic(\"none\") }}"))
+    rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(&self) -> Block? Never! {{ None }}\n    next: fn(self) -> Region Never! {{ self }}\n    last: fn(self) -> Block Never! {{ Block{{}} }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n    impl Display {{ display: fn(self) -> String {{ \"\" }} }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
     rows
 }
 
@@ -1688,6 +1769,26 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 
 #Test("a binding from a typed receiver's method or a generic result holds the declared type") {
     assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      region := mem.reserve()\n      first := region.claim() ?? panic(\"none\")\n      first.address()\n      cells := mem.window<Int>()\n      cells.len()\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.window", "core.mem.Window.len"})
+}
+
+#Test("a binding holds the type a method chain, a local function or an imported result gives") {
+    found: ids("use mem: core.mem\n    use process: core.process\n    local: fn(n: Int) -[FS]> mem.Region Never! {{ mem.reserve() }}\n    run: fn() {{\n      chained := mem.reserve().next().claim() ?? panic(\"none\")\n      chained.address()\n      made := local(1)\n      made.claim()\n      imported := process.block()\n      imported.address()\n    }}", "")
+    addressed := 0
+    claimed := 0
+    loop id in found {
+        if id == "core.mem.Block.address" -> addressed += 1
+        if id == "core.mem.Region.claim" -> claimed += 1
+    }
+    assert_eq(addressed, 2)
+    assert_eq(claimed, 1)
+}
+
+#Test("an interpolation that ends in a typed value calls its display") {
+    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      region := mem.reserve()\n      block := region.claim() ?? panic(\"none\")\n      print(\"{{block}} {{region.last()}} {{region.claim()}} {{block.address()}}\")\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.display", "core.mem.Region.last", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.Block.display"})
+}
+
+#Test("a built-in scalar that a Core impl gives methods is named unqualified") {
+    assert_eq(ids("run: fn(x: Float) {{\n      Float{{2.5}}.rounded()\n      x.rounded()\n      Int{{2}}.rounded()\n    }}", ""), [String]{"core.math.Float.rounded", "core.math.Float.rounded"})
 }
 
 #Test("a named argument binds nothing, so it cannot shadow a module alias") {
