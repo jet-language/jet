@@ -48,6 +48,7 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 ## Web
 
 - [AppConfigReadiness](Web/AppConfigReadiness.jet) — Typed settings decode before the port binds: a bad record stops with E2416 and exit 78, every failure named and a secret hidden.
+- [AppFieldErrors](Web/AppFieldErrors.jet) — A service method reports the rules its argument can't check as field errors, each at a path the compiler checks against the argument's type.
 - [AppHello](Web/AppHello.jet) — Minimal full-stack application builder smoke example.
 - [AppTypedArgs](Web/AppTypedArgs.jet) — The checked CLI schema reaches the entry; the app serves on the parsed port.
 - [BrowserSurface](Web/BrowserSurface.jet) — A real browser target: the companion HTML is the page under test.

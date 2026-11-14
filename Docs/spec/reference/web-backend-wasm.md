@@ -103,6 +103,7 @@ by [`tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_
 Each file is named here so documentation review cannot silently omit a new example:
 
 - `AppConfigReadiness.jet`
+- `AppFieldErrors.jet`
 - `AppHello.jet`
 - `AppImages.jet`
 - `AppRouteTable.jet`

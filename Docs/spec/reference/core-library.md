@@ -5403,6 +5403,7 @@ tasks never read or change the process registry. The module source is
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
+| `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. `T` and `E` must be `Encode` and `Decode`, and the
@@ -5447,6 +5448,17 @@ network address until then. The mount checks `limit` as an Int and `per` as a
 Duration. A call past the limit is answered 429 with `Retry-After` in whole
 seconds. The Remote reads that as `Unreachable`, with text that ends
 `is limited: retry after N s`.
+
+A method reports a rule its argument's `validate` block can't check, such as
+one that reads the database, as `app.field_error(at:, reason:)`. Its `at:`
+walks a struct argument of the method: a stored field by name and a list
+element by `[n]`, as in `assignee` or `steps[{index}].title`. It is a string
+literal, interpolated only inside a `[…]` index, so the compiler checks that
+it names a field of an argument of the function it is written in. A path that
+names none, or one computed elsewhere, is E2813
+(`jet.FieldErrorPathUnknown`), whose fix lists the fields the path can name
+at the step that failed. The error then shows beside that field, as a failed
+`validate` check does.
 
 ### `core.web` — server-rendered applications
 

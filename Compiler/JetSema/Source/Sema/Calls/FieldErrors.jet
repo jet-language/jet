@@ -1,0 +1,242 @@
+// `app.field_error(at:, reason:)` is a field error a method reports for one
+// of its arguments, from a rule the argument's `validate` block can't check
+// (one that needs the database). Its `at:` path is a string literal that
+// walks the argument's struct: a stored field by name, a list element by
+// `[n]` (`assignee`, `tasks[3].title`), where an index may be interpolated
+// (`tasks[{index}].title`). The path must name a field of a struct argument
+// of the function it is written in, so the error shows beside that field, as
+// a failed `validate` check does; any other path is E2813.
+use jet_foundation.[
+    CallArg,
+    Diagnostic,
+    Expr,
+    Span,
+    SymbolKind,
+    Type,
+    diagnostic_registry_row,
+    expr_span,
+]
+
+SEMA_FIELD_ERROR_MEMBER: "field_error"
+
+SEMA_FIELD_ERROR_CODE: "E2813"
+
+// One step of a field error path: a field name and how many `[n]` indexes
+// follow it.
+SemaFieldErrorStep: struct {
+    name: String
+    indexes: Int
+}
+
+// An `at:` path as the report shows it (an interpolated index as `{…}`) and
+// as it is checked (that index as `0`).
+SemaFieldErrorPath: struct {
+    shown: String
+    checked: String
+}
+
+// Whether `module_name.member` is `app.field_error` with an `at:` path that
+// names no field of an argument of the function being checked. The refusal
+// is reported (E2813), so the caller checks the call no further.
+sema_app_field_error_refused: fn(module_name: String, member: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if module_name != SEMA_APP_MARKER_MODULE || member != SEMA_FIELD_ERROR_MEMBER -> return false
+    graph: program.registration_graph ?? return false
+    at: sema_field_error_at(args) ?? return false
+    at_span: expr_span(at.expr)
+    roots: sema_field_error_roots(graph, environment, scopes)
+    path: sema_field_error_path(at.expr) ?? {
+        diagnostics.push(sema_field_error_computed(graph, roots, at_span))
+        return true
+    }
+    steps: sema_field_error_steps(path.checked) ?? {
+        diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
+        return true
+    }
+    holders := roots.copy() // copy: `roots` names the fields the report lists
+    loop (position, step) in steps {
+        found := Type?{None}
+        owner := -1
+        loop row in holders {
+            if sema_field_error_field(graph, row, step.name) == .Val(declared) {
+                found = Val(declared)
+                owner = row.module_index
+                break
+            }
+        }
+        ty := found ?? {
+            diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+            return true
+        }
+        indexes := step.indexes
+        loop indexes > 0 {
+            element: sema_field_error_element(ty) ?? {
+                diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+                return true
+            }
+            ty = element
+            indexes -= 1
+        }
+        if position + 1 == steps.len() -> return false
+        inner: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), owner) ?? {
+            diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+            return true
+        }
+        holders = [SemaRegistrationRowRef]{inner}
+    }
+    false
+}
+
+// The `at:` argument: labeled `at:`, or the first positional one.
+sema_field_error_at: fn(args: [CallArg]) -> CallArg? {
+    loop argument in args {
+        if argument.label == .Val(label) {
+            if label.name == "at" -> return Val(argument.copy()) // copy: the call keeps its arguments
+        }
+    }
+    if args.len() > 0 && args[0].label == None -> return Val(args[0].copy()) // copy: the call keeps its arguments
+    None
+}
+
+// The path the string literal `expression` writes, or None when it is
+// computed: anything but literal text, or an interpolation that is not the
+// whole of a `[…]` index.
+sema_field_error_path: fn(expression: Expr) -> SemaFieldErrorPath? {
+    if expression == .Str(parts, _, _) {
+        shown := ""
+        checked := ""
+        loop (index, part) in parts {
+            if part == .Lit(text) {
+                shown = "{shown}{text}"
+                checked = "{checked}{text}"
+                next
+            }
+            if part == .Interp(_, _) {
+                if !checked.ends_with("[") || index + 1 >= parts.len() -> return None
+                closed: if parts[index + 1] == .Lit(after) -> after.starts_with("]") else -> false
+                if !closed -> return None
+                shown = "{shown}{{…}}"
+                checked = "{checked}0"
+                next
+            }
+            return None
+        }
+        return Val(SemaFieldErrorPath{shown: shown, checked: checked})
+    }
+    None
+}
+
+// The steps of `path`, or None when it is not a path of field names each
+// followed by `[n]` indexes.
+sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
+    steps := [SemaFieldErrorStep]{}
+    loop segment in path.split(".") {
+        bytes: segment.bytes()
+        end := 0
+        loop end < bytes.len() && bytes[end] != 91 -> end += 1
+        if end == 0 -> return None
+        name: String.from_bytes(bytes.slice(0, end)) ?? return None
+        indexes := 0
+        at := end
+        loop at < bytes.len() {
+            if bytes[at] != 91 -> return None
+            digits := at + 1
+            loop digits < bytes.len() && bytes[digits] >= 48 && bytes[digits] <= 57 -> digits += 1
+            if digits == at + 1 || digits >= bytes.len() || bytes[digits] != 93 -> return None
+            indexes += 1
+            at = digits + 1
+        }
+        steps.push(SemaFieldErrorStep{name: name, indexes: indexes})
+    }
+    if steps.len() == 0 -> return None
+    Val(steps)
+}
+
+// The structs the parameters visible here take, `self` aside, each once.
+sema_field_error_roots: fn(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaRegistrationRowRef] {
+    roots := [SemaRegistrationRowRef]{}
+    caller: sema_type_module_row(graph, environment.module_identity)
+    frame := scopes.current
+    loop frame >= 0 {
+        loop binding in scopes.bindings {
+            if binding.frame != frame || binding.symbol.kind != SymbolKind.Parameter || binding.symbol.name == "self" -> next
+            ty: binding.symbol.ty ?? next
+            row: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), caller) ?? next
+            known: loop root in roots {
+                if root.module_index == row.module_index && root.row == row.row -> break true
+            } ?? false
+            if !known -> roots.push(row)
+        }
+        frame = scopes.frames[frame].parent
+    }
+    roots
+}
+
+// The struct row `ty` names from the module row `caller`, or None when it
+// names no struct.
+sema_field_error_struct_row: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> SemaRegistrationRowRef? {
+    row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return None
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        if item == .Struct(_) -> return Val(row)
+    }
+    None
+}
+
+// The declared type of the stored field `name` of the struct at `row`.
+sema_field_error_field: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, name: String) -> Type? {
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            loop field in definition.fields {
+                if field.name == name && field.computed == None -> return Val(field.ty.copy()) // copy: the graph keeps its declaration
+            }
+        }
+    }
+    None
+}
+
+// The stored field names of the structs at `rows`, each once.
+sema_field_error_field_names: fn(graph: SemaRegistrationGraph, rows: [SemaRegistrationRowRef]) -> [String] {
+    names := [String]{}
+    loop row in rows {
+        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+            if item == .Struct(definition) {
+                loop field in definition.fields {
+                    if field.computed == None && !names.contains(field.name) -> names.push("{field.name}")
+                }
+            }
+        }
+    }
+    names
+}
+
+// `ty` without the optional around it: a path reads through an absent value.
+sema_field_error_unwrap: fn(ty: Type) -> Type {
+    if ty == .Option(inner) -> return sema_field_error_unwrap(inner)
+    ty.copy() // copy: the caller keeps the type it walks
+}
+
+// The element type of the list `ty` names, through an optional.
+sema_field_error_element: fn(ty: Type) -> Type? {
+    if sema_field_error_unwrap(ty) == .List(element) -> return Val(element.copy()) // copy: the caller walks on from it
+    None
+}
+
+// The fields a path can start with here, as the fix lists them.
+sema_field_error_fields_text: fn(graph: SemaRegistrationGraph, rows: [SemaRegistrationRowRef]) -> String {
+    names: sema_field_error_field_names(graph, rows)
+    if names.len() == 0 -> return "none, since no argument here is a struct"
+    shown: loop name in names -> "`{name}`"
+    shown.join(", ")
+}
+
+// E2813: `path` names no field the path can reach from `rows`.
+sema_field_error_unknown: fn(graph: SemaRegistrationGraph, path: String, rows: [SemaRegistrationRowRef], span: Span) -> Diagnostic {
+    entry: diagnostic_registry_row(SEMA_FIELD_ERROR_CODE) ?? panic("E2813 must have a registry row")
+    sema_error(SEMA_FIELD_ERROR_CODE, span, entry.what.replace("{{path}}", path), entry.why, entry.fix.replace("{{fields}}", sema_field_error_fields_text(graph, rows)))
+}
+
+// E2813 for an `at:` path computed at run time beyond a `[…]` index, which
+// no check can place.
+sema_field_error_computed: fn(graph: SemaRegistrationGraph, rows: [SemaRegistrationRowRef], span: Span) -> Diagnostic {
+    entry: diagnostic_registry_row(SEMA_FIELD_ERROR_CODE) ?? panic("E2813 must have a registry row")
+    sema_error(SEMA_FIELD_ERROR_CODE, span, "`app.field_error` takes an `at:` path computed beyond a `[…]` index, which names no field the compiler can check.", entry.why, entry.fix.replace("{{fields}}", sema_field_error_fields_text(graph, rows)))
+}

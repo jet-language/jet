@@ -129,6 +129,16 @@ CallError: enum {
 // The method needs a signed-in caller, and the call had none (HTTP 401).
 // The server no longer accepts this client's wire version (HTTP 426).
 
+// A field error a method reports for one of its arguments, from a rule the
+// argument's `validate` block can't check (one that reads the database):
+// `at` is the path of the field it is about, in that argument (`assignee`,
+// `tasks[3].title`, `tasks[{index}].title`), and `reason` what is wrong with
+// it. `at` must be a string literal, interpolated only inside a `[…]` index,
+// that walks to a stored field of a struct argument of the method that
+// reports it (E2813), so the error shows beside that field, as a failed
+// `validate` check does.
+field_error: fn(at: String, reason: String) -> FieldError Never! { FieldError{path: at, reason: reason} }
+
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
 

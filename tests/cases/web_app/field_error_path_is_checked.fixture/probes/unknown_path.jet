@@ -1,0 +1,17 @@
+// Must fail: each `at:` names no field of the draft. `asignee` is
+// misspelled, `steps[{index}].name` names no field of a step, and `title[0]`
+// indexes a field that is no list.
+use {
+    app
+    logic
+}
+
+check: fn(draft: logic.TaskDraft) -> [FieldError] {
+    errors := [FieldError]{}
+    if draft.assignee == None -> errors.push(app.field_error(at: "asignee", reason: "Pick someone."))
+    loop (index, step) in draft.steps {
+        if step.title == "" -> errors.push(app.field_error(at: "steps[{index}].name", reason: "Give the step a title."))
+    }
+    if draft.title == "" -> errors.push(app.field_error(at: "title[0]", reason: "Give the task a title."))
+    errors
+}

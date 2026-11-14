@@ -22121,6 +22121,33 @@ ServerOnlyMethod: struct {
     }
 }
 
+FieldErrorPathUnknown: struct {
+    path: String
+    fields: String
+
+    impl Diagnostic {
+        code: "E2813"
+        safety_class: .Soundness
+        safety_reason: "A field error whose path names no field of the method's argument is shown beside no field, so the caller never sees what to correct."
+        expert_path: "none: `FieldError{path:, reason:}` builds an error by hand where no argument field fits"
+        stage: [.Compile]
+        meaning: "An `app.field_error` whose `at:` path names no field of the method's arguments"
+        detail: true
+
+        what: fn(self) -> String {
+            "`app.field_error` path `{self.path}` names no field of an argument."
+        }
+
+        why: fn(self) -> String {
+            "A field error shows beside the field its path names, so its path walks the fields of a decoded argument, a stored field by name and a list element by `[n]`; any other path is shown beside no field."
+        }
+
+        fix: fn(self) -> String {
+            "Write `at:` as a literal path through the arguments' fields; at the step that failed it can name {self.fields}."
+        }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String
