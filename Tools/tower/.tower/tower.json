@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6842,
-    "rev": 102501,
+    "nextNum": 6843,
+    "rev": 102514,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41824,6 +41824,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:20:51.117Z"
+        },
+        {
+          "n": 11,
+          "text": "Zero unjustified copies (owner order 2026-11-14). Every .copy() in Compiler, Core, Jetpack and Tools is either removed (moved at its last use, borrowed, the owner restructured, or a name made an interned id) or carries a justification row in the copy ledger. A row names the copy site and a paired two-program measurement on the reference machine showing that the copy makes that path faster, in wall time or peak memory, than the copy-free spelling. A copy that is neutral or slower is not justified. tests/guards/copy_ratchet.jet fails on any copy without a justified row, and the count of unjustified copies is 0. Baseline 2026-11-14: 6,686 explicit copies in 637 Compiler files, none justified.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:46.331Z"
+        },
+        {
+          "n": 12,
+          "text": "Implicit copies count too. The compiler reports every deep copy it inserts without a written .copy() as a site list, from jet check --trace or a lint, and the same zero-unjustified rule and guard apply to it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:47.236Z"
+        },
+        {
+          "n": 13,
+          "text": "No copy ceiling ever rises. No SUB, rebase or lander fix-up raises a ledger ceiling or adds a row without a justification; the guard and the lander refuse it. Main raised SerdeItems.jet to 50 in the stack127 fix-ups on 2026-11-14; that rise is undone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:48.150Z"
+        },
+        {
+          "n": 14,
+          "text": "Removing copies never makes Jet slower. Each copy-removal batch shows the cold self-compile wall time and peak memory, measured on the batch compiler, at or below the batch before it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:49.032Z"
         }
       ],
       "refs": [
@@ -41837,12 +41873,12 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-13T01:57:49.682Z",
+      "updated": "2026-11-14T22:51:49.032Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 14
     },
     {
       "id": "c0flvd7x",
@@ -98737,6 +98773,107 @@
       "updated": "2026-11-14T20:15:00.185Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
+    },
+    {
+      "id": "c0oo8eeq",
+      "num": 6842,
+      "title": "One audited memory chokepoint: every raw memory action goes through one small, heavily audited module",
+      "body": "Owner direction, 2026-11-14: memory actions go through a single inspectable place that is heavily audited, so any memory-safety risk is found by looking in one spot, and memory bugs are prevented structurally rather than reviewed site by site.\n\nToday raw memory actions sit in about 1528 #Unsafe regions spread across Compiler (about 791), the runtime and Core (Docs/spec/safety.md, Tools/agent/UnsafeRatchet.jet). The ratchet counts them but does not concentrate them.\n\nShape (to be attacked by the adversarial review before anything is built): one memory kernel module owns a small set of typed primitives (allocate, free, resize, raw read and write, pointer offset, copy and move of bytes, atomics, OS mapping, foreign-pointer crossing), each with stated preconditions and its own tests. The chokepoint is enforced in source by sema, not paid for at run time: sema refuses a raw memory operation anywhere outside the kernel, and the primitives inline at O1/O2, so the chokepoint costs nothing. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores; the kernel covers what sema cannot prove. Centralizing the operation does not by itself centralize the reasoning about why a call site meets a precondition, so the primitives should carry typed capabilities (handles a caller cannot forge) to make most preconditions type-enforced rather than reviewed.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Created by Main from the owner direction of 2026-11-14 (a single inspectable memory chokepoint). Built only after criterion 1's adversarial review passes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Adversarial review first: a dated audit in Docs/audits attacks each claimed strength of the one-chokepoint design (structural prevention, single audit spot, zero run-time cost) against the strongest existing practice, with sources: Rust's unsafe concentrated in std and audited crates (and its unsafe-code guidelines), seL4's verified kernel boundary, CHERI capabilities, Zig's explicit allocator interface, Go's runtime-only unsafe and Swift's UnsafePointer surface. It checks each claim with a runnable probe or measurement, and ends with a verdict per claim. Nothing below is built until the verdict holds or every gap is redesigned and reviewed again.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:31.815Z"
+        },
+        {
+          "n": 2,
+          "text": "Inventory: a generated list classifies every #Unsafe region in Compiler, the runtime, Core and Jetpack by the memory action it performs (allocate, free, resize, raw read or write, pointer offset, byte copy or move, atomic, OS mapping, foreign-pointer crossing, other) with its file and line, produced by a tool from the code, never maintained by hand.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:32.805Z"
+        },
+        {
+          "n": 3,
+          "text": "One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so that most preconditions are type-enforced. Sema refuses a raw memory action anywhere outside the kernel with a registered diagnostic (what, why and fix text plus a UI snapshot). User #Unsafe code reaches raw memory only by calling kernel primitives.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:33.989Z"
+        },
+        {
+          "n": 4,
+          "text": "Cutover: every Compiler, runtime, Core and Jetpack caller is migrated in one change. The count of #Unsafe regions outside the kernel performing a raw memory action is 0, and Docs/spec/safety.md and the unsafe ratchet read the kernel as the one audited place.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:35.161Z"
+        },
+        {
+          "n": 5,
+          "text": "Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores and need no kernel call.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:36.154Z"
+        },
+        {
+          "n": 6,
+          "text": "Zero cost: kernel primitives inline at O1/O2. A paired two-program cell (kernel primitives against the direct spelling) and the cold self-compile show no wall or peak-memory regression on the reference machine; any loss is fixed before ratification.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:37.142Z"
+        },
+        {
+          "n": 7,
+          "text": "Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T22:51:38.154Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T22:51:11.682Z",
+      "updated": "2026-11-14T22:51:50.037Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7
     }
   ],
   "decisions": [
@@ -204747,6 +204884,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T22:51:50.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T22:51:49.032Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#14 Removing copies never makes Jet slower. Each copy-removal ba"
+    },
+    {
+      "at": "2026-11-14T22:51:48.150Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#13 No copy ceiling ever rises. No SUB, rebase or lander fix-up "
+    },
+    {
+      "at": "2026-11-14T22:51:47.236Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#12 Implicit copies count too. The compiler reports every deep c"
+    },
+    {
+      "at": "2026-11-14T22:51:46.331Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#11 Zero unjustified copies (owner order 2026-11-14). Every .cop"
+    },
+    {
+      "at": "2026-11-14T22:51:38.155Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#7 Each primitive has a test per stated precondition, plus a fu"
+    },
+    {
+      "at": "2026-11-14T22:51:37.142Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#6 Zero cost: kernel primitives inline at O1/O2. A paired two-p"
+    },
+    {
+      "at": "2026-11-14T22:51:36.154Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#5 Codegen emits raw memory instructions for checked code only "
+    },
+    {
+      "at": "2026-11-14T22:51:35.161Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#4 Cutover: every Compiler, runtime, Core and Jetpack caller is"
+    },
+    {
+      "at": "2026-11-14T22:51:33.989Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#3 One memory kernel module holds the only implementations of t"
+    },
+    {
+      "at": "2026-11-14T22:51:32.805Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#2 Inventory: a generated list classifies every #Unsafe region "
+    },
+    {
+      "at": "2026-11-14T22:51:31.815Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#1 Adversarial review first: a dated audit in Docs/audits attac"
+    },
+    {
+      "at": "2026-11-14T22:51:11.682Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0oo8eeq",
+      "note": "One audited memory chokepoint: every raw memory action goes through one small, heavily audited module"
+    },
     {
       "at": "2026-11-14T22:48:07.826Z",
       "by": "Main",
