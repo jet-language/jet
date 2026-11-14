@@ -404,10 +404,7 @@ sema_state_switch: fn(walk: &SemaStateWalk, tree: BodyTree, subject: Expr, arms:
     // A local of an enum with a state list is in the arm's case inside that
     // arm; the narrowing ends with the arm.
     local: sema_state_local(subject) ?? ""
-    cases := [String]{}
-    if local != "" {
-        if sema_state_node_type(walk, tree, sema_state_expr_id(subject)) == .Val(owner) -> cases = walk.table.cases.get(owner) ?? [String]{}
-    }
+    cases: sema_state_subject_cases(walk, tree, subject)
     paths := [SemaStateFacts]{}
     loop arm in arms {
         sema_state_restore(walk, before)
@@ -416,13 +413,7 @@ sema_state_switch: fn(walk: &SemaStateWalk, tree: BodyTree, subject: Expr, arms:
         if narrowed == .Val(arm_state) -> walk.states[local] = arm_state
         sema_state_expr(walk, tree, arm.cond)
         sema_state_block(walk, tree, arm.body)
-        if narrowed != None {
-            if before.states.get(local) == .Val(state) {
-                walk.states[local] = state
-            } else {
-                _ := walk.states.remove(local)
-            }
-        }
+        if narrowed != None -> sema_state_end_narrowing(walk, before, local)
         if !walk.ended -> paths.push(sema_state_facts(walk))
     }
     if else_body == .Val(body) {
@@ -431,6 +422,23 @@ sema_state_switch: fn(walk: &SemaStateWalk, tree: BodyTree, subject: Expr, arms:
         paths.push(before.copy())
     }
     sema_state_merge(walk, paths, span)
+}
+
+// The cases of the state list of the enum a local subject has; empty for any
+// other subject.
+sema_state_subject_cases: fn(walk: SemaStateWalk, tree: BodyTree, subject: Expr) -> [String] Never! {
+    if sema_state_local(subject) == None -> return [String]{}
+    owner: sema_state_node_type(walk, tree, sema_state_expr_id(subject)) ?? return [String]{}
+    walk.table.cases.get(owner) ?? [String]{}
+}
+
+// A narrowed local leaves its branch in the states it had before it.
+sema_state_end_narrowing: fn(walk: &SemaStateWalk, before: SemaStateFacts, local: String) Never! {
+    if before.states.get(local) == .Val(state) {
+        walk.states[local] = state
+    } else {
+        _ := walk.states.remove(local)
+    }
 }
 
 // The case (or `|`-joined cases) an arm's pattern names, when each is one of
@@ -859,8 +867,18 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
             sema_state_expr(walk, tree, cond)
             before: sema_state_facts(walk)
             paths := [SemaStateFacts]{}
+            // A value `if door == { .Locked(_) -> … }` nests its arms as `if`s
+            // on pattern tests: the branch sees the local in the tested case.
+            local := ""
+            narrowed := String?{None}
+            if cond == .PatternTest(subject, pattern, _, _) {
+                local = sema_state_local(subject) ?? ""
+                narrowed = sema_state_pattern_case(pattern, sema_state_subject_cases(walk, tree, subject))
+            }
+            if narrowed == .Val(arm_state) -> walk.states[local] = arm_state
             sema_state_block(walk, tree, then_body)
             if !walk.ended -> sema_state_expr(walk, tree, then_value)
+            if narrowed != None -> sema_state_end_narrowing(walk, before, local)
             if !walk.ended -> paths.push(sema_state_facts(walk))
             sema_state_restore(walk, before)
             sema_state_block(walk, tree, else_body)
