@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102176,
+    "rev": 102178,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -82013,7 +82013,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -82022,6 +82022,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met; c3 by 08658dd26a (batch 33), c4 by edcd16c03d (batch 39)."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -82084,11 +82089,11 @@
         {
           "n": 4,
           "text": "c2 regressed: core_net_tcp_expired_deadlines_return_typed_timeouts exits 70 with E3003, because every stop poll (not only loop heads) delivers a passed #Deadline (jet_rt_session_propagate -> scheduler_check_loop_deadline \"a loop\"), so a typed TCP timeout escapes as a stop. Fix (G3Core-2 poll-split, which also meets #4637 c6): a separate loop-head poll key through IR, X64Select, web and the runtime. Proof: cases core_net_tcp_expired (5 rows) and core_net_dns, golden Concurrency/, and nonpositive_sleeps with exact lines, on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T03:49:25.962Z"
+          "evidence": "edcd16c03d (G3Core2-pollsplit, batch 39, dev ef5c72b4d6..6f6a4ccf58): only a loop turn or a recursive entry reports a passed deadline as \"a loop\"; every other stop poll leaves the deadline to the typed I/O path. On the gate-p45 jet: the 5 core_net_tcp_expired_deadlines rows each 1/0, cases deadline 24/0/3KF (was 23/2), core_os_interrupt_deadline 1/0, the busy loop and busy recursion cancel rows 1/0, a_failure_journey 1/0, golden Concurrency/ 186/0 apart from the 3 base BusyTurns TIMEOUTs.",
+          "at": "2026-11-14T04:19:18.394Z"
         }
       ],
       "refs": [],
@@ -82099,9 +82104,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:12:58.999Z",
-      "updated": "2026-11-14T03:49:25.962Z",
+      "updated": "2026-11-14T04:19:27.461Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-14T04:19:27.461Z"
     },
     {
       "id": "c0wtvbj7",
@@ -204673,6 +204679,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:19:27.461Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y5r79w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T04:19:18.394Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0y5r79w",
+      "note": "#4"
+    },
     {
       "at": "2026-11-14T04:15:44.362Z",
       "by": "Main",
