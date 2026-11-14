@@ -1,0 +1,24 @@
+# Anonymous-union module constants (an enum member with a payload, a String
+# and an Int member, and a list of them) are constructed while compiling and
+# dispatch on their member type with the same output on O0, O1, O2 and a
+# release build. A wrong payload type inside the union is refused (E0108).
+fixture: anonymous_union_constants_construct_check_and_dispatch_on_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = anonymous_union_constants_construct_check_and_dispatch_on_every_tier.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = anonymous_union_constants_construct_check_and_dispatch_on_every_tier.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = anonymous_union_constants_construct_check_and_dispatch_on_every_tier.out
+step: jet build --release main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = anonymous_union_constants_construct_check_and_dispatch_on_every_tier.out
+step: jet check bad.jet
+exit: nonzero
+stderr: ~ "E0108" # the payload type mismatch code
+stderr: ~ "Field `level` of `Color.Green` holds Int" # names the variant field and its declared type

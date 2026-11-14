@@ -1,0 +1,50 @@
+// Module constants of anonymous-union type: an enum member with a payload,
+// a String member and an Int member, plus a list of them. Each constant is
+// built while compiling and must match on its member type at run time.
+Color: enum {
+    Red
+    Green(level: Int)
+}
+
+shade: fn(level: Int) -> Color | String { Color.Green{level: level} }
+
+word: fn(text: String) -> Color | String { text.copy() }
+
+count: fn(n: Int) -> Int | String { n }
+
+GREEN: shade(3)
+WORD: word("plain")
+COUNT: count(7)
+LIST: [shade(1), word("two"), shade(2)]
+
+describe: fn(v: Color | String) -> String {
+    copied: v.copy()
+    if copied == {
+        .Color(c) -> {
+            if c == {
+                .Red -> { return "red" }
+                .Green(level) -> { return "green {level}" }
+            }
+        }
+        .String(s) -> { return "text {s}" }
+    }
+    return "unknown"
+}
+
+number: fn(v: Int | String) -> String {
+    copied: v.copy()
+    if copied == {
+        .Int(n) -> { return "int {n + 1}" }
+        .String(s) -> { return "string {s}" }
+    }
+    return "unknown"
+}
+
+run: fn() {
+    print(describe(GREEN))
+    print(describe(WORD))
+    print(number(COUNT))
+    loop item in LIST {
+        print(describe(item))
+    }
+}
