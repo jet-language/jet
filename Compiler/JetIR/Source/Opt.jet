@@ -881,7 +881,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     // its stop edge along, so simplify can unwrap the Block that edge left.
     stops: ir_opt_enabled(options, "stops")
     if stops {
-        ir_opt_fold_polls(out, keys)
+        ir_opt_fold_polls(out, m, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", report)
     }
     ir_opt_simplify(m, out, report)
@@ -921,7 +921,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     // between two polls (inlined bodies' Blocks and stop edges, aggregate
     // copies) kept the earlier one from folding.
     if stops {
-        ir_opt_fold_polls(out, keys)
+        ir_opt_fold_polls(out, m, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", report)
         ir_opt_stops_after_calls(out, m, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "stops", report)

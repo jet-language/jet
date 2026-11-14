@@ -14,7 +14,7 @@
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, name_rows_value]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     count: f.op.len()
@@ -297,16 +297,12 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // call or a trap publishes is still taken where it was. So an inlined
 // recursive body's entry check folds into the poll after its body. A turn
 // poll folded so makes the later one a turn poll, which still delivers a
-// passed deadline once per iteration.
-ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
-    poll := -1
-    trap := -1
-    turn := -1
-    loop id in 0..<keys.len() {
-        if keys[id] == IR_STOP_POLL_KEY -> poll = id
-        if keys[id] == IR_STOP_TRAP_KEY -> trap = id
-        if keys[id] == IR_STOP_TURN_KEY -> turn = id
-    }
+// passed deadline once per iteration. The stop points' ids are the
+// module's (ir_opt_view names them in `m`).
+ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
+    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
     folded := false
     loop at in 0..<f.op.len() {
         if !ir_opt_stops_any_poll(f, keys, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) -> next
