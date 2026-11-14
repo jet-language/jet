@@ -3837,6 +3837,10 @@ JetDriverLoweringInputs: struct {
     symbols: SymbolTable
     sources: [String:String]
     entry_module_identity: ModuleID
+    // The canonical effect module every compile registers and checks afresh
+    // (jet_driver_canonical_effect_module): `modules` leaves it out, so the
+    // Core record leaves its registration module out too.
+    canonical_effect_module_identity: ModuleID
     // The load's module identities: every ModuleID the rows name.
     module_table: ModuleTable
     entry_key: String?
@@ -4889,7 +4893,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 landed_values = comptime_values.move()
                 comptime_values = [SemaComptimeItemValue]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.copy(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.copy(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
         }
         return result
     }
@@ -5019,7 +5023,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy(), deep_checks: deep_kept.selected.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy(), deep_checks: deep_kept.selected.copy()})
     }
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = entry_effects.move()

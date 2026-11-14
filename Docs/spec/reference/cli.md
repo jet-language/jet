@@ -1452,7 +1452,9 @@ the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
 also writes the `jet.core/v5` record of that check to the file, reads it back
-and encodes every row again, which must give the bytes it was read from.
+and encodes every row again, which must give the bytes it was read from, then
+prints one line per record section: its element count, the bytes its elements
+take and the bytes of its largest element.
 `--embed <image> <out>` writes the executable `image` to `out` with the
 record added as its `jet.core` part; the compiler build runs it with the jet it
 just linked. The record names the compiler `JET_COMPILER_IDENTITY` names;

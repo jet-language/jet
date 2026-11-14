@@ -83,7 +83,7 @@ JetDriverCoreRecord: struct {
 }
 
 // What a round trip read back: each section's row count and the record's
-// size.
+// size, with each section's share of it.
 JetDriverCoreRecordCounts: struct {
     modules: Int
     bodies: Int
@@ -91,14 +91,25 @@ JetDriverCoreRecordCounts: struct {
     decls: Int
     values: Int
     bytes: Int
+    sections: [JetDriverCoreRecordSectionSize]
+}
+
+// One section of a record: its id, its element count, the bytes its
+// elements take together and the bytes of its largest element.
+JetDriverCoreRecordSectionSize: struct {
+    id: Int
+    elements: Int
+    bytes: Int
+    largest: Int
 }
 
 // The record of the closed Core program `inputs` (the Core check stopped
 // before lowering, under `every_core_body`, so its registration modules are
 // kept), for the compiler `compiler` and the target `target`. The check's own
 // entry module (one import of each public Core module) is left out, but for
-// its rows of the declaration table, which keeps its row order. Two writes of
-// the same inputs give the same bytes.
+// its rows of the declaration table, which keeps its row order, and so is the
+// canonical effect module (every compile registers and checks it afresh, so
+// it has no checked row). Two writes of the same inputs give the same bytes.
 jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: String, target: String) -> [U8] Err! {
     entry_file := ""
     // Each Core module's row of `inputs.modules`, by name, then identity.
@@ -121,12 +132,15 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
     loop (position, index) in module_order -> record_at[inputs.modules[index].module_identity.id] = position
     registration_at := [U32:Int]{}
     graph_modules := [Int]{}
+    unchecked := [String]{}
     loop (index, registration) in inputs.registration_modules {
         graph_modules.push(record_at.get(registration.module_identity.id) ?? -1)
-        if registration.module_identity == inputs.entry_module_identity -> next
+        if registration.module_identity == inputs.entry_module_identity || registration.module_identity == inputs.canonical_effect_module_identity -> next
         if registration_at.get(registration.module_identity.id) != None -> return Err("Core module `{registration.module_name}` ({module_text(inputs.module_table, registration.module_identity)}) is registered twice")
         registration_at[registration.module_identity.id] = index
+        if record_at.get(registration.module_identity.id) == None -> unchecked.push("`{registration.module_name}` ({module_text(inputs.module_table, registration.module_identity)})")
     }
+    if unchecked.len() > 0 -> return Err("the Core check registered {registration_at.len()} modules but checked {module_order.len()}; registered, never checked: {unchecked.join(", ")}")
     if registration_at.len() != module_order.len() -> return Err("the Core check registered {registration_at.len()} modules but checked {module_order.len()}")
     // Each Core body's row of `inputs.functions`, by module identity, then
     // key. Its packet (the body and the facts its check recorded) is split
@@ -464,7 +478,25 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
         again: core_record_cbor.to_bytes_canonical(module_values) ?? return Err("Core module `{record.module_names[index]}`'s value rows don't encode again: {err}")
         if again != stored -> return Err("Core module `{record.module_names[index]}`'s value rows encode to other bytes after a read")
     }
-    Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), registrations: record.module_names.len(), decls: decls, values: values, bytes: bytes.len()})
+    Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), registrations: record.module_names.len(), decls: decls, values: values, bytes: bytes.len(), sections: jet_driver_core_record_section_sizes(record.reader)})
+}
+
+// Each section of `reader`, in record order, with the bytes its elements
+// take: element `i` of section `s` spans bounds[firsts[s] + i] up to the
+// next bound.
+jet_driver_core_record_section_sizes: fn(reader: RecordReader) -> [JetDriverCoreRecordSectionSize] Never! {
+    sizes := [JetDriverCoreRecordSectionSize]{}
+    loop (section, id) in reader.ids {
+        first: reader.firsts[section]
+        elements: record_section_elements(reader, section)
+        largest := 0
+        loop index in 0..<elements {
+            size: reader.bounds[first + index + 1] - reader.bounds[first + index]
+            if size > largest -> largest = size
+        }
+        sizes.push(JetDriverCoreRecordSectionSize{id: id, elements: elements, bytes: reader.bounds[first + elements] - reader.bounds[first], largest: largest})
+    }
+    sizes
 }
 
 jet_driver_core_record_count: fn(reader: RecordReader, id: Int) -> Int Never! {

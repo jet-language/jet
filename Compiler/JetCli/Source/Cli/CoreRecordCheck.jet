@@ -7,7 +7,8 @@
 // the record would hold, or the diagnostics that keep Core from checking
 // clean. `--write <file>` also writes the `jet.core/v5` record of that check
 // (JetDriver CoreRecord.jet) to the file, then reads the file back and
-// encodes every row again, which must give the bytes it was read from.
+// encodes every row again, which must give the bytes it was read from, and
+// prints each section's element count and bytes.
 // `--embed <image> <out>` writes the executable `image` to `out` with the
 // record added as its JET_CLI_CORE_RECORD_PART part (JetBackend ELF.jet
 // x64_executable_add_part); the compiler build runs it with the jet it just
@@ -56,13 +57,13 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
                 shipped: x64_executable_add_part(image, JET_CLI_CORE_RECORD_PART, bytes) ?? return jet_cli_maintenance_error("E2105", "couldn't add the Core record to `{image_file}`: {err}", None, color, json)
                 record_files.write_bytes(out, shipped) ?? return jet_cli_maintenance_error("E2105", "couldn't write the executable `{out}`: {jet_cli_io_error_text(err)}", None, color, json)
                 record_files.set_mode(out, JET_CLI_CORE_RECORD_IMAGE_MODE) ?? return jet_cli_maintenance_error("E2105", "couldn't make `{out}` executable: {jet_cli_io_error_text(err)}", None, color, json)
-                return JetDriverVerbOutput{stdout: "{summary}core-record embed: {out}: {jet_cli_core_record_counts(counts)} as part `{JET_CLI_CORE_RECORD_PART}`, sha256 {jet_cli_core_record_digest(bytes)}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+                return JetDriverVerbOutput{stdout: "{summary}core-record embed: {out}: {jet_cli_core_record_counts(counts)} as part `{JET_CLI_CORE_RECORD_PART}`, sha256 {jet_cli_core_record_digest(bytes)}, {watch.elapsed_millis()} ms\n{jet_cli_core_record_sections(counts)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
             }
             file: args[1]
             record_files.write_bytes(file, bytes) ?? return jet_cli_maintenance_error("E2105", "couldn't write the Core record `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
             stored: record_files.read_bytes(file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the Core record `{file}` back: {jet_cli_io_error_text(err)}", None, color, json)
             counts: jet_driver_core_record_round_trip(stored) ?? return jet_cli_ice("the Core record `{file}` doesn't read back: {err}")
-            JetDriverVerbOutput{stdout: "{summary}core-record write: {file}: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(stored)}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            JetDriverVerbOutput{stdout: "{summary}core-record write: {file}: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(stored)}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n{jet_cli_core_record_sections(counts)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }
 }
@@ -124,7 +125,7 @@ jet_cli_core_record_embedded: fn() -> JetDriverVerbOutput {
     size: record_runtime.image_part_size(JET_CLI_CORE_RECORD_PART) ?? return JetDriverVerbOutput{stdout: "", stderr: "error: this jet carries no Core record part `{JET_CLI_CORE_RECORD_PART}`; `jet build Compiler/` adds it\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     bytes: record_runtime.image_part(JET_CLI_CORE_RECORD_PART, 0, size) ?? return jet_cli_ice("the Core record part `{JET_CLI_CORE_RECORD_PART}` has a size but no bytes")
     counts: jet_driver_core_record_round_trip(bytes) ?? return jet_cli_ice("the embedded Core record doesn't read back: {err}")
-    JetDriverVerbOutput{stdout: "core-record embedded: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(bytes)}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "core-record embedded: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(bytes)}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n{jet_cli_core_record_sections(counts)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // The Core record a compile of `core_input` loads its Core modules from
@@ -148,6 +149,13 @@ jet_cli_core_record_digest: fn(bytes: [U8]) -> String Never! { sha256_hex_bytes(
 // What a round trip read back, section by section.
 jet_cli_core_record_counts: fn(counts: JetDriverCoreRecordCounts) -> String Never! {
     "{counts.modules} modules, {counts.bodies} bodies, {counts.registrations} registration rows, {counts.decls} declaration rows, {counts.values} comptime values, {counts.bytes} bytes"
+}
+
+// One line per section: its id, element count, the bytes its elements take
+// and the bytes of its largest element.
+jet_cli_core_record_sections: fn(counts: JetDriverCoreRecordCounts) -> String Never! {
+    lines: loop section in counts.sections -> "core-record section {section.id}: {section.elements} elements, {section.bytes} bytes, largest {section.largest} bytes\n"
+    lines.join("")
 }
 
 // One line: the checked modules other than the scratch entry, their
