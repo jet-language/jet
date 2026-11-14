@@ -515,6 +515,10 @@ SemaComptimeFunctionResult: struct {
     // which a body pass that takes this result records again.
     codec_demand: [String]{[String]{}}
     derive_demand: [String]{[String]{}}
+    // The Prelude error conversion routines the body's propagation sites
+    // demand, checked under its module (sema_check_comptime_function); a
+    // closure that builds the body builds them too.
+    conversions: [FnBody]{[FnBody]{}}
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
@@ -2853,7 +2857,29 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     // takes it to record again (SemaDemandCapture).
     sema_demand_capture_open(graph)
     checked := sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, probe.table, probe.host_hooks, diagnostics, call_facts, calls, name_references)
-    demand := sema_demand_capture_close(graph)
+    // A propagation site that reaches `Err` from a Core error family member
+    // converts through its module's Prelude routine, which a module check
+    // injects after its bodies. A compile-time closure runs before that, so
+    // this check injects the routines the body demands, and the closure
+    // builds them beside it. The body moves into a one-row list for the
+    // injection's demand walk and back. The routines' own facts stay out of
+    // the body's, which a module check that reuses this result records.
+    conversions := [FnBody]{}
+    conversion_reasons := [String]{}
+    conversion_call_facts := [SemaCallSiteFact]{}
+    if checked.value != None {
+        taken := checked.value.move()
+        checked.value = None
+        bodies := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
+        conversion_requests := [SemaComptimeRequest]{}
+        conversion_references := [SemaNameReferenceFact]{}
+        _ := sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, probe.table, probe.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
+        loop bodies.len() > 1 -> conversions.push(bodies.pop() ?? panic("an injected conversion was lost"))
+        conversions.reverse()
+        function := bodies.pop() ?? panic("a checked body lost its function")
+        checked.value = Val(function.move())
+    }
+    demand: sema_demand_capture_close(graph)
     sema_scope_rollback(probe.table, mark)
     dependencies := sema_comptime_environment_dependencies(environment, program, name_references, values) ?? return unresolved
     waiting := sema_comptime_waiting_dependencies(available, dependencies)
@@ -2865,7 +2891,8 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         if checked.incomplete_reasons.len() == 0 -> incomplete_reasons.push("body checking is incomplete")
         incomplete_reasons.extend(checked.incomplete_reasons.move())
     }
-    settled: memory_complete && checked.complete && owner_generic_complete && waiting.len() == 0
+    incomplete_reasons.extend(conversion_reasons.move())
+    settled: memory_complete && checked.complete && owner_generic_complete && waiting.len() == 0 && incomplete_reasons.len() == 0
     complete: settled && !sema_has_error_since(diagnostics, 0)
     // A body that reads a constant not staged yet is checked again once that
     // constant lands; what this check reports past the unstaged read (a name
@@ -2873,6 +2900,9 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     // a consequence of the wait, never a finding.
     if waiting.len() > 0 -> diagnostics = [Diagnostic]{}
     reachable := sema_comptime_environment_reachable_function_keys(environment, program, call_facts)
+    loop key in sema_comptime_environment_reachable_function_keys(environment, program, conversion_call_facts) {
+        if !reachable.contains(key) -> reachable.push(key)
+    }
     if checked.value == .Val(body) {
         if program.registration_graph == .Val(resolved_graph) -> sema_comptime_drop_close_keys(resolved_graph, body.tree, module_identity, reachable)
     }
@@ -2897,6 +2927,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
         codec_demand: demand.codecs.move(),
         derive_demand: demand.derived.move(),
+        conversions: conversions,
     }
 }
 

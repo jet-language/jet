@@ -1,13 +1,29 @@
 # Card #6835 (and #6759 c1): the local value `text` of
 # a_local_value_over_derived_equality_and_a_codec_lands_in_its_owners.case,
 # whose pass reaches Point's derived `==` and its JSON encode method, is
-# computed while compiling. Jet does not meet this yet (tests/known-failing.tsv):
-# the JSON encoder's trait calls have no body while compiling, so `text`
-# stays run-time code. A module-level value over json.to_string(Point) reports
-# the same as E0643 (`core.encoding.begin_object()` "has no body here").
+# computed while compiling, and gives the text the run-time calls give on
+# every tier. `show` propagates the encoder's failure into `Err` through the
+# Prelude conversion its module injects, which the compile-time closure builds
+# too; a module value over `show` is computed the same way.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nsame: fn(a: Point, b: Point) -> Bool { a == b }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(\"{same(p.copy(), p.copy())} {show(p.copy())}\")\n    text: \"{same(Point{x: 1, y: 2}, Point{x: 1, y: 3})} {show(Point{x: 3, y: 4})}\"\n    print(text)\n}\n"
+write: value.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nSHOWN: #run show(Point{x: 3, y: 4})\n\nrun: fn() {\n    print(SHOWN)\n    print(show(Point{x: 3, y: 4}))\n}\n"
 step: jet check --trace main.jet
 exit: 0
 stderr: ~ "comptime.eval text" # the local value is computed while compiling
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
+step: jet run --optimize=none value.jet
+exit: 0
+stdout: = "{\"x\":3,\"y\":4}\n{\"x\":3,\"y\":4}\n"
+step: jet run --optimize=full value.jet
+exit: 0
+stdout: = "{\"x\":3,\"y\":4}\n{\"x\":3,\"y\":4}\n"

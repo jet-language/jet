@@ -1371,6 +1371,7 @@ jet_driver_comptime_function_closure: fn(
                     jet_driver_comptime_function_ref_add(queue, queued, found.module_identity, found.function_key)
                 }
                 functions.push(function)
+                loop conversion in checked.conversions -> functions.push(conversion.copy())
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None -> store = true
             }
@@ -2720,6 +2721,7 @@ jet_driver_comptime_run: fn(
                 // A settled closure names its bodies by checked row.
                 loop row in closure.rows {
                     if checked_functions[row].function == .Val(function) -> closure.functions.push(function.copy())
+                    loop conversion in checked_functions[row].conversions -> closure.functions.push(conversion.copy())
                 }
                 if jet_driver_comptime_batchable(source) {
                     jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign)
