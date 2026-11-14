@@ -9,4 +9,23 @@ What this means:
     Afterwards: `answer` keeps this value for the rest of its block; assigning to it again is an error.
     Related: E0111
 
+  Between a name and a declaration kind:
+    Declares the name: `area: fn(…)` is a function, `Point: struct {…}` a type and `math: module {…}` a module.
+    Example:
+      area: fn(r: Float) -> Float { r * r }
+      Point: struct {
+          x: Int
+      }
+    Afterwards: Each declaration is one name, one `:` and the declaration after it.
+
+  After `#X` on its own line inside a declaration's body:
+    Writes one of the declaration's markers inside its body: `#X: v` is the same marker as `#X(v)` above it.
+    Example:
+      Pixel: struct {
+          r: U8
+          #Layout: c
+      }
+    Afterwards: A declaration writes its whole marker set in one place; `jet fix --markers above` moves it above.
+    Related: E0942, E0943
+
 This explanation comes from Jet's syntax dictionary.
