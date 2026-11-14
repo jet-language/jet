@@ -9200,8 +9200,8 @@ ir_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ordinal: Int, message: In
 // The binding rows of the locals a stop the builder raises itself reports
 // (a list bounds stop), chosen as sema_expression_panic_locals chooses a
 // `panic`'s: the visible Int, Float and Bool variables, the latest of each
-// name, sorted by name. `_` and the compiler's `__` names are not the
-// program's locals.
+// name, sorted by name. `_`, the compiler's `__` names and its unnamed
+// entries (a `defer`, a held temporary) are not the program's locals.
 ir_frame_stop_locals: fn(m: &IRModule, b: IRBuilder) -> [Int] Never! {
     rows := [Int]{}
     // The latest bindings of the names that are not reported, sorted by
@@ -9212,7 +9212,7 @@ ir_frame_stop_locals: fn(m: &IRModule, b: IRBuilder) -> [Int] Never! {
         row: index
         index -= 1
         name: b.bindings[row].name
-        if name == "_" || name.starts_with("__") -> next
+        if name == "" || name == "_" || name.starts_with("__") -> next
         at: ir_frame_name_at(b, rows, name)
         hidden_at: ir_frame_name_at(b, hidden, name)
         if at < 0 || hidden_at < 0 -> next

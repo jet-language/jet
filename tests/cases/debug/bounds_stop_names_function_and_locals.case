@@ -30,6 +30,13 @@ stderr: ~ "Stop [E3010]: `the list has 3 items, so position 4 doesn't exist`\n  
 step registers_o2: jet run -O2 registers.jet
 exit: 70
 stderr: ~ "locals: i = 2, total = 4, wrapped = true\n" # the same words on O2, read from where the loop keeps them
+step deferred_o0: jet run -O0 deferred.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `the list has 3 items, so position 9 doesn't exist`\n  --> deferred.jet:6:7 in tally\n    |\n6 |     xs[at] + total\n    |       ^^^^\nlocals: at = 9, total = 12\n" # a `defer` adds an entry with no name and no slot to the frame, and the report passes over it
+stderr: !~ "internal compiler error" # the compiler doesn't trip over that entry
+step deferred_o2: jet run -O2 deferred.jet
+exit: 70
+stderr: ~ "locals: at = 9, total = 12\n" # the same locals on O2
 step index_off: jet run --backtrace=off main.jet
 exit: 70
 stderr: ~ "Stop [E3010]: `the list has 3 items, so position 7 doesn't exist`\n Why:" # `off`: the stop line, then straight to its Why
