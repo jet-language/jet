@@ -1,0 +1,227 @@
+#!/usr/bin/env jet
+// Runs the habit corpus (tests/habits/habits.corpus): fifty Python and
+// JavaScript habits and typos, each written once in Jet and once, as the same
+// slip, in Python.
+// Each Jet case goes through `jet check --json`. It counts as fixed when its
+// reports carry `fix_edits`, and `jet check` passes once those edits are
+// applied as written. Each Python case runs under Python 3.13. It counts as
+// hinted when its error says "Did you mean" or "Maybe you meant".
+// Usage (from the repository root):
+//   jet Tools/agent/HabitCorpus.jet --check|--list
+// `--check` prints both counts. It fails unless at least FIXED_FLOOR Jet cases
+// are fixed and Python hints on fewer cases than Jet fixes.
+// `--list` prints each case's two outcomes as well.
+// $JET names the jet to check with (default `jet`) and $PYTHON the Python
+// (default `python3.13`).
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+CORPUS: "tests/habits/habits.corpus"
+FIXED_FLOOR: 45
+PYTHON_HINTS: [String]{"Did you mean", "Maybe you meant"}
+USAGE: "usage: jet Tools/agent/HabitCorpus.jet --check|--list"
+
+HabitCase: struct {
+    name: String
+    jet: String
+    python: String
+}
+
+HabitEdit: struct {
+    start: Int
+    end: Int
+    text: String
+}
+
+run: fn() {
+    args: process.args()
+    mode: if args.len() == 0 -> "--check" else -> args[0].copy()
+    if args.len() > 1 || (mode != "--check" && mode != "--list") -> return refuse(USAGE)
+    repo: repo_root()
+    corpus: files.read("{repo}/{CORPUS}") ?? return refuse("`{CORPUS}` cannot be read: {err}")
+    cases: habit_cases(corpus)
+    dir: files.mkdtemp("jet-habits") ?? return refuse("no scratch directory: {err}")
+    jet: process.env_nonempty("JET") ?? "jet"
+    python: process.env_nonempty("PYTHON") ?? "python3.13"
+    fixed := 0
+    hinted := 0
+    loop habit in cases {
+        outcome: jet_outcome(jet, dir, habit)
+        hint: python_hint(python, dir, habit)
+        if outcome == "fixed" -> fixed += 1
+        if hint -> hinted += 1
+        if mode == "--list" -> print("{habit.name}\tjet: {outcome}\tpython: {if hint -> "did you mean" else -> "no hint"}")
+    }
+    _ := files.remove_all(dir)
+    print("habit corpus: {fixed} of {cases.len()} Jet cases carry fix_edits after which jet check passes; Python 3.13 says did-you-mean on {hinted} of {cases.len()}")
+    if fixed < FIXED_FLOOR -> return refuse("only {fixed} Jet cases are fixed, under the floor of {FIXED_FLOOR}")
+    if hinted >= fixed -> return refuse("Python hints on {hinted} cases, not fewer than the {fixed} Jet fixes")
+}
+
+refuse: fn(reason: String) -[Exec, IO]> Never { process.fail(2, "habit corpus: {reason}") }
+
+// The checkout holding this script.
+repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
+    tool: "/Tools/agent/HabitCorpus.jet"
+    script: sys.executable()
+    if script.ends_with(tool) -> return script.removesuffix(tool)
+    dir := files.cwd() ?? "/"
+    loop {
+        if files.exists("{dir}{tool}") -> return dir
+        if dir == "/" || dir == "" -> return refuse("run from inside the Jet checkout (no Tools/agent/HabitCorpus.jet above the working directory)")
+        dir = files.dirname(dir)
+    }
+}
+
+// The cases of the corpus `text`: `== name` opens a case, and `-- jet` and
+// `-- python` open its two sources. `#` lines outside a source are comments.
+habit_cases: fn(text: String) -> [HabitCase] Never! {
+    cases := [HabitCase]{}
+    name := ""
+    side := ""
+    jet := [String]{}
+    python := [String]{}
+    loop line in text.split("\n") {
+        if line.starts_with("== ") {
+            if name != "" -> cases.push(HabitCase{name: name.copy(), jet: habit_source(jet), python: habit_source(python)})
+            name = line.removeprefix("== ").trim().copy()
+            side = ""
+            jet = [String]{}
+            python = [String]{}
+            next
+        }
+        if line == "-- jet" || line == "-- python" {
+            side = line.removeprefix("-- ").copy()
+            next
+        }
+        if side == "jet" -> jet.push(line.copy())
+        if side == "python" -> python.push(line.copy())
+    }
+    if name != "" -> cases.push(HabitCase{name: name.copy(), jet: habit_source(jet), python: habit_source(python)})
+    cases
+}
+
+// A source's lines with the blank lines that separate cases dropped.
+habit_source: fn(lines: [String]) -> String Never! {
+    end := lines.len()
+    loop end > 0 && lines[end - 1].trim() == "" {
+        end -= 1
+    }
+    kept := [String]{}
+    loop at in 0..<end -> kept.push(lines[at].copy())
+    "{kept.join("\n")}\n"
+}
+
+// `fixed`, `no fix_edits`, or why the edited case still fails.
+jet_outcome: fn(jet: String, dir: String, habit: HabitCase) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
+    file: "{habit.name}.jet"
+    path: "{dir}/{file}"
+    files.write(path, habit.jet) ?? return refuse("`{path}` cannot be written: {err}")
+    ran: process.cmd([String]{jet, "check", "--json", file}).cwd(dir).output_limit(67108864).run() ?? return refuse("{jet} cannot start: {err}")
+    if ran.code == 0 -> return "jet check passes as written"
+    edits: habit_edits(ran.output, file)
+    if edits.len() == 0 -> return "no fix_edits"
+    files.write(path, apply_edits(habit.jet, edits)) ?? return refuse("`{path}` cannot be written: {err}")
+    again: process.cmd([String]{jet, "check", file}).cwd(dir).output_limit(67108864).run() ?? return refuse("{jet} cannot start: {err}")
+    if again.code == 0 -> return "fixed"
+    shown: if again.output.trim() != "" -> again.output.trim() else -> again.errors.trim()
+    lines: shown.split("\n").to_list()
+    "the edited case still fails: {if lines.len() > 0 -> lines[0].copy() else -> ""}"
+}
+
+// Whether Python's error for the case suggests a spelling.
+python_hint: fn(python: String, dir: String, habit: HabitCase) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
+    file: "{habit.name}.py"
+    files.write("{dir}/{file}", habit.python) ?? return refuse("`{dir}/{file}` cannot be written: {err}")
+    ran: process.cmd([String]{python, file}).cwd(dir).output_limit(67108864).run() ?? return refuse("{python} cannot start: {err}")
+    if ran.code == 0 -> return false
+    PYTHON_HINTS.any(fn(hint) { ran.errors.contains(hint) })
+}
+
+// The `fix_edits` of every report in `jet check --json` output that edit
+// `file`, ordered last first and without overlaps, so each applies to the
+// text as written.
+habit_edits: fn(output: String, file: String) -> [HabitEdit] Never! {
+    tree: json.parse(output.trim()) ?? return [HabitEdit]{}
+    edits := [HabitEdit]{}
+    loop report in items(field(tree, "reports")) {
+        loop edit in items(field(report, "fix_edits")) {
+            if text_field(edit, "file") != file -> next
+            span: field(edit, "span")
+            start: int_field(span, "start") ?? next
+            end: int_field(span, "end") ?? next
+            insert_edit(edits, HabitEdit{start: start, end: end, text: text_field(edit, "new_text")})
+        }
+    }
+    edits
+}
+
+// Adds `edit` in last-first order unless it overlaps one already kept.
+insert_edit: fn(edits: &[HabitEdit], edit: &&HabitEdit) Never! {
+    at := 0
+    loop at < edits.len() && edits[at].start > edit.start {
+        at += 1
+    }
+    if at > 0 && edit.end > edits[at - 1].start -> return
+    if at < edits.len() && edits[at].end > edit.start -> return
+    edits.insert(at, edit.move())
+}
+
+apply_edits: fn(text: String, edits: [HabitEdit]) -> String Never! {
+    result := text.copy()
+    loop edit in edits {
+        bytes: result.bytes()
+        if edit.start < 0 || edit.end > bytes.len() || edit.start > edit.end -> next
+        result = "{String.from_bytes_lossy(bytes[0..<edit.start])}{edit.text}{String.from_bytes_lossy(bytes[edit.end..<bytes.len()])}"
+    }
+    result
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+items: fn(tree: Dyn) -> [Dyn] Never! {
+    if tree == .Array(values) -> return values.copy()
+    [Dyn]{}
+}
+
+text_field: fn(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+int_field: fn(tree: Dyn, name: String) -> Int? Never! {
+    if field(tree, name) == .Number(text) {
+        value: Int.parse(text) ?? return None
+        return Val(value)
+    }
+    None
+}
+
+// --- tests ------------------------------------------------------------------
+
+#Test("the habit corpus reader splits cases into their two sources") {
+    cases: habit_cases("# about\n\n== one\n-- jet\nrun: fn() {{}}\n\n-- python\nprint(1)\n\n== two\n-- jet\nx\n-- python\ny\n")
+    assert_eq(cases.len(), 2)
+    assert_eq(cases[0].name, "one")
+    assert_eq(cases[0].jet, "run: fn() {{}}\n")
+    assert_eq(cases[0].python, "print(1)\n")
+    assert_eq(cases[1].jet, "x\n")
+}
+
+#Test("the habit corpus applies fix_edits last first and skips overlaps") {
+    output: "{{\"reports\":[{{\"fix_edits\":[{{\"file\":\"a.jet\",\"span\":{{\"start\":0,\"end\":4}},\"new_text\":\"true\"}}]}},{{\"fix_edits\":[{{\"file\":\"a.jet\",\"span\":{{\"start\":9,\"end\":13}},\"new_text\":\"total\"}},{{\"file\":\"a.jet\",\"span\":{{\"start\":2,\"end\":3}},\"new_text\":\"x\"}},{{\"file\":\"b.jet\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"z\"}}]}}]}}"
+    edits: habit_edits(output, "a.jet")
+    assert_eq(edits.len(), 2)
+    assert_eq(apply_edits("True and totl", edits), "true and total")
+}
