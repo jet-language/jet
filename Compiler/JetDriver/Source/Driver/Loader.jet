@@ -6049,7 +6049,8 @@ jet_driver_pascal_segment: fn(part: String) -> String {
 // module names resolves against that module's directory, and the `.jet`
 // files below it, with whether each parses to a top-level `page: fn`, go on
 // the module's Program for sema's App graph check. A file whose name starts
-// with `_` opts out of routing and is left out.
+// with `_` opts out of routing and is left out. A file whose source never
+// spells `routes` names no root, and its tree isn't walked.
 jet_driver_attach_app_route_roots: fn(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], snapshot: JetDriverAuthorizedSourceSnapshot) {
     loop index in 0..<modules.len() {
         unit_index: modules[index].source_unit_index
@@ -6058,6 +6059,7 @@ jet_driver_attach_app_route_roots: fn(modules: &[JetDriverLoadedModule], source_
         if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() -> next
         root: snapshot.roots[unit.root_index]
         if root.directories.len() == 0 || unit.file_index < 0 || unit.file_index >= root.files.len() -> next
+        if !root.files[unit.file_index].source.contains("routes") -> next
         names: jet_driver_app_route_names(modules[index].program)
         if names.len() == 0 -> next
         directory: jet_driver_parent_path(root.files[unit.file_index].path)
