@@ -238,6 +238,9 @@ HTTPRequest: struct {
     __multipart: [Header]{[]}
     __cell: Shared<__HTTPBodyCell>?{None}
     __upgrade: Shared<__HTTPUpgradeCell>?{None}
+    // The server side's peer address without its port, which per-network
+    // limits count (`app.Limit`); "" on a client request.
+    __peer: String{""}
 
     method: fn(self) -> String Never! { self.method.copy() }
     path: fn(self) -> String Never! { self.path.copy() }

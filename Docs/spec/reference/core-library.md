@@ -5439,6 +5439,15 @@ the arguments did not decode; the body
 `{"invalid": [{"path": …, "reason": …}]}` names each field error),
 `SignedOut` (401) and `UpdateRequired` (426).
 
+An endpoint marker may cap its calls: `#App.Public(limit: 30, per: 1min)`
+allows 30 calls from one network address in each one-minute window. `per`
+defaults to one minute, and `limit: 0`, the default, means no limit. A
+SignedIn method counts per account once the App signs callers in, and per
+network address until then. The mount checks `limit` as an Int and `per` as a
+Duration. A call past the limit is answered 429 with `Retry-After` in whole
+seconds. The Remote reads that as `Unreachable`, with text that ends
+`is limited: retry after N s`.
+
 ### `core.web` — server-rendered applications
 
 `core.web` builds server-rendered applications on top of `core.http`. An

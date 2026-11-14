@@ -338,9 +338,10 @@ App: struct {
 
     // An `#App.Public` method of `app.mount(service)` answers POST `path`
     // (sema lowers each here): `answer` decodes the posted JSON array of the
-    // method's arguments, runs it, and gives the encoded reply.
-    __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: __AppRemote{answer: answer}
+    // method's arguments, runs it, and gives the encoded reply. `limit` and
+    // `window_ns` are the marker's `limit:` and `per:` (`__AppRemote`).
+    __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: __AppRemote{answer: answer, limit: __app_remote_limit(limit, window_ns)}
         http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_remote_response(endpoint, request)) }), "", at)
         self.copy()
     }
@@ -348,8 +349,14 @@ App: struct {
     // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`.
     // An App has no sign-in yet, so no call has a signed-in caller: each one
     // is refused with 401, which a Remote reads as `CallError.SignedOut`.
-    __remote_signed_in: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
-        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller"))) }), "", at)
+    // A call past the marker's `limit:` is answered 429 first; until sign-in
+    // names an account, the count is per network address.
+    __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+        counted: __app_remote_limit(limit, window_ns)
+        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) {
+            if __app_remote_limited(counted, request) == .Val(wait_ns) -> return Ok(__app_limited(wait_ns))
+            Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller")))
+        }), "", at)
         self.copy()
     }
 
@@ -1208,6 +1215,60 @@ __app_mount_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.
 // One endpoint method of a mounted service; sema builds `answer` from it.
 __AppRemote: struct {
     answer: fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+    limit: __AppRemoteLimit
+}
+
+// An endpoint marker's `limit:`: at most `calls` calls from one network
+// address in each window of `window_ns`, counted in `windows` by address.
+// `calls` 0 is no limit.
+__AppRemoteLimit: struct {
+    calls: Int
+    window_ns: Int
+    windows: Shared<[String: __AppRemoteWindow]>
+}
+
+// One address's window: when it began, and the calls counted in it.
+__AppRemoteWindow: struct {
+    start_ns: Int
+    calls: Int
+}
+
+// The most addresses a limit keeps a window for; past it, the windows that
+// have ended are dropped first.
+APP_REMOTE_LIMIT_ADDRESSES: 65536
+
+__app_remote_limit: fn(calls: Int, window_ns: Int) -> __AppRemoteLimit Never! {
+    __AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String: __AppRemoteWindow]{}}}
+}
+
+// How long until `request`'s address may call again when its window's calls
+// are used up; None counts the call in.
+__app_remote_limited: fn(limit: __AppRemoteLimit, request: HTTPRequest) -> Int? Never! {
+    if limit.calls <= 0 -> return None
+    now: rt.clock_mono_ns()
+    guard := limit.windows.guard_edit()
+    window := guard.value.get(request.__peer) ?? __AppRemoteWindow{start_ns: now, calls: 0}
+    if now - window.start_ns >= limit.window_ns -> window = __AppRemoteWindow{start_ns: now, calls: 0}
+    if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
+    window.calls += 1
+    if guard.value.len() >= APP_REMOTE_LIMIT_ADDRESSES {
+        kept := [String: __AppRemoteWindow]{}
+        loop address in guard.value.keys() {
+            held: guard.value.get(address) ?? next
+            if now - held.start_ns < limit.window_ns -> kept[address] = held
+        }
+        guard.value = kept
+    }
+    guard.value[request.__peer.copy()] = window
+    None
+}
+
+// A call past its endpoint's limit: 429 with `Retry-After`, in whole seconds,
+// which a Remote reads as `CallError.Unreachable` with the retry time.
+__app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
+    seconds: (wait_ns + 999999999) / 1000000000
+    refused: __app_json(429, __app_error_json("too many calls: retry after {seconds} s"))
+    refused.__with_header("retry-after", "{seconds}")
 }
 
 // The arguments of one call of an endpoint method: the JSON array the
@@ -1235,6 +1296,7 @@ __RemoteArgs: struct {
 // errors (`__app_invalid_json`) when the body is no JSON array of arguments
 // the method takes.
 __app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if __app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return __app_limited(wait_ns)
     text: request.text() ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
     tree: live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
     reply: endpoint.answer(__RemoteArgs{tree: tree}) ?? return __app_json(422, __app_invalid_json(err))

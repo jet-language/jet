@@ -44,13 +44,25 @@ AppError: enum {
 // Endpoint markers. A method of a mounted service is an endpoint only when
 // one of these marks it: `#App.SignedIn` for a signed-in caller,
 // `#App.Public` for any caller. An unmarked method is server-only.
+// `limit:` caps the calls one caller makes in each `per` window
+// (`#App.Public(limit: 30, per: 1min)`); a call past it is answered 429
+// with `Retry-After`, which a Remote reads as `CallError.Unreachable`.
+// `#App.Public` counts per network address; `#App.SignedIn` counts per
+// account once sign-in names one, and per network address until then.
+// `limit: 0`, the default, is no limit.
 SignedIn: struct {
+    limit: Int{0}
+    per: Duration{1min}
+
     impl Marker {
         sites: [.Method]
     }
 }
 
 Public: struct {
+    limit: Int{0}
+    per: Duration{1min}
+
     impl Marker {
         sites: [.Method]
     }
@@ -139,6 +151,7 @@ remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wai
         response.status == 401 -> Err(.SignedOut)
         response.status == 422 -> Err(.Invalid(remote_invalid(text)))
         response.status == 426 -> Err(.UpdateRequired)
+        response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
         else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
     }
 }

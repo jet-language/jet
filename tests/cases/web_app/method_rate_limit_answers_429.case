@@ -1,0 +1,17 @@
+# An endpoint marker may carry `limit:` and `per:`. The fixture's Crew takes
+# two `lookup` calls a minute from one network address. Its program mounts the
+# Crew at /api and calls `lookup` three times through `app.remote_at`. The
+# first two are answered. The third is answered 429 with `Retry-After`, and the
+# Remote reads it as `CallError.Unreachable` with the retry time. The probe's
+# `limit:` is text, which is refused at the argument.
+fixture: method_rate_limit_answers_429.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: ~ "42\nnot found\nunreachable: http://127.0.0.1:" # the server's port differs per run
+stdout: ~ "/api/lookup is limited: retry after 60 s\n" # the third call is over the limit
+
+step: jet check probes/limit_not_int.jet
+exit: nonzero
+stderr: ~ "limit_not_int.jet:10:24" # at the `limit:` argument

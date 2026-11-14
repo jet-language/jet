@@ -1,0 +1,60 @@
+// A Crew whose `lookup` takes two calls a minute from one network address,
+// mounted at /api and called three times through a Remote: the third call is
+// answered 429 with `Retry-After`, which the Remote reads as
+// `CallError.Unreachable` with its retry time.
+use {
+    app
+    net: core.net
+    web: core.web
+}
+
+#Error
+LookupError: enum {
+    NotFound
+    Unreachable(String)
+}
+
+impl app.CallError -> LookupError {
+    if self == {
+        .Unreachable(why) -> LookupError.Unreachable(why)
+        .Invalid(errors) -> LookupError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> LookupError.Unreachable("signed out")
+        .UpdateRequired -> LookupError.Unreachable("update required")
+    }
+}
+
+Crew: struct {
+    name: String
+
+    // Any caller looks a task up, twice a minute.
+    #App.Public(limit: 2, per: 1min)
+    lookup: fn(self, id: Int) -> Int LookupError! {
+        if id < 0 -> return Err(LookupError.NotFound)
+        Ok(id + 1)
+    }
+}
+
+// A lookup through the Remote, as its value or what its failure says.
+lookup: fn(crew: app.Remote<Crew>, id: Int) -> String {
+    found: crew.lookup(id) ?? return if err == {
+        .NotFound -> "not found"
+        .Unreachable(why) -> "unreachable: {why}"
+    }
+    "{found}"
+}
+
+run: fn() (NetError | TaskFailure)! {
+    served: web.app().mount("/api", Crew{name: "crew"})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+    }
+    crew: app.remote_at<Crew>("http://{addr}/api")
+    print(lookup(crew, 41))
+    print(lookup(crew, -1))
+    print(lookup(crew, 41))
+    serving.join()
+}

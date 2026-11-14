@@ -1,0 +1,16 @@
+// A marker's `limit:` is a count of calls: text there is refused.
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    name: String
+
+    #App.Public(limit: "many")
+    status: fn(self) -> String { "{self.name} is up" }
+}
+
+run: fn() {
+    _: web.app().mount("/api", Crew{name: "crew"})
+}

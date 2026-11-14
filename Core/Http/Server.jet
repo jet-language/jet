@@ -690,7 +690,8 @@ __serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read,
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None, None, false)
+    peer: __peer_host(stream)
+    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None, peer: peer}, mux, None, None, false)
     Ok()
 }
 
@@ -1470,6 +1471,9 @@ __HTTPChunked: struct {
 __HTTPConn: struct {
     tcp: TCPStream?
     tls: __HTTPSecure?
+    // The peer's address without its port, which a request carries as
+    // `__peer` for per-network limits ("" when the socket has none).
+    peer: String{""}
 }
 
 // A TLS connection's stream, held only by these operations; `__tls_accept`
@@ -1489,14 +1493,15 @@ __HTTPSecure: struct {
 // handshake within the connection budget when the server has a TLS identity;
 // None drops a failed handshake.
 __accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
+    peer: __peer_host(stream)
     if tls == .Val(identity) {
         budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
         ops: identity.__ops.guard_read()
         accepted: Shared{[TCPStream]{stream.move()}}
         secure: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
-        return Val(__HTTPConn{tcp: None, tls: Val(secure)})
+        return Val(__HTTPConn{tcp: None, tls: Val(secure), peer: peer})
     }
-    Val(__HTTPConn{tcp: Val(stream), tls: None})
+    Val(__HTTPConn{tcp: Val(stream), tls: None, peer: peer})
 }
 
 // Whether the connection's request was answered by the mux. A request the
@@ -1522,6 +1527,7 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, se
                 cell: http.__upgrade_cell(fd)
                 request := received
                 request.__upgrade = Val(cell)
+                request.__peer = stream.peer.copy()
                 // The handler runs as its own task, so a panic in it is this
                 // connection's 500 and serving goes on; it is shielded as its
                 // connection is.

@@ -430,7 +430,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     // whatever markers it carries.
                     loop marker in method.markers {
                         access: sema_app_endpoint_access(marker, graph, method_module) ?? next
-                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, prefix, marker.span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, marker, prefix, environment, program, scopes, state, tail_store, context, diagnostics)
                         if endpoint == .Val(value) {
                             body.push(TStmt.ExprStmt{value: value, span: marker.span})
                         }
@@ -506,8 +506,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
 // made posts its calls. An `#App.Public` method registers through the App's
 // `__remote_public` with a handler that decodes each argument from the
 // posted JSON array and encodes the method's reply; an `#App.SignedIn` one
-// through `__remote_signed_in`.
-sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// through `__remote_signed_in`. Both take the endpoint `marker`'s rate limit
+// (`sema_app_endpoint_limit`).
+sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    span: marker.span
     graph: program.registration_graph ?? return None
     concrete: method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && method.type_params.len() == 0
     read_only: loop index in 1..<method.params.len() {
@@ -521,8 +523,11 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     }
     address: "{prefix}/{method.name}"
     path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
+    limit := sema_app_endpoint_limit(marker, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    window: limit.pop() ?? panic("an endpoint limit has no window")
+    calls: limit.pop() ?? panic("an endpoint limit has no count")
     if access == "SignedIn" {
-        return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+        return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
     }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, "__remote_public", [Type]{}, [Type]{}, span, environment, program, diagnostics)
     candidate: candidates.pop() ?? panic("App.__remote_public is not registered")
@@ -563,7 +568,38 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
         return None
     }
     answer_arg.convention = AccessConvention.Move
-    sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, sema_call_http_static_tree_arg(answer, answer_arg)}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, sema_call_http_static_tree_arg(answer, answer_arg), calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// The window an endpoint marker's `per:` defaults to: one minute.
+SEMA_APP_LIMIT_WINDOW_NS: 60000000000
+
+// An endpoint marker's rate limit as the two arguments `__remote_public`
+// and `__remote_signed_in` take: its `limit:` (0, no limit, when unwritten)
+// and its `per:` window in nanoseconds (`per.ns`), each checked as an Int.
+sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TCallArg]? {
+    span: marker.span
+    calls := Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    window := Expr.Int{value: SEMA_APP_LIMIT_WINDOW_NS, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    loop (index, argument) in marker.args {
+        written: if argument == .Expr(value) -> value.copy() else -> next
+        label := if index == 0 -> "limit" else -> "per"
+        if index < marker.arg_labels.len() {
+            if marker.arg_labels[index] == .Val(named) -> label = named.name.copy()
+        }
+        if label == {
+            "limit" -> calls = written
+            "per" -> window = Expr.Field{base: written, member: "ns", span: expr_span(written), id: AST_NODE_GENERATED}
+            else -> {}
+        }
+    }
+    args := [TCallArg]{}
+    written: [Expr]{calls, window}
+    loop expression in written {
+        value: sema_check_expression(expression, Val(Type.Named{name: "Int"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        args.push(sema_call_http_static_tree_arg(value, sema_http_mount_arg(expression, expr_span(expression))))
+    }
+    Val(args)
 }
 
 // A mount prefix as it leads each mounted path: no trailing slash, so `/api`
