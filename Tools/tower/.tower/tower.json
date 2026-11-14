@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102430,
+    "rev": 102432,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97729,6 +97729,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "D-BOUND-METHOD1 option D corrected (2026-11-14): its text called crew.tell(..) a free spelling, but .. is the inclusive range operator (OP_RANGE, 1..10), so D gives .. a second meaning (I8 cost). ... is not Jet syntax. The ballot's review missed this; D's detail now states it. The owner's <> question was answered: <> keeps its one pipe meaning."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "D-BOUND-METHOD1 is withdrawn in #6792 r4: the closure is the target form for app.live, keyed by its one call. #6824 is no longer a dependency of the proposal and stays a language gap without a ballot."
@@ -97762,7 +97767,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-14T14:25:45.322Z",
+      "updated": "2026-11-14T14:27:03.748Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -201588,7 +201593,7 @@
           "key": "D",
           "name": "A marked read is a bound value",
           "gist": "crew.tell(..) is the bound value; the plain read crew.tell stays an error that suggests the call.",
-          "detail": "The two dots stand for all of the method's other parameters, so the mark costs the same at any arity. Today crew.tell(..) is a parse error, so the spelling is free. Kotlin marks its bound reference the same way, as crew::tell, and Jet's :: is taken.\n\nThe value and its rules are A's: the same receiver evaluation, capture rules and &self rule.\n\nThe mark removes A's two silent cases. A forgotten call with nothing expected stays an error at its line. Adding a function-typed field named tell cannot change what crew.tell(..) reads, since the mark names a method.\n\nThe cost is a form to learn that only callbacks use. Scala 2 required a similar mark, and Scala 3 dropped it as noise.\n\nWhy not crew.tell(<>)? In Jet, <> is the value of the enclosing |> step. Inside a step, crew.tell(<>) is already a call: 7 |> crew.tell(<>) prints \"Lin tells 7\" on dev 03d5f7b309. So one spelling would mean a call inside a pipe and a value outside one, which I8 forbids.\n\nOne hole also reads as one argument. A two-parameter method would need crew.tell(<>, <>), and crew.tell(<>, 3) would be partial application, a larger feature. Empty parentheses, crew.tell(), stay a call with no arguments. The (..) mark is free everywhere, never means a call, and covers every remaining parameter.",
+          "detail": "The two dots stand for all of the method's other parameters, so the mark costs the same at any arity. Today crew.tell(..) is a parse error, but .. is the inclusive range operator (1..10), so this mark gives .. a second meaning. Kotlin marks its bound reference the same way, as crew::tell, and Jet's :: is taken.\n\nThe value and its rules are A's: the same receiver evaluation, capture rules and &self rule.\n\nThe mark removes A's two silent cases. A forgotten call with nothing expected stays an error at its line. Adding a function-typed field named tell cannot change what crew.tell(..) reads, since the mark names a method.\n\nThe cost is a form to learn that only callbacks use. Scala 2 required a similar mark, and Scala 3 dropped it as noise.\n\nWhy not crew.tell(<>)? In Jet, <> is the value of the enclosing |> step. Inside a step, crew.tell(<>) is already a call: 7 |> crew.tell(<>) prints \"Lin tells 7\" on dev 03d5f7b309. So one spelling would mean a call inside a pipe and a value outside one, which I8 forbids.\n\nOne hole also reads as one argument. A two-parameter method would need crew.tell(<>, <>), and crew.tell(<>, 3) would be partial application, a larger feature. Empty parentheses, crew.tell(), stay a call with no arguments. The (..) mark never means a call and covers every remaining parameter, but it reuses the range glyph.",
           "code": "Crew: struct {\n    name: String\n\n    tell: fn(self, id: Int) -> String { \"{self.name} hears about task {id}\" }\n}\n\neach: fn(ids: [Int], notify: fn(Int) -> String) {\n    loop id in ids -> print(notify(id))\n}\n\nrun: fn() {\n    crew: Crew{name: \"Ada\"}\n    each([1, 2], crew.tell(..)) // Ada hears about task 1, then 2\n}"
         }
       ],
@@ -205230,6 +205235,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T14:27:03.748Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vc9b8r",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T14:26:54.502Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-BOUND-METHOD1",
+      "note": ""
+    },
     {
       "at": "2026-11-14T14:26:17.981Z",
       "by": "Main",
