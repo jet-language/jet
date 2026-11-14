@@ -141,11 +141,13 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
             at += 1
         }
     }
-    decls: jet_driver_core_record_decls(record) ?? return Err(err)
     keyed: rows.len()
     graph.seeded_results = results.move()
     graph.seeded_core_usage = usage.move()
-    graph.core_bodies = Val(sema_core_body_store_new(record.reader, record.tree, JET_CORE_RECORD_BODY_ROWS, rows.move(), decls))
+    // The store reads a declaration row (section 7) only when a taken body
+    // first names it.
+    decls: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_DECL_ROWS)
+    graph.core_bodies = Val(sema_core_body_store_new(record.reader, record.tree, JET_CORE_RECORD_BODY_ROWS, rows.move(), JET_CORE_RECORD_DECL_ROWS, decls))
     Ok(keyed)
 }
 

@@ -1,10 +1,21 @@
 // Rebasing a Core record body's DeclIDs into a graph's declaration table
-// (CoreRecordBodies.jet sema_core_body_rebase_tree), as a graph does when it
-// takes the body: each maps to the graph's row of its key, and only the
-// rows a body names join the table.
+// (CoreRecordBodies.jet sema_core_body_rebase_row and
+// sema_core_body_rebase_tree), as a graph does when it takes the body: each
+// row the body names maps to the graph's row of its key, and only the rows a
+// body names join the table.
 use {
-    jet_sema.[sema_core_body_rebase_decl, sema_core_body_rebase_tree, sema_core_decl_rebase_new]
-    jet_foundation.[BodyCallArg, BodyFnValueKind, BodyHostCall, BodyNode, BodyTree, DeclTable, NodeKind, SharedLifetime, Span, StmtKind, SymbolKind, TExprType, Type, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index]
+    jet_sema.[SemaCoreDeclRebase, sema_core_body_rebase_decl, sema_core_body_rebase_row, sema_core_body_rebase_tree, sema_core_body_tree_decl_rows, sema_core_decl_rebase_new]
+    jet_foundation.[BodyCallArg, BodyFnValueKind, BodyHostCall, BodyNode, BodyTree, DeclRow, DeclTable, NodeKind, SharedLifetime, Span, StmtKind, SymbolKind, TExprType, Type, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index]
+}
+
+// Maps each row of `record` that `tree` names, as the store does after it
+// reads the row from the record, then rebases the tree.
+rebase_test_map: fn(rebase: &SemaCoreDeclRebase, record: DeclTable, graph: &DeclTable, tree: &BodyTree) -> Int Err! {
+    loop row in sema_core_body_tree_decl_rows(tree) {
+        decl := DeclRow{key: "{record.rows.key[row]}", kind: record.rows.kind[row]}
+        _: sema_core_body_rebase_row(rebase, graph, row, decl) ?? return Err(err)
+    }
+    sema_core_body_rebase_tree(rebase, tree)
 }
 
 // The graph row of the DeclID node `index` of `tree` names, or -1.
@@ -35,7 +46,7 @@ rebase_test_row: fn(table: DeclTable, key: String) -> Int Never! {
     f: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
     g: decl_table_add_row(record, "function:core.a::g", SymbolKind.Function)
     f_again: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
-    _: decl_table_add_row(record, "function:core.a::unused", SymbolKind.Function)
+    unused: decl_table_add_row(record, "function:core.a::unused", SymbolKind.Function)
     decl_table_index(record)
     graph := DeclTable{}
     _: decl_table_add_row(graph, "function:main::run", SymbolKind.Function)
@@ -50,8 +61,8 @@ rebase_test_row: fn(table: DeclTable, key: String) -> Int Never! {
         BodyNode{id: 4, kind: NodeKind.Call{callee: g, type_args: [Type]{}, args: [BodyCallArg]{}}, span: span},
         BodyNode{id: 5, kind: NodeKind.FnValue{kind: BodyFnValueKind.NamedFn{function: None, lambda: None}}, span: span},
     }, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
-    rebase := sema_core_decl_rebase_new(record)
-    rebased: sema_core_body_rebase_tree(rebase, graph, tree) ?? -1
+    rebase := sema_core_decl_rebase_new(record.rows.len())
+    rebased: rebase_test_map(rebase, record, graph, tree) ?? -1
     assert_eq(rebased, 5)
     decl_table_index(graph)
     // f keeps the graph's row; g and seed are added in the order the body
@@ -67,22 +78,26 @@ rebase_test_row: fn(table: DeclTable, key: String) -> Int Never! {
     assert_eq(rebase_test_row(graph, "constant:core.a::seed"), 3)
     assert_eq(rebase_test_row(graph, "function:core.a::unused"), -1)
     // A second rebase of the same record row gives the same graph row.
-    again: sema_core_body_rebase_decl(rebase, graph, g) ?? seed
+    again: sema_core_body_rebase_decl(rebase, g) ?? seed
     assert_eq(decl_id_index(again), 2)
+    assert_eq(graph.rows.len(), 4)
+    // A row no body named was never mapped.
+    unmapped: sema_core_body_rebase_decl(rebase, unused) ?? unused
+    assert_eq(decl_id_index(unmapped), 4)
     assert_eq(graph.rows.len(), 4)
 }
 
 #Test("A rebase refuses a declaration row the record doesn't have") {
-    record := DeclTable{}
-    only: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
-    decl_table_index(record)
     graph := DeclTable{}
-    _: decl_table_add_row(graph, "function:main::run", SymbolKind.Function)
+    run: decl_table_add_row(graph, "function:main::run", SymbolKind.Function)
     _: decl_table_add_row(graph, "function:main::a", SymbolKind.Function)
     far: decl_table_add_row(graph, "function:main::b", SymbolKind.Function)
     decl_table_index(graph)
-    rebase := sema_core_decl_rebase_new(record)
-    mapped: sema_core_body_rebase_decl(rebase, graph, far) ?? only
-    assert_eq(decl_id_index(mapped), 0)
+    rebase := sema_core_decl_rebase_new(1)
+    decl := DeclRow{key: "function:core.a::f", kind: SymbolKind.Function}
+    refused: sema_core_body_rebase_row(rebase, graph, decl_id_index(far), decl) ?? run
+    assert_eq(decl_id_index(refused), 0)
+    unread: sema_core_body_rebase_decl(rebase, far) ?? run
+    assert_eq(decl_id_index(unread), 0)
     assert_eq(graph.rows.len(), 3)
 }
