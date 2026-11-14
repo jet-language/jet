@@ -1,0 +1,90 @@
+// Every corpus row is one order and one argument, then what glibc's jn and yn
+// returned for them, computed offline: four 16 hex digit words, the order's
+// two's complement and the three binary64 bit patterns. The program checks
+// math.bessel_j and math.bessel_y on every row and prints, per function, the
+// rows it checked and how many differ, plus the first differing rows. A
+// result matches when both are NaN, when both are the same infinity or the
+// same signed zero, or when they are at most 256 units in the last place or
+// 2^-47 apart. Neither library is correctly rounded: near a zero of the
+// function both lose ulps while keeping the absolute error near 1e-16 times
+// its scale, and on the large values of Y_n the recurrence loses ulps.
+use {
+    math: core.math
+}
+
+CORPUS: #run embed_file("corpus/bessel.txt")
+
+ULPS: 256
+ABSOLUTE: Float{7.105427357601002e-15}
+
+hex_value: fn(b: U8) -> Int {
+    n: Int{b}
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The two's complement integer of the 16 hex digit word at `at`.
+int_at: fn(raw: [U8], at: Int) -> Int {
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n >= 0x8000_0000_0000_0000 -> return n - 0x1_0000_0000_0000_0000
+    n
+}
+
+hex_word: fn(value: Float) -> String {
+    digits: "0123456789abcdef".bytes()
+    n := math.to_bits(value)
+    if n < 0 -> n = n + 0x1_0000_0000_0000_0000
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+// The value's place on the number line counted in binary64 steps.
+ordinal: fn(value: Float) -> Int {
+    bits: math.to_bits(value)
+    magnitude: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if bits < 0 -> return -magnitude
+    magnitude
+}
+
+matches: fn(got: Float, want: Float) -> Bool {
+    if math.is_nan(got) || math.is_nan(want) -> return math.is_nan(got) && math.is_nan(want)
+    if math.is_inf(got) || math.is_inf(want) -> return got == want
+    if got == 0.0 && want == 0.0 -> return math.to_bits(got) == math.to_bits(want)
+    gap: ordinal(got) - ordinal(want)
+    if gap <= ULPS && gap >= -ULPS -> return true
+    math.fabs(got - want) <= ABSOLUTE
+}
+
+run: fn() {
+    raw: CORPUS.bytes()
+    rows := 0
+    wrong_j := 0
+    wrong_y := 0
+    at := 0
+    loop at < raw.len() {
+        n: int_at(raw, at)
+        x: math.from_bits(int_at(raw, at + 17))
+        want_j: math.from_bits(int_at(raw, at + 34))
+        want_y: math.from_bits(int_at(raw, at + 51))
+        at = at + 68
+        rows = rows + 1
+        j: math.bessel_j(n, x)
+        if !matches(j, want_j) {
+            wrong_j = wrong_j + 1
+            if wrong_j <= 3 -> print("bessel_j({n}, {hex_word(x)}) = {hex_word(j)}, glibc {hex_word(want_j)}")
+        }
+        y: math.bessel_y(n, x)
+        if !matches(y, want_y) {
+            wrong_y = wrong_y + 1
+            if wrong_y <= 3 -> print("bessel_y({n}, {hex_word(x)}) = {hex_word(y)}, glibc {hex_word(want_y)}")
+        }
+    }
+    print("bessel_j: {rows} rows, {wrong_j} differ")
+    print("bessel_y: {rows} rows, {wrong_y} differ")
+}

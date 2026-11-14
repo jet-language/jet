@@ -877,6 +877,357 @@ __ATANH_HARD: [Float]{
     0.29466049539433053, 0.30366226016540027, 1.3877787807814457e-17,
     0.4419702967639501, 0.47467676321215935, -1.3877787807814457e-17
 }
+// Bessel functions of the first and second kind of integer order: j0.c,
+// j1.c and jn.c from musl 1.2.5 (origin: FreeBSD msun e_j0.c, e_j1.c and
+// e_jn.c), which carry this notice:
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+// Below 2, orders 0 and 1 are rational approximations; from 2 they are
+// sqrt(2/(pi x)) (p cos(x - phase) - q sin(x - phase)) with p and q rational
+// in 1/x^2 on four intervals. Higher orders recur from orders 0 and 1:
+// upward where x is above the order, else backward from a continued
+// fraction. None is correctly rounded: near a zero of the function the error
+// in ulps is large, while the absolute error stays near 1e-16 times the
+// function's scale.
+
+/// J_n(x), the Bessel function of the first kind of integer order `n` (POSIX
+/// jn; j0 and j1 are orders 0 and 1), from musl 1.2.5's j0.c, j1.c and jn.c:
+/// J_-n(x) = (-1)^n J_n(x), 0 at +-inf, and NaN for a NaN.
+bessel_j: fn(n: Int, x: Float) -> Float Never! {
+    if is_nan(x) -> return x
+    if n == 0 -> return __bessel_j0(x)
+    // m = |n| - 1, and J_-n(x) = J_n(-x)
+    m: if n < 0 -> -(n + 1) else -> n - 1
+    v: if n < 0 -> -x else -> x
+    if m == 0 -> return __bessel_j1(v)
+    // An odd order is odd in x, an even one even.
+    negative: sign_bit(v) && n.bit_and(1) == 1
+    ax: fabs(v)
+    ix: __bessel_high(ax)
+    mf: Float{m}
+    nf: mf + 1.0
+    b := Float{0.0}
+    if ax == 0.0 || is_inf(ax) {
+        b = 0.0
+    } else if mf < ax {
+        // Upward: J(k + 1, x) = 2k/x J(k, x) - J(k - 1, x) is stable.
+        if ix >= 0x52D0_0000 {
+            // x > 2^302: the leading term of the asymptotic expansion
+            phase: m.bit_and(3)
+            t := cos(ax) + sin(ax)
+            if phase == 0 -> t = -cos(ax) + sin(ax)
+            if phase == 1 -> t = -cos(ax) - sin(ax)
+            if phase == 2 -> t = cos(ax) - sin(ax)
+            b = __BESSEL_INVSQRTPI * t / sqrt(ax)
+        } else {
+            a := __bessel_j0(ax)
+            b = __bessel_j1(ax)
+            loop i in 1..<(m + 1) {
+                t: b
+                b = b * (Float{2.0} * Float{i} / ax) - a
+                a = t
+            }
+        }
+    } else if ix < 0x3E10_0000 {
+        // x < 2^-29: the first Taylor term (x/2)^n / n!
+        if m > 32 {
+            b = 0.0
+        } else {
+            half: ax * 0.5
+            b = half
+            factorial := Float{1.0}
+            loop i in 2..<(m + 2) {
+                factorial = factorial * Float{i}
+                b = b * half
+            }
+            b = b / factorial
+        }
+    } else {
+        // Backward: J(n, x) / J(n - 1, x) is the continued fraction
+        // 1 / (w - 1 / (w + h - 1 / (w + 2h - ...))) with w = 2n/x and
+        // h = 2/x; its depth k is where Q(k) = (w + kh) Q(k - 1) - Q(k - 2)
+        // passes 1e9.
+        w: Float{2.0} * nf / ax
+        h: Float{2.0} / ax
+        z := w + h
+        q0 := w
+        q1 := w * z - 1.0
+        k := 1
+        loop q1 < 1.0e9 {
+            k += 1
+            z = z + h
+            next_q: z * q1 - q0
+            q0 = q1
+            q1 = next_q
+        }
+        t := Float{0.0}
+        i := k
+        loop i >= 0 {
+            t = Float{1.0} / (Float{2.0} * (Float{i} + nf) / ax - t)
+            i -= 1
+        }
+        a := t
+        b = 1.0
+        // When n ln(2n/x) passes ln(max) the recurrence may overflow, so b
+        // is scaled back whenever it passes 2^500.
+        scaled: nf * ln(fabs(w)) >= 709.782712893383973096
+        i = m
+        loop i > 0 {
+            u: b
+            b = b * (Float{2.0} * Float{i}) / ax - a
+            a = u
+            if scaled && b > __BESSEL_SCALE {
+                a = a / b
+                t = t / b
+                b = 1.0
+            }
+            i -= 1
+        }
+        zero: __bessel_j0(ax)
+        one: __bessel_j1(ax)
+        b = if fabs(zero) >= fabs(one) -> t * zero / b else -> t * one / a
+    }
+    if negative -> -b else -> b
+}
+
+/// Y_n(x), the Bessel function of the second kind of integer order `n`
+/// (POSIX yn; y0 and y1 are orders 0 and 1), from musl 1.2.5's j0.c, j1.c and
+/// jn.c: Y_-n(x) = (-1)^n Y_n(x), -inf at +-0, 0 at +inf, and NaN below 0 or
+/// for a NaN.
+bessel_y: fn(n: Int, x: Float) -> Float Never! {
+    if is_nan(x) -> return x
+    if x < 0.0 -> return NAN
+    if n == 0 -> return __bessel_y0(x)
+    m: if n < 0 -> -(n + 1) else -> n - 1
+    negative: n < 0 && n.bit_and(1) == 1
+    if m == 0 {
+        one: __bessel_y1(x)
+        return if negative -> -one else -> one
+    }
+    if is_inf(x) -> return 0.0
+    b := Float{0.0}
+    if __bessel_high(x) >= 0x52D0_0000 {
+        // x > 2^302: the leading term of the asymptotic expansion
+        phase: m.bit_and(3)
+        t := sin(x) - cos(x)
+        if phase == 0 -> t = -sin(x) - cos(x)
+        if phase == 1 -> t = -sin(x) + cos(x)
+        if phase == 2 -> t = sin(x) + cos(x)
+        b = __BESSEL_INVSQRTPI * t / sqrt(x)
+    } else {
+        // Upward recurrence, which stops at -inf.
+        a := __bessel_y0(x)
+        b = __bessel_y1(x)
+        i := 0
+        loop i < m && (to_bits(b) >> 32).bit_and(0xFFFF_FFFF) != 0xFFF0_0000 {
+            i += 1
+            t: b
+            b = (Float{2.0} * Float{i} / x) * b - a
+            a = t
+        }
+    }
+    if negative -> -b else -> b
+}
+
+__BESSEL_INVSQRTPI: Float{0.56418958354775628}
+__BESSEL_TPI: Float{0.63661977236758138}
+__BESSEL_SCALE: Float{3.2733906078961419e150}
+
+// The high word of x's bits, its sign cleared.
+__bessel_high: fn(x: Float) -> Int Never! { (to_bits(x) >> 32).bit_and(0x7FFF_FFFF) }
+
+// The interval of the p and q tables for x >= 2: [8, inf), [4.5454, 8),
+// [2.8571, 4.5454) or [2, 2.8571).
+__bessel_row: fn(ix: Int) -> Int Never! {
+    if ix >= 0x4020_0000 -> return 0
+    if ix >= 0x4012_2E8B -> return 1
+    if ix >= 0x4006_DB6D -> return 2
+    3
+}
+
+// 1 + r(z)/s(z) with z = 1/x^2: musl's pzero and pone, over tables of six
+// numerator and five denominator coefficients per interval.
+__bessel_p: fn(r: [Float], s: [Float], x: Float) -> Float Never! {
+    row: __bessel_row(__bessel_high(x))
+    p: 6 * row
+    q: 5 * row
+    z: Float{1.0} / (x * x)
+    num: r[p] + z * (r[p + 1] + z * (r[p + 2] + z * (r[p + 3] + z * (r[p + 4] + z * r[p + 5]))))
+    den: Float{1.0} + z * (s[q] + z * (s[q + 1] + z * (s[q + 2] + z * (s[q + 3] + z * s[q + 4]))))
+    Float{1.0} + num / den
+}
+
+// (c + r(z)/s(z)) / x with z = 1/x^2: musl's qzero (c = -1/8) and qone
+// (c = 3/8), over tables of six coefficients per interval.
+__bessel_q: fn(r: [Float], s: [Float], c: Float, x: Float) -> Float Never! {
+    p: 6 * __bessel_row(__bessel_high(x))
+    z: Float{1.0} / (x * x)
+    num: r[p] + z * (r[p + 1] + z * (r[p + 2] + z * (r[p + 3] + z * (r[p + 4] + z * r[p + 5]))))
+    den: Float{1.0} + z * (s[p] + z * (s[p + 1] + z * (s[p + 2] + z * (s[p + 3] + z * (s[p + 4] + z * s[p + 5])))))
+    (c + num / den) / x
+}
+
+// J0 or Y0 for x >= 2: sqrt(2/(pi x)) (p0 cos(x - pi/4) -+ q0 sin(x - pi/4)),
+// with sin(x) +- cos(x) taken as -cos(2x)/(sin(x) -+ cos(x)) where the other
+// cancels.
+__bessel_common0: fn(ix: Int, x: Float, second: Bool) -> Float Never! {
+    s: sin(x)
+    c := cos(x)
+    if second -> c = -c
+    cc := s + c
+    // 2x overflows from 2^1023
+    if ix < 0x7FE0_0000 {
+        ss := s - c
+        z: -cos(Float{2.0} * x)
+        if s * c < 0.0 -> cc = z / ss else -> ss = z / cc
+        if ix < 0x4800_0000 {
+            if second -> ss = -ss
+            cc = __bessel_p(__BESSEL_P0_R, __BESSEL_P0_S, x) * cc - __bessel_q(__BESSEL_Q0_R, __BESSEL_Q0_S, -0.125, x) * ss
+        }
+    }
+    __BESSEL_INVSQRTPI * cc / sqrt(x)
+}
+
+// J1 or Y1 for x >= 2, as __bessel_common0 with the phase 3pi/4; `negative`
+// negates the result (J1 is odd).
+__bessel_common1: fn(ix: Int, x: Float, second: Bool, negative: Bool) -> Float Never! {
+    s := sin(x)
+    if second -> s = -s
+    c: cos(x)
+    cc := s - c
+    if ix < 0x7FE0_0000 {
+        ss := -s - c
+        z: cos(Float{2.0} * x)
+        if s * c > 0.0 -> cc = z / ss else -> ss = z / cc
+        if ix < 0x4800_0000 {
+            if second -> ss = -ss
+            cc = __bessel_p(__BESSEL_P1_R, __BESSEL_P1_S, x) * cc - __bessel_q(__BESSEL_Q1_R, __BESSEL_Q1_S, 0.375, x) * ss
+        }
+    }
+    if negative -> cc = -cc
+    __BESSEL_INVSQRTPI * cc / sqrt(x)
+}
+
+__bessel_j0: fn(x: Float) -> Float Never! {
+    ix: __bessel_high(x)
+    // 0 at +-inf, NaN for a NaN
+    if ix >= 0x7FF0_0000 -> return Float{1.0} / (x * x)
+    ax: fabs(x)
+    // Large ulp errors near the zeros 2.4, 5.52, 8.6537, ...
+    if ix >= 0x4000_0000 -> return __bessel_common0(ix, ax, false)
+    if ix >= 0x3F20_0000 {
+        // 2^-13 <= |x| < 2: 1 - x^2/4 + x^2 R(x^2)/S(x^2)
+        z: ax * ax
+        r: z * (Float{0.015624999999999995} + z * (Float{-0.00018997929423885472} + z * (Float{1.8295404953270067e-06} + z * -4.6183268853210319e-09)))
+        s: Float{1.0} + z * (Float{0.015619102946489001} + z * (Float{0.00011692678466333745} + z * (Float{5.1354655020731811e-07} + z * 1.1661400333379e-09)))
+        return (Float{1.0} + ax / 2.0) * (Float{1.0} - ax / 2.0) + z * (r / s)
+    }
+    // 1 - x^2/4, with x^2/4 skipped where it underflows
+    if ix >= 0x3800_0000 -> return Float{1.0} - Float{0.25} * ax * ax
+    Float{1.0} - ax
+}
+
+__bessel_y0: fn(x: Float) -> Float Never! {
+    if x == 0.0 -> return -INFINITY
+    if is_inf(x) -> return 0.0
+    ix: __bessel_high(x)
+    // Large ulp errors near the zeros 3.958, 7.086, ...
+    if ix >= 0x4000_0000 -> return __bessel_common0(ix, x, true)
+    if ix >= 0x3E40_0000 {
+        // 2^-27 <= x < 2: U(x^2)/V(x^2) + (2/pi) J0(x) ln(x), with a large
+        // ulp error near the first zero, 0.89
+        z: x * x
+        u: Float{-0.073804295108687232} + z * (Float{0.17666645250918112} + z * (Float{-0.01381856719455969} + z * (Float{0.00034745343209368365} + z * (Float{-3.8140705372436416e-06} + z * (Float{1.9559013703502292e-08} + z * -3.982051941321034e-11)))))
+        v: Float{1.0} + z * (Float{0.01273048348341237} + z * (Float{7.6006862735035325e-05} + z * (Float{2.5915085184045781e-07} + z * 4.4111031133267547e-10)))
+        return u / v + __BESSEL_TPI * (__bessel_j0(x) * ln(x))
+    }
+    Float{-0.073804295108687232} + __BESSEL_TPI * ln(x)
+}
+
+__bessel_j1: fn(x: Float) -> Float Never! {
+    ix: __bessel_high(x)
+    // +-0 at +-inf, as glibc's j1 gives (musl's is +0 for both)
+    if ix >= 0x7FF0_0000 -> return Float{1.0} / x
+    if ix >= 0x4000_0000 -> return __bessel_common1(ix, fabs(x), false, sign_bit(x))
+    z := x
+    if ix >= 0x3800_0000 {
+        // 2^-127 <= |x| < 2: x/2 + x R(x^2)/S(x^2)
+        zz: x * x
+        r: zz * (Float{-0.0625} + zz * (Float{0.0014070566695518971} + zz * (Float{-1.599556310840356e-05} + zz * 4.9672799960958445e-08)))
+        s: Float{1.0} + zz * (Float{0.019153759953836346} + zz * (Float{0.00018594678558863092} + zz * (Float{1.1771846404262368e-06} + zz * (Float{5.0463625707621704e-09} + zz * 1.2354227442613791e-11))))
+        z = r / s
+    }
+    (Float{0.5} + z) * x
+}
+
+__bessel_y1: fn(x: Float) -> Float Never! {
+    if x == 0.0 -> return -INFINITY
+    if is_inf(x) -> return 0.0
+    ix: __bessel_high(x)
+    if ix >= 0x4000_0000 -> return __bessel_common1(ix, x, true, false)
+    // x < 2^-54: -2/(pi x)
+    if ix < 0x3C90_0000 -> return -__BESSEL_TPI / x
+    z: x * x
+    u: Float{-0.19605709064623894} + z * (Float{0.050443871663981128} + z * (Float{-0.0019125689587576355} + z * (Float{2.352526005616105e-05} + z * -9.1909915803987887e-08)))
+    v: Float{1.0} + z * (Float{0.01991673182366499} + z * (Float{0.00020255258102513517} + z * (Float{1.3560880109751623e-06} + z * (Float{6.227414523646215e-09} + z * 1.6655924620799208e-11))))
+    x * (u / v) + __BESSEL_TPI * (__bessel_j1(x) * ln(x) - Float{1.0} / x)
+}
+
+// p0, q0, p1 and q1's tables, one row per interval of __bessel_row.
+__BESSEL_P0_R: [Float]{
+    0.0, -0.070312499999990036, -8.081670412753498, -257.06310567970485, -2485.2164100942882, -5253.0438049072955,
+    -1.141254646918945e-11, -0.070312494087359928, -4.1596106447058778, -67.674765226516726, -331.23129964917297, -346.43338836560491,
+    -2.5470460177195192e-09, -0.070311961638148165, -2.4090322154952961, -21.965977473488309, -58.079170470173757, -31.44794705948885,
+    -8.8753433303252641e-08, -0.070303099548362474, -1.4507384678095299, -7.6356961382352777, -11.193166886035675, -3.2336457935133534
+}
+__BESSEL_P0_S: [Float]{
+    116.53436461966818, 3833.7447536412183, 40597.857264847255, 116752.97256437592, 47627.728414673096,
+    60.753938269230034, 1051.2523059570458, 5978.9709433385578, 9625.4451435777446, 2406.0581592293911,
+    35.856033805520973, 361.51398305030386, 1193.6078379211153, 1127.9967985690741, 173.58093081333575,
+    22.220299753208881, 136.20679421821521, 270.47027865808349, 153.87539420832033, 14.657617694825619
+}
+__BESSEL_Q0_R: [Float]{
+    0.0, 0.073242187499993505, 11.768206468225269, 557.67338025640186, 8859.1972075646863, 37014.626777688783,
+    1.8408596359451553e-11, 0.073242176661268477, 5.8356350896205695, 135.11157728644983, 1027.243765961641, 1989.9778586460538,
+    4.3774101408973862e-09, 0.073241118004291145, 3.3442313751617072, 42.621844074541265, 170.8080913405656, 166.73394869665117,
+    1.5044444488698327e-07, 0.073223426596307928, 1.99819174093816, 14.495602934788574, 31.666231750478154, 16.252707571092927
+}
+__BESSEL_Q0_S: [Float]{
+    163.77602689568982, 8098.3449465644981, 142538.29141912048, 803309.2571195144, 840501.57981906051, -343899.29353786662,
+    82.776610223653776, 2077.8141642139299, 18847.288778571809, 56751.112289494733, 35976.753842511447, -5354.3427560194477,
+    48.758872972458718, 709.68922105660602, 3704.1482262011136, 6460.4251675256892, 2516.3336892036896, -149.24745183615639,
+    30.365584835521918, 269.34811860804984, 844.78375759532014, 882.93584511248855, 212.66638851179883, -5.3109549388266695
+}
+__BESSEL_P1_R: [Float]{
+    0.0, 0.11718749999998865, 13.239480659307358, 412.05185430737856, 3874.7453891396053, 7914.4795403189173,
+    1.3199051955624352e-11, 0.1171874931906141, 6.8027512786843287, 108.30818299018911, 517.63613953319975, 528.71520136333754,
+    3.0250391613737362e-09, 0.11718686556725359, 3.9329775003331564, 35.119403559163693, 91.055011075078127, 48.559068519736492,
+    1.0771083010687374e-07, 0.11717621946268335, 2.3685149666760879, 12.242610914826123, 17.693971127168773, 5.073523125888185
+}
+__BESSEL_P1_S: [Float]{
+    114.20737037567841, 3650.9308342085346, 36956.206026903346, 97602.79359349508, 30804.272062788881,
+    59.280598722113133, 991.40141873361438, 5353.2669529148798, 7844.6903174955123, 1504.0468881036106,
+    34.791309500125152, 336.76245874782575, 1046.8713997577513, 890.81134639825643, 103.78793243963928,
+    21.436485936382141, 125.29022716840275, 232.27646905716281, 117.6793732871471, 8.3646389337161828
+}
+__BESSEL_Q1_R: [Float]{
+    0.0, -0.10253906249999271, -16.271753454458999, -759.60172251395011, -11849.806670242959, -48438.512428575035,
+    -2.089799311417641e-11, -0.10253905024137543, -8.0564482812393603, -183.66960747488838, -1373.1937606550816, -2612.4444045321566,
+    -5.0783122646176656e-09, -0.10253782982083709, -4.610115811394734, -57.847221656278364, -228.2445407376317, -219.21012847890933,
+    -1.7838172751095887e-07, -0.10251704260798555, -2.7522056827818746, -19.663616264370372, -42.325313337283049, -21.371921170370406
+}
+__BESSEL_Q1_S: [Float]{
+    161.39536970072291, 7825.3859992334847, 133875.33628724958, 719657.72368324094, 666601.23261777638, -294490.26430383464,
+    81.276550138433578, 1991.7987346048596, 17468.485192490891, 49851.427091035228, 27948.075163891812, -4719.1835479512847,
+    47.665155032372951, 673.86511267669971, 3380.1528667952634, 5547.7290972072278, 1903.119193388108, -135.20119144430734,
+    29.533362906052385, 252.98154998219053, 757.50283486864544, 739.39320532046725, 155.94900333666612, -4.9594989882262821
+}
 /// The cube root of x, correctly rounded (CORE-MATH cbrt.c): odd in x, exact
 /// at every exact cube, and +-0, +-inf and NaN return themselves.
 cbrt: fn(n: Float) -> Float Never! {
