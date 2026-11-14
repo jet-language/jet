@@ -1,8 +1,8 @@
 // Loading a Core module from the precompiled Core record (JetDriver
 // Loader.jet JetDriverParseJob.Record, jet_driver_core_record_parsed_unit):
 // its registration row decodes into the unit's program and line table with
-// no source lexed or scanned, its recorded identifier demand is the unit's,
-// and the loaded rows seed the graph (JetDriver
+// no source lexed or scanned, its recorded reach (identifier demand and
+// words) is the unit's, and the loaded rows seed the graph (JetDriver
 // CoreRecordRebase.jet jet_driver_core_record_seeds). Kept beside the record
 // codec's tests, not in the driver's test package, whose files compile most
 // of the compiler.
@@ -14,7 +14,7 @@ use {
         SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment,
         sema_registration_prepare_graph,
     ]
-    jet_driver.[JetDriverCoreIdentifierDemand, JetDriverLoadedModule, jet_driver_canonical_effect_module, jet_driver_core_record_parsed_unit, jet_driver_core_record_seeds]
+    jet_driver.[JetDriverCoreIdentifierDemand, JetDriverCoreModuleReach, JetDriverLoadedModule, JetDriverReachDeclaration, JetDriverUnitWords, jet_driver_canonical_effect_module, jet_driver_core_record_parsed_unit, jet_driver_core_record_seeds]
     jet_foundation.[Span, SymbolKeys, ast_program, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
@@ -50,12 +50,16 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     JetDriverLoadedModule{source_unit_index: 0, source_identity: "load:main.jet", package_identity: row.package_identity, module_identity: row.module_identity, module_name: row.module_name, program: program.move(), core_record_index: index, core_registration: [SemaRegistrationModule]{held.move()}}
 }
 
-#Test("a record row loads as the program, line table and demand it holds, with no source lexed") {
+#Test("a record row loads as the program, line table and reach it holds, with no source lexed") {
     row := core_record_load_row()
     items: row.program.items.len()
     assert(items > 0)
     demand: JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_receiver: false, core_paths: [String]{"encoding"}, codec_decode: true}
-    unit := jet_driver_core_record_parsed_unit(row.encode(), demand, "main", 3)
+    // One row, `main` (item 1), spelling its own name; the rest spells
+    // nothing.
+    words: JetDriverUnitWords{words: [String]{"main"}, items: [Int]{1}, members: [String]{""}, owners: [Int]{-1}, names: [String]{"main"}, cascades: [Bool]{false}, traits: [String]{""}, spells: [[Int]]{[Int]{0}, [Int]{}}, routed: false, held: [JetDriverReachDeclaration]{}}
+    reach := JetDriverCoreModuleReach{demand: demand, words: words}
+    unit := jet_driver_core_record_parsed_unit(row.encode(), reach.move(), "main", 3)
     assert_eq(unit.parsed.diagnostics.len(), 0)
     assert_eq(unit.parsed.program.items.len(), items)
     assert_eq(unit.tokens, 0)
@@ -63,7 +67,11 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     // The row's own line table, not a scan of the text.
     assert(unit.line_starts.len() > 1)
     assert_eq(unit.line_starts, parser_line_starts(LOAD_MAIN.bytes()))
-    assert(unit.words == None)
+    // The words the record's check found in the module's source.
+    found: unit.words ?? panic("the record unit has no words")
+    assert_eq(found.names, [String]{"main"})
+    assert_eq(found.items, [Int]{1})
+    assert_eq(found.spells.len(), 2)
     // The demand the record's check found in the module's source.
     assert_eq(unit.demand.core_paths, [String]{"encoding"})
     assert(unit.demand.codec_decode)

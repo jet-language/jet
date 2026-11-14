@@ -106,6 +106,11 @@ JetDriverUnitWords: struct {
     held: [JetDriverReachDeclaration]
 }
 
+// The words of a unit that spells nothing.
+jet_driver_unit_no_words: fn() -> JetDriverUnitWords Never! {
+    JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
+}
+
 // One implementation of a trait for a Core type: the modules and names of
 // its type and its trait. A compiler-owned trait (Compiler/Prelude/Traits.jet)
 // has the module "", and so does a builtin type.
@@ -768,6 +773,52 @@ jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], held: [Jet
     JetDriverUnitWords{words: spellings.table.texts.move(), items: rows.items.move(), members: rows.members.move(), owners: rows.owners.move(), names: rows.names.move(), cascades: rows.cascades.move(), traits: rows.traits.move(), spells: spells, routed: routes.routed, held: held}
 }
 
+// The words the Core record keeps for a lazy Core unit `words`
+// (CoreRecord.jet JetDriverCoreModuleReach), whose program.items are `items`.
+// A compile that takes the unit's recorded rows keeps all of it, and sema
+// takes a body of it only when a taken body names that body, save the
+// bodies it takes up front: a trait implementation's methods, a `close`, a
+// generated method (JetSema CoreDemand.jet). So only the row of a top-level
+// function or constant stays; every other row's spellings (a routed type's
+// and its methods', a lazy implementation's) join the rest, reached with the
+// unit, and what a body taken up front spells loads what it names. The unit
+// is routed for no one, since it keeps its unreached code, and holds
+// nothing: its rows hold every declaration parsed.
+jet_driver_reach_recorded_words: fn(words: JetDriverUnitWords, items: [Item]) -> JetDriverUnitWords Never! {
+    kept := JetDriverUnitWords{words: words.words.copy(), items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
+    // The rows whose spellings join the rest, and the rest's own row last
+    // (a unit that spells nothing has none).
+    merged := [Int]{}
+    loop (row, position) in words.items {
+        declaration: words.members[row] == "" && words.traits[row] == "" && words.owners[row] < 0 && (items[position] == .Func(_) || items[position] == .Const(_))
+        if !declaration {
+            merged.push(row)
+            next
+        }
+        kept.items.push(position)
+        kept.members.push("")
+        kept.owners.push(-1)
+        kept.names.push(words.names[row].copy())
+        kept.cascades.push(words.cascades[row])
+        kept.traits.push("")
+        kept.spells.push(words.spells[row].copy())
+    }
+    if words.spells.len() > words.items.len() -> merged.push(words.items.len())
+    rest := [Int]{}
+    // Each spelling once in the rest.
+    seen := [Bool]{}
+    loop row in merged {
+        loop key in words.spells[row] {
+            loop seen.len() <= key -> seen.push(false)
+            if seen[key] -> next
+            seen[key] = true
+            rest.push(key)
+        }
+    }
+    kept.spells.push(rest)
+    kept
+}
+
 // One lazy declaration of a reached module: its module (`unit`), position in
 // that module's program.items, the method it is (`member`, "" for a whole
 // item), name, whether its name leaves with it (`cascade`), and spellings
@@ -809,12 +860,15 @@ JetDriverReachImpl: struct {
 // entry, a module the compiler demands) reaches every word it spells and
 // every declaration it has. `local` holds the names its reached code spells
 // bare, `dotted` those it spells after a `.`, `heads` those it spells as a
-// path head. A `routed` module leaves every unreached lazy declaration.
+// path head. A `routed` module leaves every unreached lazy declaration. A
+// `recorded` module is one the Core record holds: its rows are final, so
+// none of its declarations or imports leaves it (jet_driver_reach_strip).
 JetDriverReachUnit: struct {
     loaded: Int
     module_name: String
     open: Bool
     routed: Bool
+    recorded: Bool
     local: [Bool]
     dotted: [Bool]
     heads: [Bool]
@@ -902,10 +956,11 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 // method from it, so each name it spells after a `.` reaches such methods.
 // The module's declarations count as reached for implementations
 // (jet_driver_core_impl_reached), and each waiting implementation of a trait
-// it declares tries again.
-jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
+// it declares tries again. A `recorded` module's words are the ones the Core
+// record keeps for it (jet_driver_reach_recorded_words).
+jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool, recorded: Bool) -> Int {
     unit: reach.units.len()
-    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, local: [Bool]{}, dotted: [Bool]{}, heads: [Bool]{}})
+    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, recorded: recorded, local: [Bool]{}, dotted: [Bool]{}, heads: [Bool]{}})
     name_rows_set(reach.reached, module_name, 1)
     loop at in 0..<reach.impls.len() {
         index: reach.impls[at].item
@@ -1251,7 +1306,9 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
 // dropped declaration (bare in the same module, after a `.` anywhere), until
 // no remaining declaration names a dropped one. A dropped method or trait
 // block leaves its type; a method's name stays, since other types may share
-// it.
+// it. A recorded unit keeps all of it: its rows are final, and sema takes
+// a body of it only when a taken body names that body
+// (JetSema CoreRecordBodies.jet).
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModule]) {
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
@@ -1267,14 +1324,14 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     }
     any := false
     loop edge in reach.edges {
-        if edge.followed -> next
+        if edge.followed || reach.units[edge.unit].recorded -> next
         any = true
         loop dead[edge.unit].len() <= edge.alias -> dead[edge.unit].push(false)
         dead[edge.unit][edge.alias] = true
         dead_imports[edge.unit].push(edge.scoped.declaration.span)
     }
     loop demand in reach.demands {
-        if demand.followed -> next
+        if demand.followed || reach.units[demand.unit].recorded -> next
         any = true
         if demand.dotted {
             loop waiting_dotted[demand.unit].len() <= demand.word -> waiting_dotted[demand.unit].push(false)
@@ -1291,8 +1348,8 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     local_gone := [[Bool]]{}
     loop _ in reach.units -> local_gone.push([Bool]{})
     loop index in 0..<reach.items.len() {
-        if reach.items[index].live -> next
         unit: reach.items[index].unit
+        if reach.items[index].live || reach.units[unit].recorded -> next
         if reach.units[unit].routed || reach.items[index].held || reach.items[index].lazy_impl >= 0 || modules[reach.units[unit].loaded].program.items[reach.items[index].item] == .Const(_) {
             any = true
             jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
@@ -1303,8 +1360,8 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     loop grew {
         grew = false
         loop index in 0..<reach.items.len() {
-            if reach.items[index].live || gone[index] -> next
             unit: reach.items[index].unit
+            if reach.items[index].live || gone[index] || reach.units[unit].recorded -> next
             hit := false
             loop spell in reach.items[index].spells {
                 id: spell >> 2

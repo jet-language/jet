@@ -1474,7 +1474,7 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v14` record of that check to the file and prints one
+also writes the `jet.core/v15` record of that check to the file and prints one
 line per record section at once: its element count, the bytes its elements
 take and the bytes of its largest element. It then reads the file back and
 encodes every row again, which must give the tree it was read from. The record
@@ -1498,7 +1498,10 @@ that takes the record walks no Core body to check a call that carries such a
 value into Core. So are its effect facts: each Core function's `#FX(…)`
 regions, loop spans, `assume_deterministic` spans and pending
 `#Kernel(.parallel)` obligations, so a compile that takes the record walks no
-Core body for the effect check either.
+Core body for the effect check either. So is its reach: what its source
+spells, so a compile that takes the record loads the Core modules a module
+imports or names only once reached code of it spells them, as a compile of
+Core's sources does.
 `--embed <image> <runtime-dir> <out> <identity>` writes the executable
 `image` to `out` with the record added as its `jet.core` part and, in the
 same pass, each runtime file of `runtime-dir` (the key, export and thread

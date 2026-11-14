@@ -6,11 +6,13 @@ use {
     fs: core.files
     jet_driver.[
         JET_DRIVER_MEMBER_ROUTES, JET_DRIVER_ROUTED_MODULES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult, JetDriverParseJob,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult, JetDriverLoadedModule, JetDriverParseJob, JetDriverScopedImport,
         jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load, jet_driver_parse_one,
+        jet_driver_reach, jet_driver_reach_admit, jet_driver_reach_defer, jet_driver_reach_drain, jet_driver_reach_global, jet_driver_reach_recorded_words,
+        jet_driver_reach_strip, jet_driver_reach_wants, jet_driver_reach_word, jet_driver_scoped_imports,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, Func, compiler_threads_single]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, Func, ModuleID, compiler_threads_single]
 }
 
 // A check request for the one user file `source`, with no Core sources yet.
@@ -273,6 +275,64 @@ reach_test_sources: fn(dir: String, out: &[String]) {
         loop key in words.spells[row] -> spelled.push("{words.words[key >> 2]}/{key.bit_and(3)}")
     }
     assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
+}
+
+#Test("the Core record keeps a lazy Core unit's top-level function and constant rows, and every other row's spellings reach with the unit") {
+    text: "Box: struct {{\n    width: Float\n\n    area: fn(self) -> Float Never! {{ self.width * other.size() }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nLIMIT: 4\n"
+    parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
+    words: parsed.words ?? panic("a Core unit has words")
+    recorded: jet_driver_reach_recorded_words(words, parsed.parsed.program.items)
+    // Routed for no one and holding nothing: the record's rows hold every
+    // declaration parsed.
+    assert(!recorded.routed && recorded.held.len() == 0)
+    assert_eq(recorded.words, words.words)
+    // `make`, and `LIMIT`, which `limit` reaches too; Box's row and area's
+    // leave, since sema takes a type's code with the type.
+    assert_eq(recorded.names, [String]{"make", "LIMIT", "limit"})
+    assert_eq(recorded.spells.len(), 4)
+    rest := [String]{}
+    loop key in recorded.spells[3] -> rest.push("{recorded.words[key >> 2]}/{key.bit_and(3)}")
+    assert(rest.contains("other/2") && rest.contains("size/1"), "the rest spells {rest}")
+}
+
+// The Core module `core.devtools`, whose `lookup` alone names its import,
+// admitted to a reach alone, its words the Core record's when `recorded`,
+// with its import deferred; then reached code spells `reached` ("" for
+// nothing), and the reach strips the module.
+reach_test_recorded_strip: fn(recorded: Bool, reached: String) -> JetDriverLoadedModule {
+    owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
+    parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    found: parsed.words ?? panic("a Core unit has words")
+    words: if recorded -> jet_driver_reach_recorded_words(found, parsed.parsed.program.items) else -> found.copy()
+    reach := jet_driver_reach(true)
+    unit: jet_driver_reach_admit(reach, 0, "core.devtools", words, parsed.parsed.program.imports, false, recorded)
+    scoped := [JetDriverScopedImport]{}
+    jet_driver_scoped_imports(parsed.parsed.program.imports, parsed.parsed.program.items, "", true, scoped)
+    loop row in scoped -> jet_driver_reach_defer(reach, unit, row)
+    if reached != "" {
+        word: jet_driver_reach_word(reach, reached)
+        jet_driver_reach_global(reach, word)
+    }
+    jet_driver_reach_drain(reach)
+    assert_eq(jet_driver_reach_wants(reach, 0), reached == "lookup")
+    modules := [JetDriverLoadedModule]{JetDriverLoadedModule{source_unit_index: 0, source_identity: "reach:core.devtools", package_identity: "core", module_identity: ModuleID{id: 0}, module_name: "core.devtools", program: parsed.parsed.program.move()}}
+    jet_driver_reach_strip(reach, modules)
+    modules.pop() ?? panic("the reach strips the one module")
+}
+
+#Test("a recorded Core unit defers its import until reached code spells its alias, and keeps its unreached code") {
+    // A parsed unit's unreached `lookup` leaves with the import it names.
+    parsed: reach_test_recorded_strip(false, "plain")
+    assert_eq(parsed.program.imports.len(), 0)
+    assert_eq(parsed.program.items.len(), 1)
+    // A recorded unit's rows are final: nothing leaves, and the import
+    // still waits for `lookup`.
+    kept: reach_test_recorded_strip(true, "")
+    assert_eq(kept.program.imports.len(), 1)
+    assert_eq(kept.program.items.len(), 2)
+    reached: reach_test_recorded_strip(true, "lookup")
+    assert_eq(reached.program.items.len(), 2)
 }
 
 #Test("a lazy routed Core unit parses only the declarations reached code names") {
