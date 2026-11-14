@@ -33,7 +33,7 @@
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
 
-use jet_foundation.[name_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_rows, name_rows_set, name_rows_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
 IR_TAIL_JUMP: 1
@@ -61,12 +61,32 @@ IRTailSite: struct {
     drops: [Int]
 }
 
-ir_tail_calls: fn(m: &IRModule) Never! {
+// Each function's ownable parameters and tail calls as built read only its
+// own body and its callees' signatures, so for those the functions split
+// into consecutive parts (compiler_threads_partition by size), one thread
+// each, as many as `threads` admits. The variants are then numbered in
+// function order and call order, as the one-thread walk does, so every
+// body and variant is the same for any thread count.
+ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     count: m.functions.len()
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    weights := [Int]{}
+    total := 0
+    loop f in m.functions {
+        weights.push(1 + f.op.len())
+        total += 1 + f.op.len()
+    }
     ownable := [Int]{}
-    loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
+    plans := [IRTailPlan]{}
+    workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if {
+        workers <= 1 -> {
+            loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
+            loop f in m.functions -> plans.push(ir_tail_sites(m, f, 0, poll, trap, ownable))
+        }
+        else -> ir_tail_threads_plan(m, compiler_threads_partition(weights, workers), poll, trap, ownable, plans)
+    }
     // Work items: item k < count is function k as built; each later one a
     // variant (function id k) of function sources[k] owning masks[k].
     sources := [Int]{}
@@ -76,11 +96,12 @@ ir_tail_calls: fn(m: &IRModule) Never! {
         masks.push(0)
     }
     rows := name_rows()
-    plans := [IRTailPlan]{}
-    item := 0
+    loop id in 0..<count -> ir_tail_targets(plans[id], rows, sources, masks)
+    item := count
     loop item < sources.len() {
-        plan: ir_tail_plan(m, m.functions[sources[item]], masks[item], poll, trap, ownable, rows, sources, masks)
-        plans.push(plan)
+        plan := ir_tail_sites(m, m.functions[sources[item]], masks[item], poll, trap, ownable)
+        ir_tail_targets(plan, rows, sources, masks)
+        plans.push(plan.move())
         item += 1
     }
     // The variants copy the bodies as built, before those are rewritten.
@@ -119,9 +140,9 @@ ir_tail_ownable: fn(m: IRModule, f: IRFunction) -> Int Never! {
     mask
 }
 
-// The tail calls of `f` owning the parameters in `owned`; a call handing
-// values over names the variant it jumps to, queued as a work item when new.
-ir_tail_plan: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: [Int], rows: &NameRows, sources: &[Int], masks: &[Int]) -> IRTailPlan Never! {
+// The tail calls of `f` owning the parameters in `owned`, each targeting
+// its callee until ir_tail_targets names the variants.
+ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: [Int]) -> IRTailPlan Never! {
     plan := IRTailPlan{calls: [Int]{}, returns: [Int]{}, targets: [Int]{}, masks: [Int]{}, polls: [Int]{}, drop_start: [Int]{0}, drops: [Int]{}}
     if f.asm != None -> return plan
     loop at in 0..<f.op.len() {
@@ -131,27 +152,85 @@ ir_tail_plan: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, o
         // Sites never overlap: a Return inside an earlier site's stop poll
         // has no Call shape of its own.
         if plan.returns.len() > 0 && site.call <= plan.returns[plan.returns.len() - 1] -> next
-        callee: f.a[site.call]
-        target := callee
-        if site.mask != 0 {
-            key: "{callee}#{site.mask}"
-            target = name_rows_value(rows, key) ?? -1
-            if target < 0 {
-                target = sources.len()
-                sources.push(callee)
-                masks.push(site.mask)
-                name_rows_set(rows, key, target)
-            }
-        }
         plan.calls.push(site.call)
         plan.returns.push(at)
-        plan.targets.push(target)
+        plan.targets.push(f.a[site.call])
         plan.masks.push(site.mask)
         plan.polls.push(site.poll)
         loop slot in site.drops -> plan.drops.push(slot)
         plan.drop_start.push(plan.drops.len())
     }
     plan
+}
+
+// Points each call of `plan` handing values over at the variant of its
+// callee owning them, queued as a work item when new.
+ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, sources: &[Int], masks: &[Int]) Never! {
+    loop site in 0..<plan.calls.len() {
+        mask: plan.masks[site]
+        if mask == 0 -> next
+        callee: plan.targets[site]
+        key: "{callee}#{mask}"
+        target := name_rows_value(rows, key) ?? -1
+        if target < 0 {
+            target = sources.len()
+            sources.push(callee)
+            masks.push(mask)
+            name_rows_set(rows, key, target)
+        }
+        plan.targets[site] = target
+    }
+}
+
+// ir_tail_ownable, then ir_tail_sites as built, of every function of `m`
+// into `ownable` and `plans`, one thread per part from `bounds`. Both walks
+// only read `m`; each part's results come back in part order.
+ir_tail_threads_plan: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, ownable: &[Int], plans: &[IRTailPlan]) Never! {
+    owned: ir_tail_parts(m, bounds, poll, trap, ownable, 0)
+    loop part in owned.move() -> ownable.extend(part.ownable)
+    planned: ir_tail_parts(m, bounds, poll, trap, ownable, 0)
+    loop part in planned.move() -> plans.extend(part.plans)
+}
+
+// One part's walk of ir_tail_calls: its functions' ownable parameters, or
+// their tail calls as built.
+IRTailPart: struct {
+    ownable: [Int]
+    plans: [IRTailPlan]
+}
+
+// Parts `at` on, in part order, each walked on its own thread and the last
+// on this one (ir_tail_part).
+ir_tail_parts: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, ownable: [Int], at: Int) -> [IRTailPart] Never! {
+    done := [IRTailPart]{}
+    last: bounds.len() - 2
+    if at > last -> return done
+    if at == last {
+        done.push(ir_tail_part(m, bounds[at], bounds[at + 1], poll, trap, ownable))
+        return done
+    }
+    task.group ir_tail_group {
+        head: task ir_tail_part(m, bounds[at], bounds[at + 1], poll, trap, ownable)
+        rest: ir_tail_parts(m, bounds, poll, trap, ownable, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+// The functions `start..<end`: their ownable parameters while `ownable`
+// has none, else their tail calls as built.
+ir_tail_part: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int, ownable: [Int]) -> IRTailPart Never! {
+    part := IRTailPart{ownable: [Int]{}, plans: [IRTailPlan]{}}
+    if {
+        ownable.len() == 0 -> {
+            loop id in start..<end -> part.ownable.push(ir_tail_ownable(m, m.functions[id]))
+        }
+        else -> {
+            loop id in start..<end -> part.plans.push(ir_tail_sites(m, m.functions[id], 0, poll, trap, ownable))
+        }
+    }
+    part
 }
 
 ir_tail_none: fn() -> IRTailSite Never! {

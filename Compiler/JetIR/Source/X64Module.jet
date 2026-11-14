@@ -347,7 +347,7 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
 ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String]) -> IRX64Result Never! {
     m := program.move()
     ir_drop_early(m, threads)
-    ir_tail_calls(m)
+    ir_tail_calls(m, threads)
     tables := ir_x64_tables(m)
     log := [String]{}
     if names.len() > 0 {
