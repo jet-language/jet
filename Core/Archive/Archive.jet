@@ -46,7 +46,7 @@ crc32: fn(data: [U8]) -> Int Never! { zlib.crc32(data) }
 adler32: fn(data: [U8]) -> Int Never! { zlib.adler32(data) }
 
 // The ArchiveError of a failed zlib kernel status.
-zlib_error: fn(status: Int) -> ArchiveError Never! {
+__zlib_error: fn(status: Int) -> ArchiveError Never! {
     if {
         status == zlib.C_INFLATE_UNSUPPORTED -> ArchiveError.Unsupported
         status == zlib.C_ZLIB_CHECKSUM -> ArchiveError.Checksum
@@ -91,7 +91,7 @@ deflate: fn(data: [U8]) -> [U8] ArchiveError! {
 inflate: fn(data: [U8]) -> [U8] ArchiveError! {
     out := [U8]{}
     status: zlib.inflate_into(data, out)
-    if status != zlib.C_INFLATE_OK -> return Err(zlib_error(status))
+    if status != zlib.C_INFLATE_OK -> return Err(__zlib_error(status))
     Ok(out)
 }
 
@@ -113,7 +113,7 @@ compress: fn(data: [U8]) -> [U8] ArchiveError! {
 decompress: fn(data: [U8]) -> [U8] ArchiveError! {
     out := [U8]{}
     status: zlib.decompress_into(data, out)
-    if status != zlib.C_INFLATE_OK -> return Err(zlib_error(status))
+    if status != zlib.C_INFLATE_OK -> return Err(__zlib_error(status))
     Ok(out)
 }
 

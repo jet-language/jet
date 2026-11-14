@@ -613,7 +613,7 @@ BrowserProtocol: struct {
         }
         if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
-        page_session: protocol_session(self)
+        page_session: __protocol_session(self)
         request := [(key: String, value: Dyn)]{(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)}
         if page_session == .Val(session) -> request.push((key: "session", value: Dyn.Text(session)))
         result: browser_command(self.__browser, "goog:cdp.sendCommand", obj(request))
@@ -628,7 +628,7 @@ BrowserProtocol: struct {
         if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
         if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
         request := [(key: String, value: Dyn)]{(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))}
-        if protocol_session(self) != None -> request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
+        if __protocol_session(self) != None -> request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
         browser_command(self.__browser, "session.subscribe", obj(request))
         Ok()
     }
@@ -636,15 +636,15 @@ BrowserProtocol: struct {
     // A page's handle waits for the next event of its own CDP session and
     // leaves every other event queued.
     next_event: fn(self, timeout: BrowserTimeout) -[Net, Time]> BrowserEvent BrowserError! {
-        page_session: protocol_session(self)
+        page_session: __protocol_session(self)
         session: page_session ?? return self.__browser.next_event(timeout)
         if browser_closed(self.__browser) -> return Err(BrowserError{kind: "closed"})
-        if browser_pop_session_event(self.__browser, session) == .Val(queued) -> return Ok(queued)
+        if __browser_pop_session_event(self.__browser, session) == .Val(queued) -> return Ok(queued)
         started: time.instant()
         loop {
             value: browser_recv_json(self.__browser, started, timeout.milliseconds)
             if !browser_capture_event(self.__browser, value) -> return Err(BrowserError{kind: "protocol"})
-            if browser_pop_session_event(self.__browser, session) == .Val(event) -> return Ok(event)
+            if __browser_pop_session_event(self.__browser, session) == .Val(event) -> return Ok(event)
         }
     }
 }
@@ -652,7 +652,7 @@ BrowserProtocol: struct {
 // The CDP session of a page's handle, asked of the driver once with
 // `goog:cdp.getSession` and kept in the handle; None for a browser's handle.
 // It never leaves Core.
-protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? BrowserError! {
+__protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? BrowserError! {
     page: scope_id(protocol.__page)
     if page == "" -> return Ok(None)
     if scope_closed(protocol.__page) || scope_closed(protocol.__context) -> return Err(BrowserError{kind: "closed"})
@@ -661,7 +661,7 @@ protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? BrowserErr
     result: browser_command(protocol.__browser, "goog:cdp.getSession", obj([(key: "context", value: Dyn.Text(page))]))
     session: browser_string(result, "session")
     if session == "" -> return Err(BrowserError{kind: "protocol"})
-    scope_set_id(protocol.__session, session)
+    __scope_set_id(protocol.__session, session)
     Ok(Val(session))
 }
 
@@ -1138,7 +1138,7 @@ browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
 
 // The first queued event of CDP session `session`; every other event stays
 // queued in order.
-browser_pop_session_event: fn(browser: Browser, session: String) -> BrowserEvent? Never! {
+__browser_pop_session_event: fn(browser: Browser, session: String) -> BrowserEvent? Never! {
     guard := browser.__state.guard_edit()
     found := -1
     loop index in 0..<guard.value.events.len() {
@@ -1466,7 +1466,7 @@ scope_close: fn(scope: Shared<__BrowserScope>) Never! {
     guard.value.closed = true
 }
 
-scope_set_id: fn(scope: Shared<__BrowserScope>, id: String) Never! {
+__scope_set_id: fn(scope: Shared<__BrowserScope>, id: String) Never! {
     guard := scope.guard_edit()
     guard.value.id = id
 }

@@ -109,7 +109,7 @@ char_indices: fn(text: String) -> [String] Never! {
 
 display_width: fn(text: String) -> Int Never! {
     bytes: text.bytes()
-    if printable_ascii(bytes) -> return bytes.len()
+    if __printable_ascii(bytes) -> return bytes.len()
     total := 0
     loop cluster in split_graphemes(text) -> total = total + text_width.cluster_width(decode_scalars(cluster))
     total
@@ -117,7 +117,7 @@ display_width: fn(text: String) -> Int Never! {
 
 // Whether every byte is printable ASCII, space through `~`: each is a
 // grapheme of its own, one column wide, so display_width needs no lookup.
-printable_ascii: fn(bytes: [U8]) -> Bool Never! {
+__printable_ascii: fn(bytes: [U8]) -> Bool Never! {
     loop b in bytes {
         if b < (U8{32}) || b > (U8{126}) -> return false
     }

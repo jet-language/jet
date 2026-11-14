@@ -322,7 +322,7 @@ to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> 
     if items[0] == .Object(_) {
         header := [String]{}
         loop entry in stream.object_entries(items[0]) -> header.push(entry.key)
-        out = encode_row(header, formulas)
+        out = __encode_row(header, formulas)
         loop tree in items {
             if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
             fields := [String]{}
@@ -330,22 +330,22 @@ to_string: fn<T: Encode>(rows: T, formulas: CSVFormulas{CSVFormulas.Escape}) -> 
                 cell := ""
                 loop entry in stream.object_entries(tree) {
                     if entry.key == key {
-                        cell = formula_cell(entry.value, formulas)
+                        cell = __formula_cell(entry.value, formulas)
                         break
                     }
                 }
                 fields.push(cell)
             }
-            out = "{out}\n{encode_row(fields, CSVFormulas.Keep)}"
+            out = "{out}\n{__encode_row(fields, CSVFormulas.Keep)}"
         }
     } else {
         loop i in 0..<items.len() {
             if items[i] == {
                 .Array(cells) -> {
                     fields := [String]{}
-                    loop cell in cells -> fields.push(formula_cell(cell, formulas))
+                    loop cell in cells -> fields.push(__formula_cell(cell, formulas))
                     if i > 0 -> out = "{out}\n"
-                    out = "{out}{encode_row(fields, CSVFormulas.Keep)}"
+                    out = "{out}{__encode_row(fields, CSVFormulas.Keep)}"
                 }
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("csv.to_string needs rows or records")
             }
@@ -378,7 +378,7 @@ CSVFormulas: enum { Escape Keep }
 
 // Does `formulas` escape text cell `cell`: it opens a formula and is not a
 // number such as `-12.5`.
-formula_escaped: fn(cell: String, formulas: CSVFormulas) -> Bool Never! {
+__formula_escaped: fn(cell: String, formulas: CSVFormulas) -> Bool Never! {
     if formulas == .Keep || cell.count_bytes() == 0 -> return false
     lead: stream.byte_at(cell, 0)
     if lead == (U8{61}) || lead == (U8{64}) || lead == (U8{9}) || lead == (U8{13}) -> return true
@@ -389,9 +389,9 @@ formula_escaped: fn(cell: String, formulas: CSVFormulas) -> Bool Never! {
 
 // A record cell's text (`csv_cell`), after an apostrophe when it is a text
 // cell `formulas` escapes; a number, a Bool or a byte string is never one.
-formula_cell: fn(value: Dyn, formulas: CSVFormulas) -> String Never! {
+__formula_cell: fn(value: Dyn, formulas: CSVFormulas) -> String Never! {
     cell: csv_cell(value)
-    if value == .Text(_) && formula_escaped(cell, formulas) -> return "'{cell}"
+    if value == .Text(_) && __formula_escaped(cell, formulas) -> return "'{cell}"
     cell
 }
 
@@ -570,17 +570,17 @@ kept_record: fn(fields: [String], record: Int, header: Bool, skip_blank: Bool) -
     false
 }
 
-encode_row: fn(fields: [String], formulas: CSVFormulas) -> String {
+__encode_row: fn(fields: [String], formulas: CSVFormulas) -> String {
     out := ""
     loop i in 0..<fields.len() {
         if i > 0 -> out = "{out},"
-        out = "{out}{encode_field(fields[i], formulas)}"
+        out = "{out}{__encode_field(fields[i], formulas)}"
     }
     out
 }
 
-encode_field: fn(field: String, formulas: CSVFormulas) -> String {
-    if formula_escaped(field, formulas) -> return encode_field("'{field}", CSVFormulas.Keep)
+__encode_field: fn(field: String, formulas: CSVFormulas) -> String {
+    if __formula_escaped(field, formulas) -> return __encode_field("'{field}", CSVFormulas.Keep)
     needs := false
     loop b in field.bytes() {
         n: b
@@ -631,8 +631,8 @@ dict_get_or: fn(row: DictRow, key: String, fallback: String) -> String Never! {
 
 write_dict: fn(rows: [DictRow], formulas: CSVFormulas{CSVFormulas.Escape}) -> String Never! {
     if rows.len() == 0 -> return ""
-    out := "{encode_row(rows[0].fields, formulas)}\n"
-    loop row in rows -> out = "{out}{encode_row(row.values, formulas)}\n"
+    out := "{__encode_row(rows[0].fields, formulas)}\n"
+    loop row in rows -> out = "{out}{__encode_row(row.values, formulas)}\n"
     out
 }
 
@@ -716,7 +716,7 @@ CSVWriter: struct {
                 if byte == (U8{34}) -> quotes += 1
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
             }
-            escaped: if formula_escaped(field, self.formulas) -> 1 else -> 0
+            escaped: if __formula_escaped(field, self.formulas) -> 1 else -> 0
             wire += field.count_bytes() + escaped + (if quoted -> 2 + quotes else -> 0) + (if i > 0 -> 1 else -> 0)
         }
         if self.limits.max_total_bytes == .Val(limit) {
@@ -734,7 +734,7 @@ CSVWriter: struct {
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
             }
             if quoted -> self.byte(U8{34}, 1) ?? return Err(err)
-            if formula_escaped(field, self.formulas) -> self.byte(U8{39}, 1) ?? return Err(err)
+            if __formula_escaped(field, self.formulas) -> self.byte(U8{39}, 1) ?? return Err(err)
             if quoted {
                 loop at in 0..<field.count_bytes() {
                     byte: stream.byte_at(field, at)

@@ -15,28 +15,28 @@ init_session_storage: fn() -> Shared<SessionStorage> Never! {
 }
 
 get: fn(key: String) -[Browser]> String? Never! {
-    if storage.world_entries("core.browser.storage.session") == .Val(entries) -> return entries.get(key)
+    if storage.__world_entries("core.browser.storage.session") == .Val(entries) -> return entries.get(key)
     state: core.mem.__process_shared(init_session_storage)
     guard: state.guard_read()
     guard.value.entries.get(key)
 }
 
 set: fn(key: String, value: String) Never! -[Browser]> {
-    if storage.world_set("core.browser.storage.session", key, value) -> return
+    if storage.__world_set("core.browser.storage.session", key, value) -> return
     state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
     _: guard.value.entries.add(key.copy(), value.copy())
 }
 
 remove: fn(key: String) Never! -[Browser]> {
-    if storage.world_remove("core.browser.storage.session", key) -> return
+    if storage.__world_remove("core.browser.storage.session", key) -> return
     state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
     _: guard.value.entries.remove(key)
 }
 
 clear: fn() Never! -[Browser]> {
-    if storage.world_clear("core.browser.storage.session") -> return
+    if storage.__world_clear("core.browser.storage.session") -> return
     state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
     guard.value.entries.clear()

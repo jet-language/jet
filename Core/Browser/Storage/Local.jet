@@ -15,28 +15,28 @@ init_local_storage: fn() -> Shared<LocalStorage> Never! {
 }
 
 get: fn(key: String) -[Browser]> String? Never! {
-    if storage.world_entries("core.browser.storage.local") == .Val(entries) -> return entries.get(key)
+    if storage.__world_entries("core.browser.storage.local") == .Val(entries) -> return entries.get(key)
     state: core.mem.__process_shared(init_local_storage)
     guard: state.guard_read()
     guard.value.entries.get(key)
 }
 
 set: fn(key: String, value: String) Never! -[Browser]> {
-    if storage.world_set("core.browser.storage.local", key, value) -> return
+    if storage.__world_set("core.browser.storage.local", key, value) -> return
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _: guard.value.entries.add(key.copy(), value.copy())
 }
 
 remove: fn(key: String) Never! -[Browser]> {
-    if storage.world_remove("core.browser.storage.local", key) -> return
+    if storage.__world_remove("core.browser.storage.local", key) -> return
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     _: guard.value.entries.remove(key)
 }
 
 clear: fn() Never! -[Browser]> {
-    if storage.world_clear("core.browser.storage.local") -> return
+    if storage.__world_clear("core.browser.storage.local") -> return
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
     guard.value.entries.clear()
