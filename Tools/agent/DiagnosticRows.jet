@@ -630,14 +630,15 @@ source_codes: fn(text: String, codes: &[String]) {
     }
 }
 
-// The codes the `.jet` sources under `directory` name, outside test and
-// fixture directories and the registry's own two files.
+// The codes the `.jet` sources under `directory` name, outside test, fixture
+// and hidden directories (a build's `.jet` holds generated copies of the
+// registry) and the registry's own two files.
 emitted_codes: fn(directory: String, codes: &[String]) DiagnosticRowsError! -[FS]> {
     if !files.exists(directory) -> return Ok()
     loop child in (files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))) {
         path: "{directory}/{child.name}"
         if child.is_dir {
-            if !COVERAGE_SKIPPED.contains(child.name) -> emitted_codes(path, codes) ?? return Err(err)
+            if !child.name.starts_with(".") && !COVERAGE_SKIPPED.contains(child.name) -> emitted_codes(path, codes) ?? return Err(err)
         } else if child.name.ends_with(".jet") && path != SOURCE_PATH && path != ROWS_PATH {
             text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
             source_codes(text, codes)
@@ -1774,6 +1775,21 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     loop path in planted -> files.write("{root}/{path}", "Warning [jet.Foo]: {path}\n") ?? panic("{path}: {err}")
     cases: (case_snapshots(root, "tests/cases/s") ?? panic(err.message)).map(fn(file) { file.path })
     assert_eq(cases, [String]{"tests/cases/s/c.warn"})
+    files.remove_all(root) ?? panic("remove scratch: {err}")
+}
+
+#Test("the codes a source names leave out test, fixture and hidden directories") {
+    root: files.mkdtemp("diagnostic-rows-") ?? panic("scratch: {err}")
+    directories: [String]{"src/Tests", "src/fixtures", "src/.jet/build"}
+    loop directory in directories -> files.create_dir_all("{root}/{directory}") ?? panic("{directory}: {err}")
+    planted: [String]{"src/a.jet\tE9991", "src/Tests/t.jet\tE9992", "src/fixtures/f.jet\tE9993", "src/.jet/build/copy.jet\tE9994"}
+    loop row in planted {
+        path: text_before(row, "\t")
+        files.write("{root}/{path}", "report: \"{text_after(row, "\t")}\"\n") ?? panic("{path}: {err}")
+    }
+    codes := [String]{}
+    emitted_codes("{root}/src", codes) ?? panic(err.message)
+    assert_eq(codes, [String]{"E9991"})
     files.remove_all(root) ?? panic("remove scratch: {err}")
 }
 
