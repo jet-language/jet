@@ -452,7 +452,11 @@ measurement, one row per entry and language. The harness writes each entry's
 rows into it as soon as that entry is measured, from a run in any worktree,
 and reuses a row whose program and toolchain are unchanged instead of
 measuring it again (`--remeasure` forces it). Cells the table has no row for
-read "not measured yet". `node Tools/gauntlet/harness/table.mjs import
+read "not measured yet". A measured cell shows its values at a glance and is
+grey until Jet is measured, then green or red by whether Jet beats it; an asm
+ceiling a peer beats is flagged red. Clicking a cell opens its detail with
+Jet's distance on every metric. The page refetches the table every 20 s.
+`node Tools/gauntlet/harness/table.mjs import
 RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows.
 
 ```

@@ -4,9 +4,14 @@
 // over the grid the server plans from the entries' manifests (Tower
 // app/gauntlet-standings.mjs), filled in as the harness measures. Every comparison entry is a
 // row of the grid and Jet, every standings peer and the hand-written asm
-// ceiling are its columns; a cell is measured, not measured yet, or the reason
-// it cannot be (no program, not applicable, no ceiling reference, a failed
-// run). Below the grid, a measured run draws one bar chart per metric on
+// ceiling are its columns. A measured cell shows its values at a glance (run
+// wall · peak RSS, then cycles · size) and is grey until Jet is measured, then
+// green where Jet beats it and red where Jet loses; an asm ceiling some peer
+// beats is flagged red, a defect in the reference. Any other cell is not
+// measured yet or the reason it cannot be (no program, not applicable, no
+// ceiling reference, a failed run). A click opens the cell's detail: every
+// metric with Jet's value and how far Jet is off it, the best peer and the
+// asm ceiling. Below the grid, a measured run draws one bar chart per metric on
 // startup, run wall, run cycles, peak RSS and size: every peer's measured
 // value is a bar Jet must beat, the asm ceiling a marked bar, and Jet a bar
 // once a run measured it; until then the entry reads "Jet pending". Once Jet
@@ -124,13 +129,55 @@ function gridText(head, note) {
   return { head, note: note && note !== NOT_MEASURED_YET ? note : null, text: note && note !== NOT_MEASURED_YET ? `${head}: ${note}` : head };
 }
 
-function rowGrid(row) {
+// A measured cell at a glance: run wall and peak RSS on its first line,
+// cycles and size on its second. `value(metric)` gives that metric's value.
+const GLANCE = Object.freeze([['wall', 'peak_rss'], ['cycles', 'size']]);
+const glanceLines = (cells, value) => GLANCE.map((ids) => ids.map((id) => {
+  const cell = cells.find((item) => item.metric === id);
+  const shown = cell ? value(cell) : null;
+  if (shown === null) return null;
+  const text = standingValue(cell.unit, shown);
+  return cell.unit === 'cycles' ? text.replace(/ ?([kMG]?) cycles$/, '$1 cyc') : text;
+}).filter(Boolean).join(' · '));
+
+// Where a measured peer beats the asm ceiling: per metric, the best peer
+// value below the ceiling's (size only on the same size basis). The ceiling is
+// hand-optimized machine code doing the same work, so any entry here is a
+// defect in the reference, never a result.
+function ceilingBeaten(rows) {
+  const ceiling = rows.find((row) => row.role === 'ceiling' && row.status === 'ok');
+  if (!ceiling) return [];
+  const beaten = [];
+  for (const own of ceiling.cells) {
+    if (own.peerValue === null) continue;
+    let best = null;
+    for (const row of rows) {
+      if (row.role === 'ceiling' || row.status !== 'ok') continue;
+      const cell = row.cells.find((item) => item.metric === own.metric);
+      if (!cell || cell.peerValue === null || cell.peerValue >= own.peerValue) continue;
+      if (own.metric === 'size' && cell.peerBasis !== own.peerBasis) continue;
+      if (!best || cell.peerValue < best.value) best = { peer: row.peer, label: row.label, value: cell.peerValue };
+    }
+    if (best) beaten.push({ metric: own.metric, by: best.peer, label: best.label, value: best.value, ceiling: own.peerValue, ratio: best.value / own.peerValue, unit: own.unit });
+  }
+  return beaten;
+}
+
+// A grid cell's tone: until Jet is measured every measured cell is grey; then
+// green where Jet beats the row on every judged metric, red where it loses
+// one. A ceiling a peer beats is flagged red whether or not Jet is measured.
+function rowGrid(row, jetMeasured, beaten) {
   if (row.status === 'ok') {
+    const [head, note] = glanceLines(row.cells, (cell) => cell.peerValue);
+    if (row.role === 'ceiling' && beaten.length) {
+      const worst = beaten.reduce((low, item) => item.ratio < low.ratio ? item : low);
+      return { head: head || 'measured', note: `beaten: ${worst.label} ${worst.metric.replace('_', ' ')} ${worst.ratio.toFixed(2)}×`, text: `ceiling beaten by ${beaten.map((item) => `${item.label} on ${standingWords(item.metric)}`).join(', ')}`, tone: 'flag' };
+    }
     const tally = {};
     for (const cell of row.cells) if (cell.ratio !== null) tally[cell.verdict] = (tally[cell.verdict] ?? 0) + 1;
     const judged = Object.entries(tally).map(([verdict, n]) => `${n} ${verdict}`).join(' · ');
-    const tone = tally.fail || tally.miss ? 'fail' : judged ? 'pass' : 'ok';
-    return { ...gridText(judged || 'measured', null), tone };
+    const tone = !jetMeasured || !judged ? 'grey' : tally.fail || tally.miss ? 'fail' : 'pass';
+    return { head: head || 'measured', note: note || null, text: [head, note, judged].filter(Boolean).join(' · ') || 'measured', tone };
   }
   if (row.status === 'not_measured') return { ...gridText(NOT_MEASURED_YET, row.reason), tone: 'open' };
   if (row.status === 'uncovered') return { ...gridText('uncovered', row.role === 'ceiling' ? 'no ceiling reference' : row.reason), tone: 'na' };
@@ -148,12 +195,15 @@ function standingRow(peer, item, metrics, inRun) {
   const cells = metrics.map((metric) => standingCell(role, metric.id, object(source.metrics)[metric.id]));
   const reason = item ? source.reason ?? null
     : inRun ? 'the results file has no row for this peer' : `this run's standings do not include ${label}`;
-  const row = { peer, label, role, status, reason, reference: source.reference ?? null, cells };
-  return { ...row, grid: { ...rowGrid(row), reason } };
+  return { peer, label, role, status, reason, reference: source.reference ?? null, program: source.program ?? null, measured: isObject(source.measured) ? source.measured : null, runs: finite(source.runs) ? source.runs : null, cells };
 }
 
-function jetGrid(jet, measured) {
-  if (measured) return { ...gridText('measured', null), tone: 'ok' };
+function jetGrid(jet, measured, rows) {
+  if (measured) {
+    const [head, note] = glanceLines(rows.flatMap((row) => row.cells).filter((cell) => cell.jetValue !== null)
+      .filter((cell, index, all) => all.findIndex((other) => other.metric === cell.metric) === index), (cell) => cell.jetValue);
+    return { head: head || 'measured', note: note || null, text: [head, note].filter(Boolean).join(' · ') || 'measured', tone: 'jet' };
+  }
   if (!jet.status || jet.status === 'not_measured') return { ...gridText(NOT_MEASURED_YET, jet.reason), tone: 'open' };
   return { ...gridText(standingWords(jet.status), jet.reason ?? 'no reason recorded'), tone: 'fail' };
 }
@@ -202,12 +252,15 @@ export function projectGauntletStandings(payload) {
     const panels = metrics.map((metric) => standingPanel(metric, rows));
     const jet = object(entry.jet);
     const measured = panels.some((panel) => panel.jet);
-    const jetRow = { status: jet.status ?? null, reason: jet.reason ?? null, measured };
+    const jetRow = { status: jet.status ?? null, reason: jet.reason ?? null, measured, provenance: isObject(jet.measured) ? jet.measured : null, runs: finite(jet.runs) ? jet.runs : null };
+    const beaten = ceilingBeaten(rows);
+    for (const row of rows) row.grid = { ...rowGrid(row, measured, beaten), reason: row.reason };
     return {
       entry: entry.entry,
       mode: entry.mode ?? null,
       jet: jetRow,
-      grid: [{ peer: 'jet', label: 'Jet', ...jetGrid(jetRow, measured), reason: jetRow.reason }, ...rows.map((row) => ({ peer: row.peer, label: row.label, ...row.grid }))],
+      beaten,
+      grid: [{ peer: 'jet', label: 'Jet', ...jetGrid(jetRow, measured, rows), reason: jetRow.reason }, ...rows.map((row) => ({ peer: row.peer, label: row.label, ...row.grid }))],
       rows,
       panels,
     };
@@ -328,16 +381,130 @@ function standingPanelHtml(entry, panel) {
     + `<ol class="standings__bars">${panel.bars.map((bar) => standingBar(entry.entry, bar)).join('')}${pending}${missing}</ol></figure>`;
 }
 
+// How Jet stands against `value` on `metric`, lower being better: Jet/value
+// and the same in words. Null until both are measured.
+const VERSUS_WORDS = Object.freeze({
+  startup: ['faster', 'slower'], wall: ['faster', 'slower'], cycles: ['fewer cycles', 'more cycles'],
+  peak_rss: ['less memory', 'more memory'], size: ['smaller', 'larger'],
+});
+function jetVersus(metric, jet, value) {
+  if (jet === null || value === null || !(value > 0)) return null;
+  const ratio = jet / value;
+  const [better, worse] = VERSUS_WORDS[metric] ?? ['better', 'worse'];
+  if (ratio === 1) return { ratio, words: 'Jet even (1.00×)', tone: 'pass' };
+  return ratio < 1
+    ? { ratio, words: `Jet ${sig3(1 / ratio)}× ${better} (${ratio.toFixed(2)})`, tone: 'pass' }
+    : { ratio, words: `Jet ${sig3(ratio)}× ${worse} (+${sig3((ratio - 1) * 100)}%)`, tone: 'fail' };
+}
+
+// Everything one grid cell stands for, for the panel a click opens: the row's
+// state and provenance, and per metric its value, Jet's, how far Jet is off
+// it, the best peer's and the asm ceiling's. `peer` is a column ('jet' too).
+export function gauntletDetail(view, entryName, peer) {
+  const entry = view?.entries.find((item) => item.entry === entryName);
+  if (!entry) return null;
+  const isJet = peer === 'jet';
+  const row = isJet ? null : entry.rows.find((item) => item.peer === peer);
+  if (!isJet && !row) return null;
+  const cells = entry.rows.flatMap((item) => item.cells);
+  const valueIn = (item, id) => item?.status === 'ok' ? item.cells.find((cell) => cell.metric === id)?.peerValue ?? null : null;
+  const peers = entry.rows.filter((item) => item.role === 'peer' && item.status === 'ok');
+  const ceiling = entry.rows.find((item) => item.role === 'ceiling');
+  const metrics = view.metrics.map((metric) => {
+    const unit = cells.find((cell) => cell.metric === metric.id && cell.unit)?.unit ?? null;
+    const shown = (value) => value === null ? null : standingValue(unit, value);
+    const jet = cells.find((cell) => cell.metric === metric.id && cell.jetValue !== null)?.jetValue ?? null;
+    const own = isJet ? jet : valueIn(row, metric.id);
+    const cell = isJet ? null : row.cells.find((item) => item.metric === metric.id);
+    const best = peers.map((item) => ({ label: item.label, value: valueIn(item, metric.id) })).filter((item) => item.value !== null)
+      .sort((left, right) => left.value - right.value)[0] ?? null;
+    const asm = valueIn(ceiling, metric.id);
+    return {
+      metric: metric.id,
+      label: metric.label,
+      what: metric.what,
+      value: shown(own),
+      basis: cell?.peerBasis ?? null,
+      missing: own !== null ? null : isJet ? NOT_MEASURED_YET : row.status === 'ok' ? cell?.reason ?? 'no value recorded' : null,
+      jet: shown(jet),
+      versus: isJet ? null : jetVersus(metric.id, jet, own),
+      best: best ? { label: best.label, value: shown(best.value), versus: jetVersus(metric.id, jet, best.value) } : null,
+      ceiling: asm === null ? null : { value: shown(asm), versus: jetVersus(metric.id, jet, asm) },
+      beaten: row?.role === 'ceiling' ? entry.beaten.find((item) => item.metric === metric.id) ?? null : null,
+    };
+  });
+  return {
+    entry: entry.entry,
+    mode: entry.mode,
+    peer,
+    label: isJet ? 'Jet' : row.label,
+    role: isJet ? 'jet' : row.role,
+    status: isJet ? (entry.jet.measured ? 'ok' : entry.jet.status ?? 'not_measured') : row.status,
+    reason: isJet ? entry.jet.reason : row.reason,
+    program: row?.program ?? null,
+    reference: row?.reference ?? null,
+    measured: isJet ? entry.jet.provenance : row.measured,
+    runs: isJet ? entry.jet.runs : row.runs,
+    jetMeasured: entry.jet.measured,
+    metrics,
+  };
+}
+
+// The panel a grid cell opens: one line per metric with this cell's value,
+// Jet's and how far Jet is off it, then the best peer and the asm ceiling
+// with Jet's distance to each. Jet's own panel compares Jet with those two.
+export function renderGauntletDetail(detail) {
+  if (!detail) return '';
+  const versus = (item) => item ? `<span class="gdetail__vs gdetail__vs--${item.tone}">${esc(item.words)}</span>` : '';
+  const pending = detail.jetMeasured ? '—' : NOT_MEASURED_YET;
+  const provenance = detail.measured ? [
+    `measured ${tableDate(detail.measured.at)}`,
+    detail.runs ? `${detail.runs} timed runs` : null,
+    detail.measured.toolchain ? `toolchain ${detail.measured.toolchain}` : null,
+    detail.measured.commit ? `commit ${String(detail.measured.commit).slice(0, 12)}` : null,
+    detail.measured.run_id ? `run ${detail.measured.run_id}` : null,
+  ].filter(Boolean).join(' · ') : null;
+  const facts = [
+    detail.program ? `program ${detail.program}` : null,
+    detail.reference ? `reference ${detail.reference}` : null,
+    provenance,
+  ].filter(Boolean);
+  const status = detail.status === 'ok' ? ''
+    : `<p class="gdetail__status gdetail__status--${detail.status === 'not_measured' ? 'open' : 'fail'}">${esc(standingWords(detail.status))}${detail.reason && detail.reason !== NOT_MEASURED_YET ? `: ${esc(detail.reason)}` : ''}</p>`;
+  const isJet = detail.role === 'jet';
+  const head = isJet
+    ? ['metric', 'Jet', 'best peer', 'Jet vs best peer', 'asm ceiling', 'Jet vs asm']
+    : ['metric', detail.label, 'Jet', `Jet vs ${detail.label}`, 'best peer', 'asm ceiling'];
+  const value = (text, basis, missing) => text === null ? `<span class="gdetail__missing">${esc(missing ?? '—')}</span>` : `${esc(text)}${basis ? `<em>${esc(basis)}</em>` : ''}`;
+  const rows = detail.metrics.map((item) => {
+    const metric = `<th scope="row" title="${esc(item.what ?? item.label)}">${esc(item.label)}</th>`;
+    const best = item.best ? `${esc(item.best.label)} ${esc(item.best.value)}` : '—';
+    const asm = item.ceiling ? esc(item.ceiling.value) : '—';
+    if (isJet) {
+      return `<tr>${metric}<td>${value(item.value, null, item.missing)}</td><td>${best}</td><td>${versus(item.best?.versus) || '—'}</td><td>${asm}</td><td>${versus(item.ceiling?.versus) || '—'}</td></tr>`;
+    }
+    const flag = item.beaten ? `<span class="gdetail__flag">beaten by ${esc(item.beaten.label)} ${esc(standingValue(item.beaten.unit, item.beaten.value))} (${item.beaten.ratio.toFixed(2)}×): the reference is wrong</span>` : '';
+    return `<tr${item.beaten ? ' class="gdetail__row--flag"' : ''}>${metric}<td>${value(item.value, item.basis, item.missing)}${flag}</td><td>${item.jet === null ? `<span class="gdetail__missing">${esc(pending)}</span>` : esc(item.jet)}</td><td>${versus(item.versus) || '—'}</td>`
+      + `<td>${best}${item.best?.versus ? ` ${versus(item.best.versus)}` : ''}</td><td>${asm}${item.ceiling?.versus ? ` ${versus(item.ceiling.versus)}` : ''}</td></tr>`;
+  }).join('');
+  return `<header class="gdetail__head"><h3>${esc(detail.entry)} <small>${esc(detail.mode ?? '')}</small> · ${esc(detail.label)}</h3>`
+    + `<button type="button" class="gdetail__close" data-gclose aria-label="Close details">×</button></header>${status}`
+    + `${facts.length ? `<p class="gdetail__facts">${facts.map(esc).join(' · ')}</p>` : ''}`
+    + `<table class="gdetail__table"><thead><tr>${head.map((label) => `<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`
+    + `<p class="gdetail__rule">Lower is better on every metric. Jet must beat every peer (Jet/peer below 1.00) and reach the asm ceiling (Jet/asm at most 1.00).</p>`;
+}
+
 // The grid: one row per entry, one column for Jet, each peer and the asm
 // ceiling; every cell names its state, its reason beneath and in its title.
 // The title adds the full reason where the cell shortens it (the ceiling's).
 function gridHtml(view) {
-  const title = (entry, item) => `${entry.entry} · ${item.label}: ${item.text}${item.reason && !item.text.includes(item.reason) && item.reason !== NOT_MEASURED_YET ? ` (${item.reason})` : ''}`;
-  const cell = (entry, item) => `<td class="ggrid ggrid--${item.tone}" title="${esc(title(entry, item))}"><b>${esc(item.head)}</b>${item.note ? `<small>${esc(item.note)}</small>` : ''}</td>`;
+  const title = (entry, item) => `${entry.entry} · ${item.label}: ${item.text}${item.reason && !item.text.includes(item.reason) && item.reason !== NOT_MEASURED_YET ? ` (${item.reason})` : ''} · click for details`;
+  const cell = (entry, item) => `<td class="ggrid ggrid--${item.tone}" title="${esc(title(entry, item))}" tabindex="0" role="button" data-gentry="${esc(entry.entry)}" data-gpeer="${esc(item.peer)}"><b>${esc(item.head)}</b>${item.note ? `<small>${esc(item.note)}</small>` : ''}</td>`;
   return `<div class="gauntlet__grid"><table class="gauntlet__table" aria-label="Gauntlet grid">
     <thead><tr><th scope="col">entry</th>${view.columns.map((column) => `<th scope="col">${esc(column.label)}</th>`).join('')}</tr></thead>
     <tbody>${view.entries.map((entry) => `<tr><th scope="row"><div><strong>${esc(entry.entry)}</strong><small>${esc(entry.mode ?? '')}</small></div></th>${entry.grid.map((item) => cell(entry, item)).join('')}</tr>`).join('')}</tbody>
-  </table></div>`;
+  </table></div>
+  <section class="gdetail" data-gdetail aria-live="polite" hidden></section>`;
 }
 
 // The Gauntlet page below its title: which run it is, the grid, and for a

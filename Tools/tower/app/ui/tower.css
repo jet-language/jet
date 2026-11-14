@@ -922,18 +922,55 @@ button.queue__row:hover { border-color: var(--edge-hi); color: var(--blue); }
 .gauntlet__table tbody tr:last-child th, .gauntlet__table tbody tr:last-child td { border-bottom: 0; }
 .gauntlet__table tbody tr:hover th { background: var(--hover); }
 
-/* A grid cell: its state, the reason beneath. Colour = state. */
-.ggrid { padding: 3px 5px; text-align: center; vertical-align: middle; color: var(--faint); cursor: default; }
+/* A grid cell: a measured row's values at a glance (run wall · peak RSS,
+   then cycles · size), else its state and reason. Colour = how Jet stands:
+   grey until Jet is measured, green where Jet beats the row, red where it
+   loses; a red-flagged ceiling is one a peer beats (a defect). Click opens
+   the detail panel below the grid. */
+.ggrid { padding: 3px 5px; text-align: center; vertical-align: middle; color: var(--faint); cursor: pointer; }
 .ggrid b { display: block; font: 700 10px/1.2 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ggrid small { display: block; font: 500 8.5px/1.2 var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ggrid--ok b { color: var(--ink); }
+.ggrid--grey { background: rgba(123, 129, 144, .14); }
+.ggrid--grey b { color: var(--ink); font-weight: 600; }
+.ggrid--grey small { color: var(--dim); }
+.ggrid--jet { background: rgba(106, 142, 242, .14); }
+.ggrid--jet b { color: var(--blue); }
 .ggrid--pass { background: var(--ok-soft); }
 .ggrid--pass b { color: var(--ok); }
 .ggrid--fail { background: var(--ember); }
 .ggrid--fail b { color: var(--red); }
+.ggrid--flag { background: rgba(255, 46, 77, .22); box-shadow: inset 0 0 0 2px var(--red); }
+.ggrid--flag b { color: var(--ink); }
+.ggrid--flag small { color: var(--red); font-weight: 700; }
 .ggrid--open b { color: var(--amber); font-weight: 500; }
 .ggrid--na { opacity: .55; }
-.ggrid:hover { background: var(--hover); outline: 1px solid var(--edge-hi); outline-offset: -1px; }
+.ggrid:hover, .ggrid:focus-visible { background: var(--hover); outline: 1px solid var(--edge-hi); outline-offset: -1px; }
+.ggrid--selected { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+/* The detail panel a grid cell opens. */
+.gdetail { margin: 10px 0 16px; padding: 10px 12px; border: 1px solid var(--edge-hi); border-radius: 6px; background: var(--panel); }
+.gdetail__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.gdetail__head h3 { margin: 0; font: 700 13px/1.3 var(--mono); color: var(--ink); }
+.gdetail__head small { color: var(--faint); font-weight: 500; }
+.gdetail__close { background: none; border: 1px solid var(--edge); border-radius: 4px; color: var(--dim); font: 700 13px/1 var(--mono); padding: 2px 7px; cursor: pointer; }
+.gdetail__close:hover { color: var(--ink); border-color: var(--edge-hi); }
+.gdetail__status { margin: 6px 0 0; font: 600 11px/1.4 var(--mono); }
+.gdetail__status--open { color: var(--amber); }
+.gdetail__status--fail { color: var(--red); }
+.gdetail__facts { margin: 6px 0 0; font: 500 10px/1.5 var(--mono); color: var(--faint); }
+.gdetail__table { width: 100%; margin-top: 8px; border-collapse: collapse; font: 500 11px/1.4 var(--mono); }
+.gdetail__table th, .gdetail__table td { padding: 4px 8px; border-bottom: 1px solid var(--edge); text-align: left; vertical-align: top; }
+.gdetail__table thead th { color: var(--dim); font-weight: 600; background: var(--raised); }
+.gdetail__table tbody th { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.gdetail__table td em { display: block; color: var(--faint); font-style: normal; font-size: 9.5px; }
+.gdetail__missing { color: var(--amber); }
+.gdetail__vs { display: inline-block; padding: 0 5px; border-radius: 3px; font-weight: 700; }
+.gdetail__vs--pass { color: var(--ok); background: var(--ok-soft); }
+.gdetail__vs--fail { color: var(--red); background: var(--ember); }
+.gdetail__row--flag { background: rgba(255, 46, 77, .10); }
+.gdetail__flag { display: block; color: var(--red); font-weight: 700; font-size: 10px; }
+.gdetail__rule { margin: 8px 0 0; font: 500 10px/1.4 var(--mono); color: var(--faint); }
 
 /* Standings (#6834): per entry, one bar chart per metric from the newest
    results file. Grey bars are the peers Jet must beat, the frost bar is the

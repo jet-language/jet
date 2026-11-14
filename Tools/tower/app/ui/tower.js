@@ -8,7 +8,7 @@ import { applyIndexDelta } from './live-delta.js';
 import { renderNowReports, refreshRelativeTimes, briefingBody } from './now.js';
 import { renderBallotIntro, lossText } from './ballot.js';
 
-import { projectGauntletStandings, renderGauntletStandings } from './gauntlet.js';
+import { gauntletDetail, projectGauntletStandings, renderGauntletDetail, renderGauntletStandings } from './gauntlet.js';
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
 // milestones → cards). The beacon on the left edge carries one lit segment
@@ -2554,10 +2554,15 @@ async function viewGuidance() {
     }
   });
 }
-// ---- Gauntlet tab: the one run shown (#6834) --------------------------------
-// The newest full or merged results run, else the planned grid from the
-// entries' manifests; the server decides which (app/gauntlet-standings.mjs).
+// ---- Gauntlet tab: the gauntlet table (#6834) ------------------------------
+// The server serves the table over the grid planned from the entries'
+// manifests (app/gauntlet-standings.mjs). The table fills in as the harness
+// measures, so the tab refetches it each time it draws and every 20 s while
+// it is open. A grid cell opens its detail panel; the open one stays open
+// across a refresh.
 let gauntletCache = null;
+let gauntletOpen = null;
+let gauntletTimer = null;
 
 async function loadGauntlet() {
   const r = await fetch('/api/gauntlet/standings');
@@ -2565,22 +2570,55 @@ async function loadGauntlet() {
   gauntletCache = r.ok ? { data: j, error: null } : { data: null, error: j.message || 'Gauntlet standings fetch failed' };
 }
 
+function showGauntletDetail(v, view, entry, peer) {
+  const panel = v.querySelector('[data-gdetail]');
+  if (!panel) return;
+  v.querySelectorAll('.ggrid--selected').forEach((cell) => cell.classList.remove('ggrid--selected'));
+  const detail = entry ? gauntletDetail(view, entry, peer) : null;
+  gauntletOpen = detail ? { entry, peer } : null;
+  panel.hidden = !detail;
+  panel.innerHTML = renderGauntletDetail(detail);
+  if (!detail) return;
+  const selector = `[data-gentry="${CSS.escape(entry)}"][data-gpeer="${CSS.escape(peer)}"]`;
+  v.querySelector(selector)?.classList.add('ggrid--selected');
+}
+
 async function viewGauntlet() {
   const v = $('#view');
-  if (!gauntletCache) {
-    v.innerHTML = '<div class="viewhead"><h1 class="h1">Gauntlet</h1><span class="viewhead__sub">loading…</span></div>';
-    try { await loadGauntlet(); }
-    catch (e) {
+  if (!gauntletCache) v.innerHTML = '<div class="viewhead"><h1 class="h1">Gauntlet</h1><span class="viewhead__sub">loading…</span></div>';
+  try { await loadGauntlet(); }
+  catch (e) {
+    if (!gauntletCache) {
       v.innerHTML = `<div class="empty"><div>Gauntlet load failed: ${esc(e.message)}</div></div>`;
       return;
     }
   }
   const view = gauntletCache.data ? projectGauntletStandings(gauntletCache.data) : null;
   const body = view ? renderGauntletStandings(view)
-    : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the results file has no standings section')}</div>`;
+    : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the table has no standings section')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">Jet against every peer and the asm ceiling</span>
+      <span class="viewhead__sub">Jet against every peer and the asm ceiling · click a cell for its details</span>
     </div>${body}`;
+  if (!view) return;
+  const open = (event) => {
+    if (event.target.closest('[data-gclose]')) return showGauntletDetail(v, view, null, null);
+    const cell = event.target.closest('[data-gpeer]');
+    if (!cell) return;
+    if (event.type === 'keydown') {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+    }
+    const same = gauntletOpen && gauntletOpen.entry === cell.dataset.gentry && gauntletOpen.peer === cell.dataset.gpeer;
+    showGauntletDetail(v, view, same ? null : cell.dataset.gentry, cell.dataset.gpeer);
+    if (!same) v.querySelector('[data-gdetail]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+  v.querySelector('.standings')?.addEventListener('click', open);
+  v.querySelector('.standings')?.addEventListener('keydown', open);
+  if (gauntletOpen) showGauntletDetail(v, view, gauntletOpen.entry, gauntletOpen.peer);
+  clearTimeout(gauntletTimer);
+  gauntletTimer = setTimeout(() => {
+    if ($('#view').querySelector('.viewhead--gauntlet')) viewGauntlet();
+  }, 20_000);
 }
 
 

@@ -12,7 +12,7 @@ import { empty, TowerError } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import { readGauntletStandings, tableStandings } from '../app/gauntlet-standings.mjs';
 import { readTable, recordEntry, tablePath, writeTable } from '../../gauntlet/harness/table.mjs';
-import { gauntletRunText, gauntletStandingsText, projectGauntletStandings, renderGauntletStandings } from '../app/ui/gauntlet.js';
+import { gauntletDetail, gauntletRunText, gauntletStandingsText, projectGauntletStandings, renderGauntletDetail, renderGauntletStandings } from '../app/ui/gauntlet.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/gauntlet-results.json', import.meta.url));
 const PEERS_FIXTURE = fileURLToPath(new URL('./fixtures/gauntlet-results-peers.json', import.meta.url));
@@ -50,23 +50,58 @@ test('the grid gives every entry a cell for Jet, every peer and the asm ceiling'
   const projected = view();
   const grid = Object.fromEntries(projected.entries[0].grid.map((cell) => [cell.peer, cell.text]));
   assert.deepEqual(grid, {
-    jet: 'measured',
-    rust: '5 pass',
-    c: '4 pass · 1 fail',
-    zig: '5 pass',
+    jet: '417 µs · 292 kB · 57.8k cyc · 95.6 kB',
+    rust: '731 µs · 2.45 MB · 565k cyc · 3.26 MB · 5 pass',
+    c: '851 µs · 1.95 MB · 617k cyc · 13.4 kB · 4 pass · 1 fail',
+    zig: '1.39 ms · 1.26 MB · 481k cyc · 234 kB · 5 pass',
     go: 'uncovered: no go program: go/main.go is missing',
-    python: '5 pass',
-    node: '5 pass',
-    bun: '5 pass',
+    python: '13.2 ms · 13.3 MB · 44.5M cyc · 11.5 MB · 5 pass',
+    node: '27.2 ms · 46.6 MB · 72.9M cyc · 138 MB · 5 pass',
+    bun: '15.6 ms · 37.4 MB · 46.6M cyc · 105 MB · 5 pass',
     vite: 'not applicable: Vite bundles web front ends; an entry without a web front end has nothing for it to build',
     lua: 'not measured yet: this run\'s standings do not include Lua',
     luajit: 'not measured yet: this run\'s standings do not include LuaJIT',
-    asm: '5 miss',
+    asm: '374 µs · 72 kB · 9.63k cyc · 1.45 kB · 5 miss',
   });
+  assert.deepEqual(Object.fromEntries(projected.entries[0].grid.map((cell) => [cell.peer, cell.tone])),
+    { jet: 'jet', rust: 'pass', c: 'fail', zig: 'pass', go: 'na', python: 'pass', node: 'pass', bun: 'pass', vite: 'na', lua: 'open', luajit: 'open', asm: 'fail' });
   const html = renderGauntletStandings(projected);
   assert.match(html, /<table class="gauntlet__table" aria-label="Gauntlet grid">\s*<thead><tr><th scope="col">entry<\/th><th scope="col">Jet<\/th><th scope="col">Rust<\/th>.*<th scope="col">LuaJIT<\/th><th scope="col">asm ceiling<\/th><\/tr><\/thead>/);
-  assert.match(html, /<td class="ggrid ggrid--fail" title="hello · C: 4 pass · 1 fail"><b>4 pass · 1 fail<\/b><\/td>/);
-  assert.match(html, /<td class="ggrid ggrid--open" title="hello · Lua: not measured yet: this run&#39;s standings do not include Lua"><b>not measured yet<\/b><small>this run&#39;s standings do not include Lua<\/small><\/td>/);
+  assert.match(html, /<td class="ggrid ggrid--fail" title="hello · C: 851 µs · 1\.95 MB · 617k cyc · 13\.4 kB · 4 pass · 1 fail · click for details" tabindex="0" role="button" data-gentry="hello" data-gpeer="c"><b>851 µs · 1\.95 MB<\/b><small>617k cyc · 13\.4 kB<\/small><\/td>/);
+  assert.match(html, /<td class="ggrid ggrid--open" title="hello · Lua: not measured yet: this run&#39;s standings do not include Lua · click for details" tabindex="0" role="button" data-gentry="hello" data-gpeer="lua"><b>not measured yet<\/b><small>this run&#39;s standings do not include Lua<\/small><\/td>/);
+  assert.match(html, /<\/table><\/div>\s*<section class="gdetail" data-gdetail aria-live="polite" hidden><\/section>/);
+});
+
+test('a peer that beats the asm ceiling flags it; a cell opens its detail with Jet against it on every metric', () => {
+  const standings = report().standings;
+  standings.entries[0].peers.c.metrics.peak_rss.peer = 40;
+  const projected = projectGauntletStandings({ file: 'table.json', table: TABLE, standings });
+  const asm = projected.entries[0].grid.find((item) => item.peer === 'asm');
+  assert.deepEqual([asm.tone, asm.note, asm.text], ['flag', 'beaten: C peak rss 0.56×', 'ceiling beaten by C on peak rss']);
+  assert.deepEqual(projected.entries[0].beaten.map((item) => [item.metric, item.label]), [['peak_rss', 'C']]);
+  const flagged = gauntletDetail(projected, 'hello', 'asm');
+  assert.equal(flagged.metrics.find((item) => item.metric === 'peak_rss').beaten.label, 'C');
+  assert.match(renderGauntletDetail(flagged), /<tr class="gdetail__row--flag"><th scope="row" title="[^"]+">peak RSS<\/th><td>72 kB<span class="gdetail__flag">beaten by C 40 kB \(0\.56×\): the reference is wrong<\/span>/);
+
+  const rust = gauntletDetail(view(), 'hello', 'rust');
+  assert.deepEqual([rust.label, rust.role, rust.status, rust.jetMeasured], ['Rust', 'peer', 'ok', true]);
+  const startup = rust.metrics.find((item) => item.metric === 'startup');
+  assert.equal(startup.versus.tone, 'pass');
+  assert.match(startup.versus.words, /^Jet \S+× faster \(0\.54\)$/);
+  const size = gauntletDetail(view(), 'hello', 'c').metrics.find((item) => item.metric === 'size');
+  assert.deepEqual([size.versus.tone, size.versus.words], ['fail', 'Jet 7.16× larger (+616%)']);
+  const html = renderGauntletDetail(gauntletDetail(view(), 'hello', 'c'));
+  assert.match(html, /^<header class="gdetail__head"><h3>hello <small>batch<\/small> · C<\/h3><button type="button" class="gdetail__close" data-gclose aria-label="Close details">×<\/button><\/header>/);
+  assert.match(html, /<thead><tr><th scope="col">metric<\/th><th scope="col">C<\/th><th scope="col">Jet<\/th><th scope="col">Jet vs C<\/th><th scope="col">best peer<\/th><th scope="col">asm ceiling<\/th><\/tr><\/thead>/);
+  assert.match(html, /<span class="gdetail__vs gdetail__vs--fail">Jet 7\.16× larger \(\+616%\)<\/span>/);
+  const jet = gauntletDetail(view(), 'hello', 'jet');
+  assert.deepEqual([jet.role, jet.status], ['jet', 'ok']);
+  assert.ok(jet.metrics.every((item) => item.ceiling && item.ceiling.versus), 'Jet is set against the asm ceiling on every metric');
+  const pending = gauntletDetail(view(PEERS_FIXTURE), 'hello', 'rust');
+  assert.ok(pending.metrics.every((item) => item.jet === null && item.versus === null));
+  assert.match(renderGauntletDetail(pending), /<span class="gdetail__missing">not measured yet<\/span>/);
+  assert.equal(gauntletDetail(view(), 'no-such-entry', 'rust'), null);
+  assert.equal(renderGauntletDetail(null), '');
 });
 
 test('ratios carry the floor verdict and the ceiling gap; non-measured rows keep their reason', () => {
@@ -100,7 +135,8 @@ test('a peer missing from the results file stays a row with a reason', () => {
 test('a peers-only run shows every peer value as a bar, the asm ceiling marked, and Jet pending', () => {
   const projected = view(PEERS_FIXTURE);
   assert.equal(projected.jetMeasured, false);
-  assert.deepEqual(projected.entries[0].jet, { status: 'not_measured', reason: 'not measured: this run measures rust, c, zig, go, python, node, bun, vite, lua, luajit only', measured: false });
+  assert.deepEqual(projected.entries[0].jet, { status: 'not_measured', reason: 'not measured: this run measures rust, c, zig, go, python, node, bun, vite, lua, luajit only', measured: false, provenance: null, runs: null });
+  assert.deepEqual(projected.entries[0].grid.filter((cell) => ['rust', 'c', 'python', 'bun', 'asm'].includes(cell.peer)).map((cell) => cell.tone), ['grey', 'grey', 'grey', 'grey', 'grey'], 'until Jet is measured every measured cell is grey');
   assert.deepEqual(bars(projected, 'startup'), ['asm ceiling 296 µs', 'Rust 614 µs', 'C 683 µs', 'Bun 7.31 ms', 'Python 18.2 ms']);
   assert.deepEqual(bars(projected, 'size'), ['asm ceiling 1.45 kB', 'C 13.4 kB', 'Rust 319 kB', 'Python 6.21 MB']);
   assert.deepEqual(panel(projected, 'startup').bars.map((bar) => bar.role), ['ceiling', 'peer', 'peer', 'peer', 'peer']);
@@ -249,7 +285,7 @@ test('the planned grid covers every entry × Jet, every peer and asm, each cell 
   assert.match(text, /\nhello \(batch\)\n {2}Jet +not measured yet\n {2}Rust +not measured yet\n/);
   const html = renderGauntletStandings(projected);
   assert.match(html, /^<section class="standings" aria-label="Gauntlet standings"><p class="gauntlet__run">gauntlet table: nothing measured yet/);
-  assert.match(html, /<td class="ggrid ggrid--na" title="[^"]+ · asm ceiling: uncovered: no ceiling reference \([^"]+\)"><b>uncovered<\/b><small>no ceiling reference<\/small><\/td>/);
+  assert.match(html, /<td class="ggrid ggrid--na" title="[^"]+ · asm ceiling: uncovered: no ceiling reference \([^"]+\) · click for details" tabindex="0" role="button" data-gentry="[^"]+" data-gpeer="asm"><b>uncovered<\/b><small>no ceiling reference<\/small><\/td>/);
   assert.doesNotMatch(html, /standings__panel|gauntlet__pill/);
 });
 
