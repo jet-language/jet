@@ -1817,6 +1817,28 @@ sema_call_missing_instance_method: fn(method: String, receiver: Type, actual: In
     sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, sema_call_method_fix(suggestion, "check the spelling of `{method}`"), suggestion)
 }
 
+// The Fix for `method` missing on the receiver when one of the receiver's
+// instance methods returns a type that declares it: `execute` on a
+// `DBConnection` is reached through `.with_policy(…)`, which returns the
+// `DBScope` that has it. None when no method's result (or the value inside
+// its Option or Result) declares it.
+sema_call_method_reached_through: fn(method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return None
+    graph: program.registration_graph ?? return None
+    loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+            if function.parameters.len() == 0 -> next
+            if function.signature == .Fn(_, value, _, _, _, _) {
+                returned: sema_expr_unwrap_tag(value ?? next)
+                result: if returned == .Result(ok, _) -> sema_expr_unwrap_tag(ok) else -> if returned == .Option(inner) -> sema_expr_unwrap_tag(inner) else -> returned
+                owner: sema_expr_type_base_name(result) ?? next
+                if owner != base_name && sema_call_declared_method_names(result, environment, program).contains(method) -> return Val("`{method}` is on `{sema_call_method_leaf(owner)}`, which `.{function.symbol.name}(…)` returns: write `.{function.symbol.name}(…).{method}(…)`")
+            }
+        }
+    }
+    None
+}
+
 // Rust `builtin_method_arity_diagnostic`: the method exists for this receiver,
 // but at another argument count.
 sema_call_builtin_method_arity: fn(receiver: Type, method: String, actual: Int, span: Span) -> Diagnostic? {
@@ -1883,7 +1905,8 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
     protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/")))
     if protected {
-        fix: sema_call_method_fix(suggestion, "use a documented method on `{display}`")
+        reached: if suggestion == None -> sema_call_method_reached_through(method, nominal, environment, program) else -> None
+        fix: reached ?? sema_call_method_fix(suggestion, "use a documented method on `{display}`")
         return sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a protected Core type with a closed method surface", fix, suggestion)
     }
     loop param in environment.generic_params {
