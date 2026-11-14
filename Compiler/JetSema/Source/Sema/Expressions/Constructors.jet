@@ -2513,7 +2513,7 @@ sema_expression_typed_literal_float_exact: fn(head: Type, checked: TExpr, value:
     outcome: sema_expr_narrow_outcome(word, None)
     if outcome == TNarrowOutcome.Stop {
         if sema_expression_typed_literal_written_float(value) == .Val(number) {
-            if !sema_expression_typed_literal_float_fits(head, number, value_span, diagnostics) -> return None
+            if !sema_expression_typed_literal_float_fits(head, number, sema_expression_typed_literal_float_spelling(value, number), value_span, diagnostics) -> return None
         }
     }
     ty: if outcome == TNarrowOutcome.Absent -> Type.Option{inner: head} else -> head
@@ -2522,8 +2522,8 @@ sema_expression_typed_literal_float_exact: fn(head: Type, checked: TExpr, value:
 
 // A written Float literal under an integer head converts only when it is a
 // whole number the head holds: `Int{2.5}` (E0112) and `U8{300.0}` (E1003)
-// are refused where they are written.
-sema_expression_typed_literal_float_fits: fn(head: Type, number: Float, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+// are refused where they are written, each naming the literal as written.
+sema_expression_typed_literal_float_fits: fn(head: Type, number: Float, spelling: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     shown: type_name(head)
     roundings: "round it first, as in `{shown}{{math.trunc(value)}}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`"
     // Every finite Float of magnitude 2^52 or more is whole; a smaller one
@@ -2532,13 +2532,23 @@ sema_expression_typed_literal_float_fits: fn(head: Type, number: Float, span: Sp
     large: number >= 4503599627370496.0 || number <= -4503599627370496.0
     whole: finite && (large || checked(Int{number}) != None)
     if !whole {
-        diagnostics.push(sema_error("E0112", span, "`{number}` isn't a whole number, so `{shown}` can't hold it exactly", "an integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you", roundings))
+        diagnostics.push(sema_error("E0112", span, "`{spelling}` isn't a whole number, so `{shown}` can't hold it exactly", "an integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you", roundings))
         return false
     }
     bounds: if head == .IntN(signed, bits) -> sema_expr_integer_range(signed, bits) else -> SemaIntegerRange{lo: -9223372036854775808, hi: 9223372036854775807}
     if number >= approx(bounds.lo) && number < approx(bounds.hi + 1) -> return true
-    diagnostics.push(sema_error("E1003", span, "`{number}` is outside the range of `{shown}`", "`{shown}` holds whole numbers from {bounds.lo} through {bounds.hi}, and an integer typed literal never clamps", "write a value in that range, or use `saturating({shown}{{value}})` to clamp"))
+    diagnostics.push(sema_error("E1003", span, "`{spelling}` is outside the range of `{shown}`", "`{shown}` holds whole numbers from {bounds.lo} through {bounds.hi}, and an integer typed literal never clamps", "write a value in that range, or use `saturating({shown}{{value}})` to clamp"))
     false
+}
+
+// How a body sema_expression_typed_literal_written_float reads as `number`
+// is written: the literal's source text (`1.0e19`, not `1e19`), after a `-`
+// for a negation.
+sema_expression_typed_literal_float_spelling: fn(value: Expr, number: Float) -> String Never! {
+    if value == .Float(_, _, _, raw, _) -> return raw ?? "{number}"
+    if value == .Paren(inner, _, _) -> return sema_expression_typed_literal_float_spelling(inner, number)
+    if value == .Unary(_, inner, _, _) -> return "-{sema_expression_typed_literal_float_spelling(inner, -number)}"
+    "{number}"
 }
 
 // The Float a body is written as: a decimal literal, or its negation.
