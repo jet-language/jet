@@ -1454,14 +1454,17 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v6` record of that check to the file and prints one
+also writes the `jet.core/v7` record of that check to the file and prints one
 line per record section at once: its element count, the bytes its elements
 take and the bytes of its largest element. It then reads the file back and
 encodes every row again, which must give the tree it was read from. The record
 leaves out what a load gets back without it: a module's source text when the
 jet embeds that Core source, the bodies of an export's declaration (a check
-reads another module's export for its header), and the lookup columns of a
-body's symbol-key and type tables, which follow from their rows.
+reads another module's export for its header), the lookup columns of a
+body's symbol-key and type tables, which follow from their rows, and the ids
+of a body's expression-type rows, which are its nodes'. It writes each body
+node's id as its step from the node before, and each node's and name
+reference's span as an offset from the body's start and a length.
 `--embed <image> <out>` writes the executable `image` to `out` with the
 record added as its `jet.core` part; the compiler build runs it with the jet it
 just linked. The record names the compiler `JET_COMPILER_IDENTITY` names;

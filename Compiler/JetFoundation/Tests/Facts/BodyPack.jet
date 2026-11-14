@@ -1,0 +1,40 @@
+// A body tree packed as the Core record stores it unpacks to the tree it was.
+use jet_foundation.[
+    BodyNode, BodyTree, NodeKind, Span, TExprType, Type, body_tree_new, body_tree_pack,
+    body_tree_unpack, symbol_keys_intern, type_table_intern,
+]
+
+// Five nodes, a generated one first, with types and two symbol keys.
+body_pack_tree: fn() -> BodyTree Never! {
+    tree := body_tree_new()
+    ids: [Int]{-1, 3, 4, 9, 120}
+    loop (index, id) in ids {
+        tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: index, width: None}, span: Span{start: 400 + index * 7, end: 405 + index * 9}})
+        ty: type_table_intern(tree.types, if index % 2 == 0 -> Type.Int else -> Type.Bool)
+        tree.expr_types.push(TExprType{id: id, ty: ty})
+    }
+    _: symbol_keys_intern(tree.symbols, "local.a")
+    _: symbol_keys_intern(tree.symbols, "local.b")
+    tree
+}
+
+#Test("a packed body tree unpacks to the tree it was") {
+    whole: body_pack_tree()
+    tree := body_pack_tree()
+    packed: body_tree_pack(tree, 400) ?? panic("packs: {err}")
+    assert_eq(packed, 5)
+    assert_eq(tree.nodes[2].id, 1)
+    assert_eq(tree.expr_types[2].id, 0)
+    assert_eq(tree.symbols.keys.slots.len(), 0)
+    body_tree_unpack(tree, 400)
+    assert_eq("{tree:Debug}", "{whole:Debug}")
+}
+
+#Test("a body tree whose expression-type rows are not its nodes' is not packed") {
+    tree := body_pack_tree()
+    tree.expr_types[1].id = 7
+    assert_eq(body_tree_pack(tree, 0) ?? -1, -1)
+    short := body_pack_tree()
+    _: short.expr_types.pop()
+    assert_eq(body_tree_pack(short, 0) ?? -1, -1)
+}

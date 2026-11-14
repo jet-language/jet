@@ -45,6 +45,47 @@ body_tree_new: fn() -> BodyTree Never! {
     BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
 }
 
+// `tree` as the precompiled Core record stores it (JetSema
+// CoreRecordBodies.jet): what follows from the rest left out, the rest
+// written small. Its expression-type rows lose their ids, which are its
+// nodes' (the two columns are filed together, row for row); each node's id
+// becomes its step from the node before, and its span its start's offset
+// from `base` and its length; its symbol-key and type tables lose their
+// lookup columns. body_tree_unpack undoes each exactly. Returns how many
+// nodes it packed; a tree whose two columns disagree is refused.
+body_tree_pack: fn(tree: &BodyTree, base: Int) -> Int Err! {
+    if tree.expr_types.len() != tree.nodes.len() -> return Err("it has {tree.nodes.len()} nodes but {tree.expr_types.len()} expression-type rows")
+    previous := 0
+    loop index in 0..<tree.nodes.len() {
+        id: tree.nodes[index].id
+        if tree.expr_types[index].id != id -> return Err("its expression-type row {index} is node {tree.expr_types[index].id}'s, not node {id}'s")
+        tree.expr_types[index].id = 0
+        tree.nodes[index].id = id - previous
+        previous = id
+        span: tree.nodes[index].span
+        tree.nodes[index].span = Span{start: span.start - base, end: span.end - span.start}
+    }
+    name_table_index_drop(tree.symbols.keys)
+    type_table_index_drop(tree.types)
+    Ok(tree.nodes.len())
+}
+
+// The tree body_tree_pack packed with `base`, as it was.
+body_tree_unpack: fn(tree: &BodyTree, base: Int) Never! {
+    previous := 0
+    loop index in 0..<tree.nodes.len() {
+        id: previous + tree.nodes[index].id
+        tree.nodes[index].id = id
+        previous = id
+        if index < tree.expr_types.len() -> tree.expr_types[index].id = id
+        span: tree.nodes[index].span
+        start: base + span.start
+        tree.nodes[index].span = Span{start: start, end: start + span.end}
+    }
+    name_table_index_rebuild(tree.symbols.keys)
+    type_table_index_rebuild(tree.types)
+}
+
 // The row of node `id`.
 body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
     low := 0
