@@ -1381,7 +1381,7 @@ sema_effect_runtime_input_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], i
     maker: nodes[path[path.len() - 1]].chain_name
     if path.len() == 1 -> return sema_error("E0956", input.span, "`{maker}` runs in the program, so it can't call `{input.name}`", "the compiler answers `{input.name}` while it compiles, and nothing calls `{maker}` at compile time, so the call would run in the program", "call `{input.name}` from a prepared constant (`NAME: #run {{ … }}`) and read that value at run time")
     chain: loop step in path -> nodes[step].chain_name
-    sema_error("E0956", input.span, "`{maker}` calls `{input.name}`, and the running program reaches `{maker}` from `{chain[0]}`", "the call path {chain.join(" → ")} runs in the program, and the compiler answers `{input.name}` only while it compiles", "call `{maker}` only from compile-time code, such as a prepared constant (`NAME: #run {{ {maker}() }}`), and read that value at run time")
+    sema_error("E0956", input.span, "`{maker}` calls `{input.name}`, and the running program reaches `{maker}` from `{chain[0]}`", "the call path {chain.join(" → ")} runs in the program, and the compiler answers `{input.name}` only while it compiles", "call `{maker}` only from compile-time code, such as a prepared constant (`NAME: #run {maker}()`), and read that value at run time")
 }
 
 // Code handed the root's `Compiler` value runs while the build runs and acts
@@ -3917,7 +3917,7 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
         loop bound in module_row.trait_bounds {
             if bound.trait_name != trait_name || bound.method != method -> next
             over: sema_effect_uncovered(solved[node_index], bound.bound)
-            if over.len() > 0 -> diagnostics.push(sema_effect_trait_bound_diagnostic(bound, over, nodes[node_index].name_span, "{type_name(owner_type)}::{method}"))
+            if over.len() > 0 -> diagnostics.push(sema_effect_trait_bound_diagnostic(bound, over, nodes[node_index].name_span, "{type_name(owner_type)}.{method}"))
             break
         }
     }
