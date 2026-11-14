@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102420,
+    "rev": 102421,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98161,7 +98161,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-14T03:25:37.158Z",
+      "updated": "2026-11-14T13:55:21.661Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -202259,6 +202259,226 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-14T13:19:41.619Z"
+    },
+    {
+      "id": "D-BOUND-METHOD1",
+      "cardId": "c0vc9b8r",
+      "group": "syntax",
+      "title": "Whether a method read without parentheses is a function value",
+      "situation": "Today crew.tell with no parentheses is an error unless Crew has a field named tell: E0302 says Crew has no field tell. To pass a method where a function value goes, a program writes a closure, fn(id) { crew.tell(id) }. Card #6824 asks for bound method values: crew.tell would be a function value with crew bound. The web app shape dropped its need for them in revision 4, so this vote is about the language alone.\n\nUnder A the plain read is a bound value. Under B the closure stays the only form. Under C, Crew.tell names the method as a plain function whose first parameter is the receiver. Under D a marked read, crew.tell(..), is the bound value. We recommend A.",
+      "gist": "Is crew.tell, a method read without parentheses, a function value with crew bound, or does a program keep writing the closure fn(id) { crew.tell(id) }?",
+      "lesson": "Passing a method as a callback is common enough to deserve a short form. The form must not hide a copy that a later write would miss, so it binds a &self method only where its closure would write the owner.",
+      "explainer": "A method is a function declared in a type that takes the value as self. A call writes parentheses: crew.tell(1).\n\nA function value is a function passed or stored without being called, such as the notify parameter of each(ids, notify). A closure, fn(id) { crew.tell(id) }, is a function value that captures names from where it is written.\n\nA bound method value is a function value made from a method and one receiver. Calling it calls the method on that receiver.\n\nA method takes self to read its receiver, &self to change it, or &&self to consume it. Members have separate namespaces (D-MEMBER-NAMESPACE1 A): a type may have a field and a method with one name.",
+      "story": "A crew passes its tell method to each, a function that calls a notify callback for every task ID. The same program is written under each option.",
+      "inWild": "Python: obj.method is a bound method object that holds a reference to obj, so later changes to obj are seen. A forgotten call such as if door.is_open: is always true and raises no error.\n\nSwift: crew.tell is a partially applied method. Swift refuses this for a mutating method of a value type, so a bound value cannot change a hidden copy. Crew.tell is the curried form, called as Crew.tell(crew)(1).\n\nC#: a method group such as crew.Tell converts to a delegate. Since C# 10, var f = crew.Tell infers a Func type only when the group has one overload. Jet has no overloading (E0105), so a read always names one method.\n\nRust: no bound method values. Crew::tell names the method as a function whose first parameter is the receiver; binding is a closure, |id| crew.tell(id).\n\nKotlin: crew::tell is a bound reference and Crew::tell an unbound one, each spelled with ::. Kotlin ships both forms.\n\nScala 3: a method read where a function is expected is converted without the old trailing underscore, which Scala 2 required.\n\nGo: a method value evaluates its receiver once. For a pointer-receiver method on an addressable variable it binds &t, so writes land on the variable. Jet cannot bind a lasting reference: a stored value owns its captures (E0120).\n\nThese outside facts were not re-checked for this ballot.",
+      "detail": "Today, on dev 99aa698189 with the gate-p64 jet, crew.tell with no field tell is E0302 jet.UnknownField. Its fix line says to check the field names; it does not suggest the call.\n\nThe closure form works on every tier. Called where it is written, or passed to a call that runs it, a closure borrows what it captures, so its writes land on the owner. Stored or returned, it owns its captures: a copy value is copied, a clonable value is cloned, and anything else moves.\n\nThat split leaves a trap in today's closures. A stored closure that calls a &self method on a copied local changes the copy, and the local never sees it. A probe printed 10 where a reader expects 15.\n\nA staged patch, GoalsB-2-6824-bound-method-r2, implements A in sema by generating the closure at the member read. It adds E0314 jet.MethodReadWithoutCall. It is not landed.\n\nD-LIVEQUERY1 keeps the closure as its form under every option. Edge cases are written under each option.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The plain read is a bound value",
+          "gist": "crew.tell with no parentheses is a function value of tell's other parameters with crew bound, when Crew has no field tell.",
+          "detail": "The read means the closure fn(id: Int) -> String { crew.tell(id) }. Its parameters keep the method's access marks, effects and error type. They are positional, and a parameter with a default is required.\n\nThe receiver is evaluated once, where the member is read. A name or field path is captured under the closure rules, so team.lead.tell captures team whole. Any other receiver, such as hired(\"Lin\").tell, is computed then and kept.\n\nA &self method binds where its closure would write the owner: passed to the call that runs it. Stored or returned over a local it would copy, it is E0314, since the write would miss. This is stricter than the closure, which loses that write silently.\n\nA static, generic or variadic method, a &&self method, and a read where Int or another value type is expected are E0314. Only declared structs and enums bind.\n\nA field of the same name wins, as D-MEMBER-NAMESPACE1 says. So adding a function-typed field named tell later changes what crew.tell reads, with no error.\n\nA forgotten call with nothing expected, x: crew.total, is a value. print(x) is then an error that names the function type, and \"{x}\" suggests the call. Function values have no equality, so a handler kept for removal is kept as a value.",
+          "code": "Crew: struct {\n    name: String\n\n    tell: fn(self, id: Int) -> String { \"{self.name} hears about task {id}\" }\n}\n\neach: fn(ids: [Int], notify: fn(Int) -> String) {\n    loop id in ids -> print(notify(id))\n}\n\nrun: fn() {\n    crew: Crew{name: \"Ada\"}\n    each([1, 2], crew.tell) // Ada hears about task 1, then 2\n}"
+        },
+        {
+          "key": "B",
+          "name": "No bound value; write the closure",
+          "gist": "A method read without parentheses stays an error; a callback is the closure fn(id) { crew.tell(id) }, as today.",
+          "detail": "Nothing changes in the language. The closure takes its parameter types from the expected function type, so fn(id) { crew.tell(id) } needs no annotation where a callback is expected.\n\nThe forgotten call stays E0302, which says the type has no field of that name. Under B its fix line would also name the method and suggest the call, a diagnostic change only.\n\nEvery capture, borrow and escape rule is the closure's, written where the reader can see it. That includes today's silent lost write. A stored closure that calls a &self method on a copied local changes only the copy. Closing that trap is a separate card under every option.\n\nBeginners learn one form for every callback. Experts write nothing new.",
+          "code": "Crew: struct {\n    name: String\n\n    tell: fn(self, id: Int) -> String { \"{self.name} hears about task {id}\" }\n}\n\neach: fn(ids: [Int], notify: fn(Int) -> String) {\n    loop id in ids -> print(notify(id))\n}\n\nrun: fn() {\n    crew: Crew{name: \"Ada\"}\n    each([1, 2], fn(id) { crew.tell(id) }) // Ada hears about task 1, then 2\n}"
+        },
+        {
+          "key": "C",
+          "name": "Name the method through its type",
+          "gist": "Crew.tell is a plain function whose first parameter is the receiver, fn(Crew, Int) -> String; binding a receiver stays a closure.",
+          "detail": "Crew.tell names the method without a receiver, as Rust's Crew::tell does. It passes where a function of the receiver is expected, as in crews.map(Crew.label). Today Type.member on a struct is an error, so the spelling is free.\n\nA member read on a value, crew.tell, stays an error that suggests the call, so the forgotten call cannot become a value.\n\nBinding a receiver is the closure, as under B, so the one-receiver callback is unchanged. A &self method named this way takes its receiver as a write parameter, fn(&Counter, Int), so no write can hit a hidden copy.\n\nBeginners use the closure. Experts pass Crew.label to map and sort without a wrapper.",
+          "code": "Crew: struct {\n    name: String\n\n    tell: fn(self, id: Int) -> String { \"{self.name} hears about task {id}\" }\n    label: fn(self) -> String { self.name }\n}\n\neach: fn(ids: [Int], notify: fn(Int) -> String) {\n    loop id in ids -> print(notify(id))\n}\n\nrun: fn() {\n    crew: Crew{name: \"Ada\"}\n    each([1, 2], fn(id) { crew.tell(id) }) // Ada hears about task 1, then 2\n    crews: [crew, Crew{name: \"Lin\"}]\n    print(crews.map(Crew.label).join(\", \")) // Ada, Lin\n}"
+        },
+        {
+          "key": "D",
+          "name": "A marked read is a bound value",
+          "gist": "crew.tell(..) is the bound value; the plain read crew.tell stays an error that suggests the call.",
+          "detail": "The two dots stand for all of the method's other parameters, so the mark costs the same at any arity. Today crew.tell(..) is a parse error, so the spelling is free. Kotlin marks its bound reference the same way, as crew::tell, and Jet's :: is taken.\n\nThe value and its rules are A's: the same receiver evaluation, capture rules and &self rule.\n\nThe mark removes A's two silent cases. A forgotten call with nothing expected stays an error at its line. Adding a function-typed field named tell cannot change what crew.tell(..) reads, since the mark names a method.\n\nThe cost is a form to learn that only callbacks use. Scala 2 required a similar mark, and Scala 3 dropped it as noise.",
+          "code": "Crew: struct {\n    name: String\n\n    tell: fn(self, id: Int) -> String { \"{self.name} hears about task {id}\" }\n}\n\neach: fn(ids: [Int], notify: fn(Int) -> String) {\n    loop id in ids -> print(notify(id))\n}\n\nrun: fn() {\n    crew: Crew{name: \"Ada\"}\n    each([1, 2], crew.tell(..)) // Ada hears about task 1, then 2\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Passing a method as a callback is the common case in UI and event code, and A removes the closure that only restates the call. A &self value binds only where its write lands on the owner. A forgotten call where a value is expected gets an error that suggests the call.",
+        "gains": [
+          "A method passes as a callback with no closure to write",
+          "The receiver is evaluated once, where it is read",
+          "Every capture, borrow and escape rule is the existing closure rule",
+          "A stored &self value over a copy is refused, where today's closure loses the write"
+        ],
+        "losses": [
+          {
+            "loss": "A forgotten call with nothing expected, x: crew.total, becomes a function value instead of an error at that line.",
+            "mitigation": "The first use of x fails and shows the function type. Where a value type is expected, the read itself is E0314 suggesting crew.total()."
+          },
+          {
+            "loss": "Adding a function-typed field with a method's name changes what a plain read names, with no error.",
+            "mitigation": "Calls still name the method, so only plain reads move, and the field's type must still fit where the read goes."
+          },
+          {
+            "loss": "Passed on, the value owns its receiver, so a non-clonable crew moves into it.",
+            "mitigation": "This is the closure rule, and the use-after-move error names the bound read; crew.copy().tell keeps crew."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a closure at every callback that only restates the call, and D-MEMBER-NAMESPACE1 already decides which member a read names."
+          },
+          {
+            "key": "C",
+            "reason": "C helps map and sort over many receivers, but binding one receiver, the callback case, still needs the closure."
+          },
+          {
+            "key": "D",
+            "reason": "D closes A's two silent cases with a mark that only callbacks use. Python, Swift, C# and Scala 3 bind the plain read."
+          }
+        ],
+        "tradeoff": "Methods pass as callbacks with no closure, at the cost of a forgotten call with nothing expected failing at its first use instead of its line."
+      },
+      "hybrid": {
+        "synthesis": "A and C do not conflict: crew.tell binds one receiver and Crew.tell would name the method for many. Kotlin ships both. A can land now and C later as an addition, if map and sort over methods prove common.",
+        "harvest": [
+          {
+            "key": "C",
+            "aspect": "Crew.label as a function of the receiver, for map and sort.",
+            "use": "A later card can add it beside A, since Type.member stays free under A."
+          },
+          {
+            "key": "D",
+            "aspect": "A mark that cannot be a forgotten call.",
+            "use": "If forgotten calls prove common under A, crew.tell(..) can be added as the explicit form."
+          }
+        ]
+      },
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: GoalsA-1. Its review in Docs/audits/2026-11-14-D-BOUND-METHOD1-review.md found an unstated &self rule and no marked-read option. A now follows the closure's borrow split, D adds the marked read, and the other findings are applied."
+      },
+      "checkInstructions": "Read D-MEMBER-NAMESPACE1 in Docs/spec/spec.md (\"Fields and methods have separate namespaces\"). Read Captures and escaping lambdas in the same file. Read R3-5 in Docs/audits/2026-11-13-web-app-framework-shape-review.md. Read the review Docs/audits/2026-11-14-D-BOUND-METHOD1-review.md.\n\nRead the staged patch GoalsB-2-6824-bound-method-r2. Its sema is sema_expression_bound_method_value and sema_expression_bound_method_refusal in Places.jet, and the bound_write_receiver check in Lambdas.jet. Read its spec paragraph, the example Examples/Basics/Functions/BoundMethodValues.jet, two cases and two E0314 UI snapshots.\n\nProbes ran with the gate-p64 jet at a dev 99aa698189 worktree.\npassed down: a closure over counter calling &self bump, passed to a call that runs it twice, printed 6 from 1, 2 and 3.\nstored: the same closure stored in a struct field printed 10 after a bump of 5 from 10.\nescape: a closure returning a &self call over a lent parameter is E0120 naming it.\n\ndisplay: print of a function value is an error naming its type, and an interpolation hole suggests the call; == on it is jet.EqualityNotSupported.\nmarked: crew.tell(..) is a parse error today.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Is crew.tell, read without parentheses, a function value with crew bound?",
+        "lesson": "A method passed as a callback should need no closure that restates the call, as long as no hidden copy can miss a write.",
+        "trio": {
+          "current": {
+            "note": "A method read without parentheses is E0302, so every callback is a closure.",
+            "code": "each([1, 2], crew.tell)             // E0302: `Crew` has no field `tell`\neach([1, 2], fn(id) { crew.tell(id) }) // works"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A method read without a call is a bound closure; Swift refuses it for a mutating method of a value type.",
+            "code": "let notify = crew.tell   // (Int) -> String\nlet bump = counter.bump  // error: partial application of 'mutating' method"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Bound value",
+            "gist": "crew.tell is a function value with crew bound.",
+            "gains": [
+              "No closure for a method callback",
+              "Closure rules for capture and escape"
+            ],
+            "losses": [
+              "A forgotten call with nothing expected fails at first use",
+              "A new same-named fn field changes what a read names"
+            ],
+            "proposed": {
+              "code": "each([1, 2], crew.tell)\napply_all([2, 3], counter.bump)   // &self, passed down: writes counter\nholder: Holder{bump: counter.bump} // E0314: would change a copy"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Closure",
+            "gist": "Keep writing fn(id) { crew.tell(id) }, as today.",
+            "gains": [
+              "No new rule",
+              "The capture is written out"
+            ],
+            "losses": [
+              "A closure that only restates the call at every callback"
+            ],
+            "proposed": {
+              "code": "each([1, 2], fn(id) { crew.tell(id) })"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Through the type",
+            "gist": "Crew.tell is fn(Crew, Int) -> String; binding stays a closure.",
+            "gains": [
+              "map and sort take Crew.label directly",
+              "No hidden receiver"
+            ],
+            "losses": [
+              "The callback case still needs a closure"
+            ],
+            "proposed": {
+              "code": "labels: crews.map(Crew.label)\neach([1, 2], fn(id) { crew.tell(id) })"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Marked read",
+            "gist": "crew.tell(..) is the bound value; crew.tell stays an error.",
+            "gains": [
+              "A forgotten call stays an error at its line",
+              "A new field cannot change what the mark names"
+            ],
+            "losses": [
+              "A mark that only callbacks use"
+            ],
+            "proposed": {
+              "code": "each([1, 2], crew.tell(..))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A method callback is common, and A binds a &self method only where its write lands on the owner.",
+          "gains": [
+            "No closure for a method callback",
+            "Receiver evaluated once, under closure rules"
+          ],
+          "losses": [
+            {
+              "loss": "A forgotten call with nothing expected becomes a value.",
+              "mitigation": "It fails at first use, and where a value is expected the read suggests the call."
+            },
+            {
+              "loss": "A new same-named fn field changes what a read names.",
+              "mitigation": "Calls still name the method, and the field's type must still fit."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A closure that only restates the call at every callback."
+            },
+            {
+              "key": "C",
+              "reason": "It helps map and sort, but the callback case still needs a closure."
+            },
+            {
+              "key": "D",
+              "reason": "A mark only callbacks use, where most languages bind the plain read."
+            }
+          ],
+          "tradeoff": "Methods pass as callbacks; a forgotten call with nothing expected fails at first use."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-14T13:55:21.661Z"
     }
   ],
   "questions": [
@@ -205705,6 +205925,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:55:21.661Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BOUND-METHOD1",
+      "note": "Whether a method read without parentheses is a function value"
+    },
     {
       "at": "2026-11-14T13:55:03.394Z",
       "by": "Main",
