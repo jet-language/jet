@@ -1391,8 +1391,9 @@ sema_call_local_default_values: fn(target: SemaCallDirectTarget, binding: SemaCa
 
 // `waiting` is the first argument whose probe checked to no value without an
 // error: a read still waiting on a compile-time value (another module's
-// constant not staged yet) that gives inference no type. `lambda_returns` are
-// the written-parameter lambdas' return facts, also the last of the type lists.
+// constant not staged yet) that gives inference no type. A written-parameter
+// lambda's parameter types, then its return facts (`lambda_returns`), are the
+// last of the type lists.
 SemaCallInferenceFacts: struct {
     parameter_types: [Type]
     argument_types: [Type]
@@ -1422,6 +1423,8 @@ sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCall
     argument_types := [Type]{}
     waiting := Int?{None}
     lambda_returns := [SemaCallLambdaReturn]{}
+    lambda_parameters := [Type]{}
+    lambda_arguments := [Type]{}
     loop index in 0..<args.len() {
         slot: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
@@ -1436,15 +1439,31 @@ sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCall
                         waiting = Val(index)
                     }
                 } else if sema_call_lambda_params_written(args[index].expr) {
-                    fact: sema_call_lambda_return_fact(index, required, args[index].expr, environment, program, scopes, state, tail_store, context) ?? next
+                    probe_diagnostics := [Diagnostic]{}
+                    checked: sema_probe_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? next
+                    // `on_drop: fn(task: Task) { … }` for `fn(T)` settles T
+                    // from the written parameter type.
+                    if required == .Fn(required_params, _, _, _, _, _) {
+                        if checked.ty == .Fn(written_params, _, _, _, _, _) {
+                            if required_params.len() == written_params.len() {
+                                loop position in 0..<required_params.len() {
+                                    lambda_parameters.push(required_params[position].copy())
+                                    lambda_arguments.push(written_params[position].copy())
+                                }
+                            }
+                        }
+                    }
+                    fact: sema_call_lambda_return_fact(index, required, checked.ty) ?? next
                     lambda_returns.push(fact)
                 }
             }
         }
     }
-    // The lambda returns unify after the plain arguments, so a type parameter
+    // The lambda facts unify after the plain arguments, so a type parameter
     // a plain argument settles stays settled and a lambda returning another
     // type is the conflict (sema_call_lambda_return_conflicts).
+    loop parameter in lambda_parameters -> parameter_types.push(parameter)
+    loop argument in lambda_arguments -> argument_types.push(argument)
     loop row in lambda_returns {
         parameter_types.push(row.required)
         argument_types.push(row.value)
@@ -1533,16 +1552,14 @@ sema_call_lambda_params_written: fn(expr: Expr) -> Bool Never! {
 // return fills the type parameters of the required `fn` return. Of a
 // `U E!` return only `U` is this fact: the failure part is
 // sema_call_lambda_failure_facts' own.
-sema_call_lambda_return_fact: fn(argument: Int, required: Type, lambda: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallLambdaReturn? Never! {
+sema_call_lambda_return_fact: fn(argument: Int, required: Type, lambda_ty: Type) -> SemaCallLambdaReturn? Never! {
     required_value := Type?{None}
     if required == .Fn(_, required_ret, _, _, _, _) -> required_value = required_ret
     ret: required_value ?? return None
-    probe_diagnostics := [Diagnostic]{}
-    checked: sema_probe_expression(lambda, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
     lambda_value := Type?{None}
     // A lambda's `Fn` writes a Unit return as no return, so one ending in a
     // call that returns nothing fills `U` with Unit.
-    if checked.ty == .Fn(_, lambda_ret, _, _, _, _) -> lambda_value = Val(lambda_ret ?? Type.Named{name: "Unit"})
+    if lambda_ty == .Fn(_, lambda_ret, _, _, _, _) -> lambda_value = Val(lambda_ret ?? Type.Named{name: "Unit"})
     value: lambda_value ?? return None
     if value == .Named(name) {
         if name == "Never" -> return None

@@ -1,0 +1,11 @@
+# A type parameter that appears only in a callback's parameters is inferred
+# from the closure's written parameter type: `style(fn(t: CrewTheme) { … })`
+# and `drop_zone(label, on_drop: fn(task: logic.Task) { … })` settle T, as
+# ui.style and ui.drop_zone need. seed-b14 gave E0904 UninferableTypeArgument
+# (#6819 c4, Appendix A.6 finding 3).
+fixture: generic_inferred_from_annotated_closure_param.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: app
+exit: 0
+stdout: = "style\ntasks\ngap 4\n"

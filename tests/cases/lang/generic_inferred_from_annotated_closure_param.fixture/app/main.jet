@@ -1,0 +1,15 @@
+use logic
+
+CrewTheme: struct { gap: Int }
+
+// T appears only in the callback's parameter, as in ui.style and
+// ui.drop_zone: the written closure parameter type settles it.
+style: fn<T>(build: fn(T) -> String) -> String { "style" }
+drop_zone: fn<T>(label: String, on_drop: fn(T)) -> String { label.copy() }
+run_with: fn<T>(value: T, body: fn(T) -> String) -> String { body(value) }
+
+run: fn() {
+    print(style(fn(t: CrewTheme) { "gap {t.gap}" }))
+    print(drop_zone("tasks", on_drop: fn(task: logic.Task) { print(task.title) }))
+    print(run_with(CrewTheme{gap: 4}, fn(t: CrewTheme) { "gap {t.gap}" }))
+}
