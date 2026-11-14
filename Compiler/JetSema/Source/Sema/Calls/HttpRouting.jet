@@ -1152,7 +1152,9 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             wire = ""
         }
     }
-    if !dynamic && wire != "" {
+    // A refused pattern (E2805) registers nothing, so it can't collide with a
+    // valid route as a duplicate (E2804).
+    if !dynamic && !literal.invalid && wire != "" {
         chained := false
         if app && program.registration_graph == .Val(graph) -> chained = sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
         if !chained -> sema_http_route_table_record(receiver, wire, pattern, span, scopes, context, diagnostics)
