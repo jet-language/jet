@@ -224,9 +224,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1526,
+  "total": 1528,
   "counts": {
-    "Compiler": 789,
+    "Compiler": 791,
     "Core": 181,
     "Docs": 10,
     "Examples": 42,
@@ -4431,98 +4431,112 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 32,
+      "line": 40,
+      "column": 5,
+      "reason": "idempotent flags: every writer stores the same 1, the held one first"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Scheduler.jet",
+      "line": 49,
       "column": 5,
       "reason": "an idempotent flag: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 142,
+      "line": 61,
+      "column": 5,
+      "reason": "the monitor is the only thread that clears the flag; an arm it races restores it"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Scheduler.jet",
+      "line": 173,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 220,
+      "line": 251,
       "column": 5,
       "reason": "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 293,
+      "line": 324,
       "column": 5,
       "reason": "written under the scheduler root mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 304,
+      "line": 335,
       "column": 9,
       "reason": "written under the scheduler root mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 320,
+      "line": 351,
       "column": 9,
       "reason": "written under the scheduler root mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 641,
+      "line": 672,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 778,
+      "line": 809,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1001,
+      "line": 1032,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1253,
+      "line": 1284,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1286,
+      "line": 1317,
       "column": 5,
       "reason": "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1515,
+      "line": 1549,
       "column": 5,
       "reason": "gettid takes no arguments and retains nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1766,
+      "line": 1800,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1808,
+      "line": 1842,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -10925,14 +10939,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 789 |
+| Compiler | 791 |
 | Core | 181 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 6 |
 | tests | 490 |
-| **total** | **1526** |
+| **total** | **1528** |
 
 ### Regions
 
@@ -11537,20 +11551,22 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 100:9 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 4:5 | "borrows an initialized aligned word in a live scalar/reflection carrier" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 7:5 | "owns a writable aligned word in a native scalar/reflection carrier" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 32:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 142:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 220:5 | "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 293:5 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 304:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 320:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 641:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 778:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1001:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1253:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1286:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1515:5 | "gettid takes no arguments and retains nothing" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1766:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1808:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 40:5 | "idempotent flags: every writer stores the same 1, the held one first" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 49:5 | "an idempotent flag: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 61:5 | "the monitor is the only thread that clears the flag; an arm it races restores it" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 173:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 251:5 | "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 324:5 | "written under the scheduler root mutex" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 335:9 | "written under the scheduler root mutex" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 351:9 | "written under the scheduler root mutex" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 672:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 809:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1032:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1284:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1317:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1549:5 | "gettid takes no arguments and retains nothing" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1800:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1842:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |

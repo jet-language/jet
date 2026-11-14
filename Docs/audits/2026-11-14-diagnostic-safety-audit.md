@@ -454,8 +454,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1335 | EnvironmentIntegrationConflict | Jetpack/CLI/Source/Env/ComposeEnv.jet:311 | integrations lower to one consistent set of facts |
 | E1336 | ImageProjectionFailed | Jetpack/CLI/Source/Commands/ImageCommand.jet:96 | the layer projects verified output |
 | E1337 | UnknownEnvironmentModule | Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet:533 | the plan names a declared module |
-| E1338 | LibraryIdentityMismatch | Compiler/JetFoundation/Source/Record/JetLib.jet:471 | the library is rebuilt with the host's Jet |
-| E1339 | LibraryEffectNotGranted | Compiler/JetFoundation/Source/Record/JetLib.jet:477 | the load site grants the effect |
+| E1338 | LibraryIdentityMismatch | Compiler/JetFoundation/Source/Record/JetLib.jet:503 | the library is rebuilt with the host's Jet |
+| E1339 | LibraryEffectNotGranted | Compiler/JetFoundation/Source/Record/JetLib.jet:509 | the load site grants the effect |
 | E1340 | JetpackCommandFailed | Compiler/JetCli/Source/Cli/ExternalFormat.jet:22 | the named input is fixed |
 | E1341 | InvalidLibraryOutput | Compiler/JetSema/Source/Sema/Guest.jet:244 | the library uses a checked projection |
 | E1344 | CliCommandConflict | Compiler/JetSema/Source/Sema/Registration/Items.jet:3680 | each command takes its own word |
