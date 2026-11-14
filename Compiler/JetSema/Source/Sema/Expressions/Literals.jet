@@ -27,6 +27,7 @@ use jet_foundation.[
     UnOp,
     UnitRatio,
     ast_empty_call_arg_flags,
+    expr_source_span,
     expr_span,
     is_compute_tensor_family,
     measure_expression,
@@ -758,11 +759,12 @@ sema_map_written_value: fn(value: TComptimeValue) -> String? Never! {
 }
 
 // E0508: entry `second` of a map literal writes the key entry `first` wrote.
+// Both spans cover the key as written, so `Level.Low` spans its owner too.
 sema_map_duplicate_key: fn(first: Expr, second: Expr, same: String) -> Diagnostic {
     written: sema_map_key_text(second)
     key: if written == "" -> same else -> written
-    diagnostic := sema_error("E0508", expr_span(second), "This map literal writes the key `{key}` twice", "A map holds one value per key, so one of the two values would be lost without a word.", "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`.")
-    diagnostic.labels.push(DiagnosticLabel{span: expr_span(first), message: "first written here"})
+    diagnostic := sema_error("E0508", expr_source_span(second), "This map literal writes the key `{key}` twice", "A map holds one value per key, so one of the two values would be lost without a word.", "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`.")
+    diagnostic.labels.push(DiagnosticLabel{span: expr_source_span(first), message: "first written here"})
     diagnostic
 }
 
