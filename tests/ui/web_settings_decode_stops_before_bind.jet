@@ -1,0 +1,29 @@
+// @run_cli
+package: {
+    name: "web_settings_decode_stops_before_bind"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    env: core.sys
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Decode]
+Settings: struct {
+    greeting: String
+    pool_size: Int
+}
+
+build: fn(settings: Settings) -> App {
+    greeting: settings.greeting
+    web.app().get("/", fn() { Ok(server.response(200, greeting)) })
+}
+
+run: fn() HTTPError! {
+    env.set("APP_POOL_SIZE", "lots")
+    bound: web.bind<Settings>("127.0.0.1:0", prefix: "APP_", build: build)
+    print("bound {bound.local_addr()}")
+    _: bound.shutdown()
+}

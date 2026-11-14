@@ -15,14 +15,14 @@ env: APP_POOL_SIZE=lots
 env: APP_API_TOKEN=tok-abc
 exit: 78
 stdout: = ""
-stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n"
+stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/E2416\n"
 
 step bind_refuses: jet run -A bind.jet
 env: APP_POOL_SIZE=lots
 env: APP_API_TOKEN=tok-abc
 exit: 78
 stdout: = ""
-stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n"
+stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n Why: Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted.\n Fix: Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record.\nMore: jet-lang.dev/e/E2416\n"
 
 # The receipt redacts a secret-named variable's value from captured output, so
 # the good token is ten digits, which no port in the ready line can contain.

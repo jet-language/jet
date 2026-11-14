@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Implement `Display` for the type or use an explicit formatter.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0915</code>: <code>tests/ui/crypto_secret_display.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingDisplay]: Secret-bearing `Secret` has no `Display` implementation
-  --&gt; tests/ui/crypto_secret_display.jet:6:13
+<p>First UI snapshot mentioning <code>E0915</code>: <code>tests/ui/E0915_names_a_type_without_display_once.stderr</code>.</p>
+<pre class="diag">Error [jet.MissingDisplay]: `ParseError` has no `Display` implementation
+  --&gt; tests/ui/E0915_names_a_type_without_display_once.jet:5:31
     |
-  6 |     print(&quot;{secret}&quot;)
-    |             ^^^^^^
- Why: Cryptographic secrets cannot enter logs or strings through interpolation
- Fix: Remove the interpolation; log a public operation label or key identifier instead
+  5 |         print(&quot;couldn&#39;t read {err}&quot;)
+    |                               ^^^
+ Why: Bare `{value}` interpolation calls `Display` — there is no default for user types
+ Fix: Add `impl ParseError.Display { display: fn(self) -&gt; String { … } }`, or use `{value:Debug}` for debug output
 More: jet-lang.dev/e/E0915
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

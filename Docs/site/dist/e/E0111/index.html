@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare the name with `:=` instead of `:`</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0111</code>: <code>tests/ui/assign_to_val.stderr</code>.</p>
-<pre class="diag">Error [jet.ImmutableAssignment]: `x` was made with `:`, so it can&#39;t change
-  --&gt; tests/ui/assign_to_val.jet:3:5
+<p>First UI snapshot mentioning <code>E0111</code>: <code>tests/ui/E0111_loop_variable_is_fixed_per_pass.stderr</code>.</p>
+<pre class="diag">Error [jet.ImmutableAssignment]: `i` is a loop variable, so it can&#39;t change
+  --&gt; tests/ui/E0111_loop_variable_is_fixed_per_pass.jet:5:9
     |
-  3 |     x = 2
-    |     ^
- Why: Only `:=` bindings and parameters declared with the write mark `&amp;` can be changed
- Fix: Declare it with `x := ...` instead
+  5 |         i = i + 1
+    |         ^
+ Why: A loop variable holds the item of the current pass, and each pass binds it afresh
+ Fix: Make a changeable copy inside the loop body: `n := i`
 More: jet-lang.dev/e/E0111
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

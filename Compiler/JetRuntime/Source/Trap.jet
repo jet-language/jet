@@ -336,8 +336,9 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 // core.rt.__coded_stop(code, message): a Core library stop carrying its
 // registered diagnostic code (Core/Http/Server.jet E2804/E2805). The caller
 // renders the row's `what` into `message`; the Why/Fix footer is generated
-// from the same registry row (Tools/agent/RuntimeGenerators.jet coded_stops).
-// Program-side, so exit 70. A task body publishes the raw message. A code
+// from the same registry row. The exit status is the one coded_stops gives
+// the code (Tools/agent/RuntimeGenerators.jet): 70, the program-side stop,
+// unless it names another. A task body publishes the raw message. A code
 // with no generated footer is a Jet defect: the host form, exit 101.
 #Export(c) jet_rt_coded_stop: fn(code: I64, message: I64) {
     data: rt_text_data(message)
@@ -370,7 +371,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     trap_write(data, length)
     trap_msg_newline()
     trap_coded_footer(word)
-    trap_exit(EXIT_RUNTIME_PANIC)
+    trap_exit(trap_coded_exit(word))
 }
 
 // ShiftOutOfRange: "Shifting {left|right} by {count} bits is out of range (this

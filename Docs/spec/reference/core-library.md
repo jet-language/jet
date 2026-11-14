@@ -5337,9 +5337,10 @@ typed settings record with `sys.decode<Settings>(prefix:)` before any socket
 binds, then serve (as `App.serve(port)`) or bind (as `App.bind`) the app
 `build(settings)` makes. Settings that do not decode stop the program with
 E2416 and exit 78 (`EX_CONFIG`): every decoder failure on its own line, with
-its variable and field path and a secret-named value hidden. A `build` that
-fails stops the program the same way, with exit 78 and its failure on one
-line, so no socket binds for an app that was never made.
+its variable and field path and a secret-named value hidden, then the E2416
+row's Why, Fix and More lines. A `build` that fails stops the program with
+exit 78 and its failure on one line, so no socket binds for an app that was
+never made.
 
 A `web.app()` owns one route table. Pages (`GET`), server functions (`POST
 /actions/<name>`), handler mounts, single routes (`app.get(path, handler)`,

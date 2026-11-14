@@ -225,6 +225,14 @@ MessageLiteral: struct {
     text: String
 }
 
+// A Core library stop that carries a registered code (core.rt.__coded_stop),
+// and the exit status it ends the program with: a constant generated from
+// Jetpack/Foundation/Source/ExitCodes.jet.
+CodedStop: struct {
+    code: String
+    exit: String
+}
+
 // A word of a literal: its byte offset, signed value, and byte count (1-8).
 TextWord: struct {
     offset: Int
@@ -790,12 +798,23 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
     }
     // Core library stops that carry a registered code (core.rt.__coded_stop,
     // Trap.jet jet_rt_coded_stop): the caller renders the row's `what`; the
-    // footer is the same row's Why/Fix. Codes are five-byte little-endian words.
+    // footer is the same row's Why/Fix, and the stop ends the program with
+    // its exit status. Codes are five-byte little-endian words.
+    // E2416 is the stop of an app's settings that did not decode (Core/Web);
     // E3012 is the stop of a `#MaxDepth(n)` call past n (Depth.jet).
-    coded_stops: ["E2804", "E2805", "E2808", "E2809", "E3012"]
+    coded_stops: [CodedStop]{
+        CodedStop{code: "E2416", exit: "EXIT_CONFIG"},
+        CodedStop{code: "E2804", exit: "EXIT_RUNTIME_PANIC"},
+        CodedStop{code: "E2805", exit: "EXIT_RUNTIME_PANIC"},
+        CodedStop{code: "E2808", exit: "EXIT_RUNTIME_PANIC"},
+        CodedStop{code: "E2809", exit: "EXIT_RUNTIME_PANIC"},
+        CodedStop{code: "E3012", exit: "EXIT_RUNTIME_PANIC"},
+    }
     registered := [String]{}
     branches := ""
-    loop code in coded_stops {
+    exits := ""
+    loop (index, stop) in coded_stops {
+        code: stop.code
         if byte_len(code) != 5 || !code.starts_with("E") -> return Err(generator_fail("{code} is not a five-byte diagnostic code"))
         why: registry_field(registry, code, "why") ?? return Err(err)
         fix: registry_field(registry, code, "fix") ?? return Err(err)
@@ -809,11 +828,13 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
             scale *= 256
         }
         registered.push("code == I64{{{word}}}")
-        if code != coded_stops[coded_stops.len() - 1] -> branches = "{branches}        (code == I64{{{word}}}) -> trap_footer_{code.lower()}()\n"
+        if index != coded_stops.len() - 1 -> branches = "{branches}        (code == I64{{{word}}}) -> trap_footer_{code.lower()}()\n"
+        if stop.exit != "EXIT_RUNTIME_PANIC" -> exits = "{exits}    if (code == I64{{{word}}}) -> return {stop.exit}\n"
     }
-    last_coded: coded_stops[coded_stops.len() - 1].lower()
+    last_coded: coded_stops[coded_stops.len() - 1].code.lower()
     source = "{source}\ntrap_coded_registered: fn(code: I64) -> Bool {{\n    {registered.join(" || ")}\n}}\n"
     source = "{source}\ntrap_coded_footer: fn(code: I64) {{\n    if {{\n{branches}        else -> trap_footer_{last_coded}()\n    }}\n}}\n"
+    source = "{source}\ntrap_coded_exit: fn(code: I64) -> I64 {{\n{exits}    EXIT_RUNTIME_PANIC\n}}\n"
     literals: [MessageLiteral]{
         MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
         MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},

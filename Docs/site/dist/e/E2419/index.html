@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2419</code>: <code>tests/ui/e2419_error_conv_ambiguous.stderr</code>.</p>
 <pre class="diag">Error [jet.AmbiguousErrorConversion]: Error conversion is ambiguous: `RootErr` already reaches `TargetErr`
-  --&gt; tests/ui/e2419_error_conv_ambiguous.jet:10:6
+  --&gt; tests/ui/e2419_error_conv_ambiguous.jet:10:16
     |
- 10 | impl RightErr -&gt; TargetErr { return TargetErr.One }
-    |      ^^^^^^^^
+ 10 | impl TargetErr.From(RightErr) { from: fn(error: RightErr) -&gt; TargetErr { TargetErr.One } }
+    |                ^^^^
  Why: A source and target may have one unique declared conversion route.
  Fix: Remove the direct edge or remove one of the intermediate conversion edges.
 More: jet-lang.dev/e/E2419

@@ -42,8 +42,8 @@
     |
   7 |     _ := auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
     |               ^^^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `AuthError` can reach `Err` only through `impl AuthError -&gt; Err`
- Fix: Handle this call locally with `??`, add `impl AuthError -&gt; Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `AuthError` can reach `Err` only through `impl Err.From(AuthError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(AuthError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
 Error [jet.CredentialValueDenied]: A `Credential` value is denied at `print`
