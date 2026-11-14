@@ -5516,8 +5516,18 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
     loop index in 0..<ok_words -> call_args.push(if index == 0 -> out else -> ir_address_at(m, b, out, 8 * index))
     loop index in 0..<err_words -> call_args.push(if index == 0 -> out else -> ir_address_at(m, b, out, 8 * index))
     word_row: ir_word_row(m)
-    selector: ir_runtime(m, b, export, call_args, word_row)
-    split: IRRouteSplit{selector: selector, out: out, ok: ok.move(), err: err.move()}
+    selector := -1
+    value := -1
+    if ir_reader_read(export) == .Val(read) {
+        row: ir_reader_read_row(m, p, read, ok, result)
+        if row >= 0 && args.len() == 1 {
+            selector = ir_temp(m, b, word_row)
+            value = ir_temp(m, b, row)
+            ir_reader_read_inline(m, b, read, args[0], export, call_args, out, selector, value)
+        }
+    }
+    if selector < 0 -> selector = ir_runtime(m, b, export, call_args, word_row)
+    split: IRRouteSplit{selector: selector, out: out, value: value, ok: ok.move(), err: err.move()}
     if unboxed {
         b.split.push(split)
         return -1
@@ -5527,10 +5537,13 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
 
 // A Result route call before its Result is built: the selector word its
 // export answered (nonzero: Ok) and the `out` words the selected side wrote,
-// with the route's carriers.
+// with the route's carriers. `value` is the Ok payload's own slot when the
+// call read it inline (ir_reader_read_inline), else -1 and the payload is in
+// `out`.
 IRRouteSplit: struct {
     selector: Int
     out: Int
+    value: Int
     ok: IRRouteCarrier
     err: IRRouteCarrier
 }
@@ -5551,7 +5564,11 @@ ir_route_split_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRoute
         zero: ir_word_const(m, b, 0)
         ok_flag: ir_bool_op(m, b, IROp.Ne, split.selector, zero)
         ir_open_if(b.f, ok_flag, b.line)
-        ir_route_store_payload(m, p, b, boxed, 8, ok_ty, split.ok, split.out, span)
+        if split.value >= 0 {
+            ir_store_at(m, p, b, boxed, 8, split.value)
+        } else {
+            ir_route_store_payload(m, p, b, boxed, 8, ok_ty, split.ok, split.out, span)
+        }
         ir_else(b.f, b.line)
     }
     // A tuple error's kernel items carry the declared `labels`.
@@ -5579,6 +5596,11 @@ ir_route_split_ok: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteS
     } else { return ir_fail_slot(b, span, "runtime route Result as {ir_type_name(result)}") }
     if split.ok == .Unit || ir_unit_type(ok_ty) -> return -1
     row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
+    if split.value >= 0 {
+        value: ir_temp(m, b, row)
+        ir_emit(b.f, IROp.Copy, value, split.value, -1, -1, b.line)
+        return value
+    }
     scalar: split.ok == .Flag || split.ok == .Float || split.ok == .Text || split.ok == .Tag(_, _) || (split.ok == .Word && ir_word_record(m, p, row) == None && m.types[row].kind != .Aggregate)
     if scalar {
         value: ir_temp(m, b, row)
@@ -5595,6 +5617,97 @@ ir_route_split_ok: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteS
     value: ir_route_inline_payload(m, p, b, ok_ty, split.ok, split.out, span)
     b.fresh[value] = m.types[row].drop != ""
     value
+}
+
+// A fixed-width Reader read export (JetRuntime StreamCursor.jet
+// jet_reader_read_*, jet_reader_peek): the bytes its field spans, whether
+// they are big-endian, and whether the read advances the position.
+IRReaderRead: struct {
+    bytes: Int
+    big_endian: Bool
+    advance: Bool
+}
+
+ir_reader_read: fn(export: String) -> IRReaderRead? Never! {
+    if export == {
+        "jet_reader_read_u8" | "jet_reader_read_i8" -> Val(IRReaderRead{bytes: 1, big_endian: false, advance: true})
+        "jet_reader_peek" -> Val(IRReaderRead{bytes: 1, big_endian: false, advance: false})
+        "jet_reader_read_u16_le" | "jet_reader_read_i16_le" -> Val(IRReaderRead{bytes: 2, big_endian: false, advance: true})
+        "jet_reader_read_u16_be" | "jet_reader_read_i16_be" -> Val(IRReaderRead{bytes: 2, big_endian: true, advance: true})
+        "jet_reader_read_u32_le" | "jet_reader_read_i32_le" | "jet_reader_read_f32_le" -> Val(IRReaderRead{bytes: 4, big_endian: false, advance: true})
+        "jet_reader_read_u32_be" | "jet_reader_read_i32_be" | "jet_reader_read_f32_be" -> Val(IRReaderRead{bytes: 4, big_endian: true, advance: true})
+        "jet_reader_read_u64_le" | "jet_reader_read_i64_le" | "jet_reader_read_f64_le" -> Val(IRReaderRead{bytes: 8, big_endian: false, advance: true})
+        "jet_reader_read_u64_be" | "jet_reader_read_i64_be" | "jet_reader_read_f64_be" -> Val(IRReaderRead{bytes: 8, big_endian: true, advance: true})
+        else -> None
+    }
+}
+
+// The row a Reader read's Ok payload loads inline as, else -1: a fixed Int
+// or Float word exactly the field's width; a big-endian Float goes to the
+// runtime.
+ir_reader_read_row: fn(m: &IRModule, p: IRProgram, read: IRReaderRead, ok: IRRouteCarrier, result: Type) -> Int Never! {
+    if ok != .Word && ok != .Float -> return -1
+    ok_ty := Type.Int
+    if ir_untag(result) == .Result(success, _) {
+        ok_ty = success
+    } else { return -1 }
+    if ir_untag(ok_ty) == {
+        .IntN(_, _) | .Float | .Float32 -> {}
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return -1
+    }
+    row: ir_value_type(m, p, ok_ty) ?? return -1
+    kind: m.types[row].kind
+    word: kind == .Word && m.types[row].bits == 8 * read.bytes
+    float: (kind == .Float || kind == .Float32) && m.types[row].size == read.bytes && !read.big_endian
+    if word || float -> row else -> -1
+}
+
+// A fixed-width Reader read at the handle's position (StreamCursor.jet
+// stream_read; the handle is [data@0, length@8, capacity@16, position@24]).
+// With the field's bytes left, `value` loads them, the position advances
+// and `selector` becomes 1, with no call. Otherwise the export runs, writes
+// its bounds error to `out` and answers 0 in `selector`.
+ir_reader_read_inline: fn(m: &IRModule, b: &IRBuilder, read: IRReaderRead, handle: Int, export: String, call_args: [Int], out: Int, selector: Int, value: Int) Never! {
+    word: ir_word_row(m)
+    row: b.f.slot_type[value]
+    length: ir_load_word(m, b, handle, 8)
+    position: ir_load_word(m, b, handle, 24)
+    left: ir_word_op(m, b, IROp.Sub, length, position)
+    need: ir_word_const(m, b, read.bytes)
+    room: ir_bool_op(m, b, IROp.Ge, left, need)
+    ir_open_if(b.f, room, b.line)
+    data: ir_load_word(m, b, handle, 0)
+    base: ir_word_op(m, b, IROp.Add, data, position)
+    if !read.big_endian || read.bytes == 1 {
+        ir_emit(b.f, IROp.Load, value, base, 0, -1, b.line)
+    } else {
+        // Byte by byte into a word, first byte highest; the bits then fit
+        // the field's row.
+        byte_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? 0
+        gathered := ir_word_const(m, b, 0)
+        loop k in 0..<read.bytes {
+            byte: ir_load_at(m, b, base, k, byte_row)
+            widened: ir_copy_word(m, b, byte, word)
+            shift: ir_word_const(m, b, 8 * (read.bytes - 1 - k))
+            placed: ir_word_op(m, b, IROp.Shl, widened, shift)
+            gathered = ir_word_op(m, b, IROp.BitOr, gathered, placed)
+        }
+        narrowed: ir_copy_word(m, b, gathered, row)
+        ir_emit(b.f, IROp.Copy, value, narrowed, -1, -1, b.line)
+    }
+    if read.advance {
+        advanced: ir_word_op(m, b, IROp.Add, position, need)
+        ir_emit(b.f, IROp.Store, -1, handle, 24, advanced, b.line)
+    }
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Copy, selector, one, -1, -1, b.line)
+    ir_else(b.f, b.line)
+    called: ir_runtime(m, b, export, call_args, word)
+    ir_emit(b.f, IROp.Copy, selector, called, -1, -1, b.line)
+    // Never read (the selector is 0 here); it keeps `value` written on
+    // both paths.
+    ir_emit(b.f, IROp.Load, value, out, 0, -1, b.line)
+    ir_end(b.f, b.line)
 }
 
 // The default Err a runtime binding's `T Err!` failed with, built from the
