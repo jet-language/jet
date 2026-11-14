@@ -2406,7 +2406,7 @@ jet_driver_comptime_flush: fn(
     if request.trace_sink == .Val(sink) {
         sink.begin_item("comptime.build", batch.entries[0].source.source_file, jet_driver_comptime_batch_names(batch))
     }
-    built := jet_driver_comptime_ir_build(batch, staging, values, graph.decls, graph.symbols, graph.module_table)
+    built := jet_driver_comptime_ir_build(batch, staging, values, graph.decls, graph.symbols, graph.module_table, request.compiler_threads)
     if request.trace_sink == .Val(sink) {
         sink.end("comptime.build", batch.functions.len() + built.items.len())
     }
