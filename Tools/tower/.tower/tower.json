@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102127,
+    "rev": 102131,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86684,6 +86684,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c3 decision (Main, 2026-11-14): the ComputeAutoDiff golden prints the host`s matmul dispatch (dispatch=avx2;vector_width=8), which differs on wasm (scalar;1), ARM and non-AVX2 x86, so the golden is host-dependent, against I5 and I9. The example stops printing the dispatch fields (option b); its golden changes once. A web profile .out was rejected, since no harness reads it, and so was counting web as met with a differing line. G3Core-2: 22 of 23 lines already match on web on the batch-27 jet; O0, O1 and O2 golden ComputeAutoDiff PASS 3/0."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "MechB-2 notes (2026-11-06): ComputeAutoDiff.jet fails because IR has no lowering for MathBuiltin(core.compute, gradient|value_and_gradient|vjp|jvp): Compiler/JetIR/Source/BuildExpr.jet:1896 sends it to ir_precise_builtin -> ir_precise_route -> 'unlowered: generic Core call core.compute.*'. Separate bug: Compiler/JetIR/Source/CompilerOwned.jet:254 declares VJPRun.grads as Fn() -> t while sema (Expressions/Places.jet:522) declares plain t. Planned design (unbuilt): runtime tracing inside Core (private Tensor fields ad_meta: [[Int]], ad_data: [[Float]]), private __ad_* helpers in Core/Compute/Compute.jet reached through CoreReach.jet, and a new Compiler/JetIR/Source/BuildAutodiff.jet lowering the curried and direct forms."
@@ -86708,7 +86713,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:43.242Z",
-      "updated": "2026-11-09T19:02:56.936Z",
+      "updated": "2026-11-14T03:26:32.235Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98324,11 +98329,11 @@
         {
           "n": 12,
           "text": "[G3Core-2] Routes whose braces are literal (core-library.md:1670), for example `/files/{name}`, are not reported as E2804 AmbiguousRoute. Only E2805 refuses that route. Proof: ui http_route_path_type passes unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T02:22:44.879Z"
+          "evidence": "G3Core2-6839c12 in batch 27. Batch 27 landed on dev 4b0ea9247d..6462f46f85; b27proofs on the batch-27 jet (gate-p33): ui http_route_path_type 1/0 unchanged. cases route 32/4/3KF; G3 checked the 4 FAILs against the batch-22 jet, where they also fail (base).",
+          "at": "2026-11-14T03:26:27.756Z"
         },
         {
           "n": 13,
@@ -98369,11 +98374,11 @@
         {
           "n": 17,
           "text": "[G5DevX-2] A Core type in a diagnostic prints as the user writes it (`DataEvent.Number`), not module-qualified (`core.encoding.DataEvent.Number`). Proof: ui data_event_payload_types passes unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T02:22:34.820Z"
+          "evidence": "G5DevX2-core-enum-plain-name in batch 27. Batch 27 landed on dev 4b0ea9247d..6462f46f85; b27proofs on the batch-27 jet (gate-p33): ui data_event_payload_types 1/0 and enum_variant_payload_field_type 1/0 unchanged.",
+          "at": "2026-11-14T03:26:28.979Z"
         },
         {
           "n": 18,
@@ -98387,11 +98392,11 @@
         {
           "n": 19,
           "text": "[G6Meta-4] An unclosed #run value is cut off at the next binding again, including a bare `NAME: #run value` binding. The error is reported there, not at end of file, and no E0391 or `fn` cascade follows. Proof: ui prep_value_unclosed passes against its refreshed snapshot, whose columns follow the #run spelling and which has no cascade report.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T02:40:48.186Z"
+          "evidence": "G6Meta-6839c19 in batch 27. Batch 27 landed on dev 4b0ea9247d..6462f46f85; b27proofs on the batch-27 jet (gate-p33): ui prep_value_unclosed 1/0 against its refreshed snapshot; ui prep_ 4/0; JetParser/Tests 256/0.",
+          "at": "2026-11-14T03:26:30.290Z"
         },
         {
           "n": 20,
@@ -98420,7 +98425,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-14T03:26:13.870Z",
+      "updated": "2026-11-14T03:26:30.290Z",
       "updatedBy": "Main",
       "criteriaLastN": 21
     }
@@ -204577,6 +204582,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T03:26:32.236Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wyaelh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T03:26:30.290Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-14T03:26:28.979Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-14T03:26:27.756Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#12"
+    },
     {
       "at": "2026-11-14T03:26:13.870Z",
       "by": "Main",
