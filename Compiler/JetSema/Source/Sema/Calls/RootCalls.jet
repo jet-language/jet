@@ -70,6 +70,7 @@ sema_root_call_named: fn(method: String, environment: SemaScopeEnvironment, prog
 sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaRootCallTarget] {
     targets := [SemaRootCallTarget]{}
     graph: program.registration_graph ?? return targets
+    if !graph.root_functions -> return targets
     module_index: sema_scope_caller_index(environment, graph) ?? return targets
     aliases := [String]{}
     loop import_row in graph.modules[module_index].imports {

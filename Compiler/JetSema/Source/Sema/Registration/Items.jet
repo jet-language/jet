@@ -900,6 +900,12 @@ SemaRegistrationGraph: struct {
     // the graph, so method lookup reads only the owning modules instead of
     // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
     source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}}
+    // Whether some registered function marks its first parameter `#Root`
+    // (sema_registration_note_root_functions). Set when the graph is built and
+    // when a user template registers more functions, never cleared, so a
+    // graph without one skips the receiver-first probe's import walk
+    // (sema_root_call_imported) on every method call.
+    root_functions: Bool{false}
     // The inferred never-return set: the SymbolIDs of the functions that never return to
     // their caller, one fixed point once every declaration is registered
     // (sema_divergence_solve).
@@ -2823,6 +2829,18 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
         }
     }
     graph.source_impl_owner_modules = owners.move()
+}
+
+// Sets graph.root_functions when module `module_index` registers a function
+// whose first parameter is `#Root`.
+sema_registration_note_root_functions: fn(graph: &SemaRegistrationGraph, module_index: Int) Never! {
+    if graph.root_functions -> return
+    loop function in graph.modules[module_index].functions {
+        if function.declaration.params.len() > 0 && function.declaration.params[0].root {
+            graph.root_functions = true
+            return
+        }
+    }
 }
 
 // Whether a built-in target is this module's to extend: an operator hook
@@ -4961,6 +4979,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     graph.seeded = seeded
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
+    loop module_index in 0..<graph.modules.len() -> sema_registration_note_root_functions(graph, module_index)
     sema_serde_index_codec_methods(graph)
     sema_derive_index_methods(graph)
     sema_registration_index_namespaces(graph)
