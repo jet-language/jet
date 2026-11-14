@@ -16,6 +16,7 @@ use {
         diagnostic_explanation_render,
         diagnostic_from_registry,
         diagnostic_render_all,
+        diagnostic_without_fix,
         diagnostic_theme_dim,
         sha256_hex,
     ]
@@ -118,21 +119,38 @@ jet_driver_present_origin_once: fn(path: String, snapshot: JetDriverAuthorizedSo
 
 // Project one checked diagnostic onto the file that owns it, the way the
 // bootstrap host does: a named source path becomes the origin (root-relative
-// display; a generated source shows its path), and the span, edit, and labels
-// move from aggregate offsets to offsets in that file's exact bytes.
+// display; a generated source shows its path), and the span, edits, and
+// labels move from aggregate offsets to offsets in that file's exact bytes.
+// An edit that names its own file keeps its span and takes that file's
+// physical path; when one can't, the diagnostic keeps no fix.
 jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
     // copy: `presented` is the shifted copy returned for display, while `diagnostic` stays the
     // caller's raw row (a read parameter). Its source_start/offset/span/edit are read below to
     // compute the shift.
     presented := diagnostic.copy()
-    path: diagnostic.source_path ?? return presented
+    path: diagnostic.source_path ?? return jet_driver_present_unplaced(presented)
     if presented.origin == None {
         presented.origin = jet_driver_present_origin_once(path, snapshot, generated, origins)
-        if presented.origin == None -> return presented
+        if presented.origin == None -> return jet_driver_present_unplaced(presented)
     }
     shift: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
     if diagnostic.span == .Val(span) -> presented.span = Val(jet_driver_shift_span(span, shift))
-    if diagnostic.edit == .Val(edit) -> presented.edit = Val(TextEdit{span: jet_driver_shift_span(edit.span, shift), new_text: edit.new_text})
+    placed := true
+    if diagnostic.edit == .Val(edit) {
+        if jet_driver_present_edit(edit, shift, snapshot, generated, origins) == .Val(moved) {
+            presented.edit = Val(moved)
+        } else {
+            placed = false
+        }
+    }
+    loop index in 0..<diagnostic.fix_edits.len() {
+        if jet_driver_present_edit(diagnostic.fix_edits[index], shift, snapshot, generated, origins) == .Val(moved) {
+            presented.fix_edits[index] = moved
+        } else {
+            placed = false
+        }
+    }
+    if !placed -> presented = diagnostic_without_fix(presented)
     loop index in 0..<presented.labels.len() {
         presented.labels[index].span = jet_driver_shift_span(presented.labels[index].span, shift)
     }
@@ -148,6 +166,22 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     presented.source_offset = None
     presented.source_start = None
     presented
+}
+
+// A diagnostic with no file of its own keeps no fix that names another one.
+jet_driver_present_unplaced: fn(diagnostic: &&Diagnostic) -> Diagnostic Never! {
+    named := diagnostic.fix_edits.len() > 0
+    if diagnostic.edit == .Val(edit) && edit.path != None -> named = true
+    if named -> return diagnostic_without_fix(diagnostic)
+    diagnostic
+}
+
+// `edit` in its file: shifted by `shift` into the diagnostic's own file, or,
+// when it names its file, unshifted with that file's physical path.
+jet_driver_present_edit: fn(edit: TextEdit, shift: Int, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> TextEdit? Never! {
+    named: edit.path ?? return Val(TextEdit{span: jet_driver_shift_span(edit.span, shift), new_text: edit.new_text})
+    origin: jet_driver_present_origin_once(named, snapshot, generated, origins) ?? return None
+    Val(TextEdit{span: edit.span, new_text: edit.new_text, path: Val(origin.path)})
 }
 
 jet_driver_present_diagnostics: fn(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {

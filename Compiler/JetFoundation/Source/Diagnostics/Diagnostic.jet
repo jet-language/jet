@@ -6,10 +6,23 @@ Span: struct {
     end: Int
 }
 
+// `path` names the file the edit changes when it is not the diagnostic's
+// own: sema's source path, then the physical path once the driver presents
+// the diagnostic (jet_driver_present_diagnostic). Its span is that file's.
 TextEdit: struct {
     span: Span
     new_text: String
+    path: String?{None}
 }
+
+// The `==` and `!=` sites a fix rewrites once every module is checked:
+// each one that resolved to the method `symbol` becomes a call of
+// `method` on its left operand (sema_complete_call_rewrites).
+DiagnosticCallRewrite: struct {
+    symbol: SymbolID
+    method: String
+}
+
 DiagnosticMoment: enum { Compile Run Test Tool }
 
 DiagnosticFixApplicability: enum { Safe Suggested }
@@ -126,6 +139,11 @@ Diagnostic: struct {
     why: String
     fix: String
     edit: TextEdit?{None}
+    // The other edits of the fix `edit` opens, applied with it all together
+    // or not at all. Each may name its own file (TextEdit.path).
+    fix_edits: [TextEdit]{[TextEdit]{}}
+    // Sema's pending `==` rewrites for this fix; none once sema is done.
+    fix_calls: DiagnosticCallRewrite?{None}
     applicability: DiagnosticFixApplicability?{None}
     safety: DiagnosticFixSafety?{None}
     no_fix_reason: DiagnosticNoFixReason?{None}
@@ -230,6 +248,17 @@ diagnostic_with_label: fn(diagnostic: &&Diagnostic, span: Span, message: String)
 diagnostic_with_edit_grade: fn(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
+}
+
+// The diagnostic with no fix: no edit, no grade and no pending rewrite.
+diagnostic_without_fix: fn(diagnostic: &&Diagnostic) -> Diagnostic Never! {
+    updated := diagnostic
+    updated.edit = None
+    updated.fix_edits = [TextEdit]{}
+    updated.fix_calls = None
+    updated.applicability = None
+    updated.safety = None
+    updated
 }
 
 diagnostic_with_structured_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {

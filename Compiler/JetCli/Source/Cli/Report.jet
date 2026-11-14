@@ -299,20 +299,43 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
     "{{{fields.join(",")}}}"
 }
 
-// `all_edits`: the primary repair, then any source-derived alternatives.
-jet_cli_report_edits: fn(diagnostic: Diagnostic) -> [TextEdit] Never! {
-    edits := [TextEdit]{}
-    // copy: `edit` is a payload of read parameter `diagnostic`, which keeps the original; the returned `edits` list owns this one
-    if diagnostic.edit == .Val(edit) -> edits.push(edit.copy())
+// How many edits `diagnostic` offers: the primary repair with the edits
+// applied beside it, then any source-derived alternatives.
+jet_cli_report_edit_count: fn(diagnostic: Diagnostic) -> Int Never! {
+    count := 0
+    if diagnostic.edit != None -> count = 1 + diagnostic.fix_edits.len()
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .SuggestedEdits(alternatives) -> count += alternatives.len()
+            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
+        }
+    }
+    count
+}
+
+// The `fix_edits` rows of `diagnostic`, in jet_cli_report_edit_count's
+// order, each naming the file it changes: its own (TextEdit.path), else
+// `report_file`.
+jet_cli_report_edits_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, report_file: String, grade: String) -> [String] Never! {
+    rendered := [String]{}
+    if diagnostic.edit == .Val(edit) {
+        rendered.push(jet_cli_report_edit_json(edit, base, report_file, grade))
+        loop other in diagnostic.fix_edits -> rendered.push(jet_cli_report_edit_json(other, base, report_file, grade))
+    }
     if diagnostic.structured == .Val(structured) {
         if structured == {
             .SuggestedEdits(alternatives) -> {
-                loop alternative in alternatives -> edits.push(alternative.copy())
+                loop alternative in alternatives -> rendered.push(jet_cli_report_edit_json(alternative, base, report_file, grade))
             }
             .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
         }
     }
-    edits
+    rendered
+}
+
+jet_cli_report_edit_json: fn(edit: TextEdit, base: JetCLIReportBase?, report_file: String, grade: String) -> String Never! {
+    file: if edit.path == .Val(named) -> jet_cli_json_string(jet_cli_report_file(base, named)) else -> jet_cli_json_string(report_file)
+    "{{\"file\":{file},\"span\":{jet_cli_report_span(edit.span.start, edit.span.end)},\"new_text\":{jet_cli_json_string(edit.new_text)},\"safety\":{grade}}}"
 }
 
 jet_cli_report_same_origin: fn(left: DiagnosticOrigin?, right: DiagnosticOrigin?) -> Bool Never! {
@@ -384,12 +407,11 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     } else {
         out = "{out},\"line\":null,\"col\":null,\"span\":null"
     }
-    edits: jet_cli_report_edits(diagnostic)
-    if edits.len() > 0 {
+    if jet_cli_report_edit_count(diagnostic) > 0 {
         if diagnostic.no_fix_reason != None -> panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
         safety: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
         grade: jet_cli_json_string(jet_cli_report_safety(safety))
-        rendered: loop edit in edits -> "{{\"file\":{jet_cli_json_string(report_file)},\"span\":{jet_cli_report_span(edit.span.start, edit.span.end)},\"new_text\":{jet_cli_json_string(edit.new_text)},\"safety\":{grade}}}"
+        rendered: jet_cli_report_edits_json(diagnostic, base, report_file, grade)
         out = "{out},\"fix_edits\":[{rendered.join(",")}]"
     } else if diagnostic.no_fix_reason == .Val(reason) {
         out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
