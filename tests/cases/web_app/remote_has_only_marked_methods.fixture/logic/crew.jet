@@ -37,37 +37,28 @@ reason: fn(error: TaskError) -> String {
     }
 }
 
-new_task_id: fn() -> TaskID {
-    TaskID{value: 1}
-}
+new_task_id: fn() -> TaskID { TaskID{value: 1} }
 
 Crew: struct {
     name: String
 
     // A signed-in caller moves a task.
-    #App.SignedIn
-    move_task: fn(self, id: TaskID) -> Int TaskError! {
+    #App.SignedIn move_task: fn(self, id: TaskID) -> Int TaskError! {
         if id.value < 0 -> return Err(TaskError.NotFound)
         Ok(id.value + 1)
     }
 
     // Any caller looks a task up.
-    #App.Public
-    lookup: fn(self, id: TaskID) -> Int TaskError! {
+    #App.Public lookup: fn(self, id: TaskID) -> Int TaskError! {
         if id.value < 0 -> return Err(TaskError.NotFound)
         Ok(id.value + 1)
     }
 
     // Any caller reads the service's status.
-    #App.Public
-    status: fn(self) -> String {
-        "{self.name} is up"
-    }
+    #App.Public status: fn(self) -> String { "{self.name} is up" }
 
     // The webhook signing key.
-    webhook_secret: fn(self, project: ProjectID) -> String? {
-        Val("secret-{project.value}")
-    }
+    webhook_secret: fn(self, project: ProjectID) -> String? { Val("secret-{project.value}") }
 
     // The job that tells a task's assignee.
     tell_assignee: fn(self, id: TaskID) TaskError! {

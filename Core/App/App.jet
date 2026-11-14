@@ -8,13 +8,7 @@ package: {
         app: .Library{ entry: app }
     }
 }
-AUTH_MAX_PROVIDERS: 64
-SYNC_MAX_SESSION: 256
-SYNC_MAX_DOCUMENT: 4194304
-SYNC_MAX_TEXT: 1048576
-SYNC_MAX_ENTRIES: 100000
-SYNC_MAX_REPLICAS: 4096
-SYNC_MAX_INT: 9223372036854775807
+
 // Live bindings live in one process-wide registry below; sync sessions are
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
@@ -26,6 +20,20 @@ use {
     rt_web: jet.runtime.web
     world_rt: jet.runtime.testing
 }
+
+AUTH_MAX_PROVIDERS: 64
+
+SYNC_MAX_SESSION: 256
+
+SYNC_MAX_DOCUMENT: 4194304
+
+SYNC_MAX_TEXT: 1048576
+
+SYNC_MAX_ENTRIES: 100000
+
+SYNC_MAX_REPLICAS: 4096
+
+SYNC_MAX_INT: 9223372036854775807
 
 #Error
 AppError: enum {
@@ -89,42 +97,37 @@ Remote: struct<S> {
 
     // `failure` as an error of the call; the compiler's `fail` binds it, so
     // the method's error type takes it through its conversion.
-    __raise: fn<R>(self, failure: CallError) -> R CallError! {
-        Err(failure)
-    }
+    __raise: fn<R>(self, failure: CallError) -> R CallError! { Err(failure) }
 }
 
 // How a remote call failed. Every call through a `Remote` can fail this way,
 // so the error type of a service method converts from it.
 #Error
 CallError: enum {
-    // No answer: the server is down or unreachable, or its reply was not one
-    // a Remote reads.
     Unreachable(String)
-    // The server could not decode the call's arguments (HTTP 422): the field
-    // errors its reply names.
     Invalid([FieldError])
-    // The method needs a signed-in caller, and the call had none (HTTP 401).
     SignedOut
-    // The server no longer accepts this client's wire version (HTTP 426).
     UpdateRequired
 }
+
+// No answer: the server is down or unreachable, or its reply was not one
+// a Remote reads.
+// The server could not decode the call's arguments (HTTP 422): the field
+// errors its reply names.
+// The method needs a signed-in caller, and the call had none (HTTP 401).
+// The server no longer accepts this client's wire version (HTTP 426).
 
 // The largest reply a remote call reads.
 REMOTE_MAX_REPLY: 16777216
 
 // The Remote of a service the server holds: each call through it runs the
 // marked method on `service` directly.
-remote: fn<S>(service: &&S) -> Remote<S> Never! {
-    Remote<S>{service: Val(service), address: ""}
-}
+remote: fn<S>(service: &&S) -> Remote<S> Never! { Remote<S>{service: Val(service), address: ""} }
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
 // `{address}/{method}`.
-remote_at: fn<S>(address: String) -> Remote<S> Never! {
-    Remote<S>{service: None, address: address}
-}
+remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None, address: address} }
 
 // One remote call: POST the JSON array of `args` to `{address}/{method}`;
 // the reply's body on 200, else the failure its status names.
@@ -206,6 +209,7 @@ auth_show: fn(auth: Auth) -> String Never! {
     providers := canonical_providers(auth.providers)
     "Auth(users={table}, providers=[{providers.join(",")}])"
 }
+
 canonical_table: fn(value: String) -> String {
     if valid_identifier(value) -> return value.copy()
     ""
@@ -268,7 +272,9 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
         if live_value_state<T, E>(text) == .Val(current) -> return current
     }
     value: binding.run() ?? {
-        if live_json.to_string<E>(err) == .Ok(encoded) -> live_store(binding.id, "err:{encoded}", now)
+        if live_json.to_string<E>(err) == .Ok(encoded) {
+            live_store(binding.id, "err:{encoded}", now)
+        }
         return Loadable.Failed(err)
     }
     if live_json.to_string<T>(value) == .Ok(encoded) -> live_store(binding.id, "ok:{encoded}", now)
@@ -313,7 +319,9 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 }
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
-__live_invalidate: fn(source: String, args: [String]) Never! { live_invalidate(source, Val(live_key(args))) }
+__live_invalidate: fn(source: String, args: [String]) Never! {
+    live_invalidate(source, Val(live_key(args)))
+}
 
 // `invalidate(source)`: every binding of `source` re-runs.
 __live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
@@ -322,7 +330,9 @@ __live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None)
 __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
 
 LIVE_MAX_QUERIES: 1024
+
 LIVE_MAX_PAYLOAD: 4194304
+
 // The registry source of sync's session records: a session keeps its
 // generation and document as the record's value.
 LIVE_SYNC_SOURCE: "app.sync"
@@ -344,7 +354,9 @@ live_cell_load: fn() -> [U8] {
 }
 
 live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
-    if world_rt.world_store_replace("core.web.live", expected, replacement) == .Val(replaced) -> return replaced
+    if world_rt.world_store_replace("core.web.live", expected, replacement) == .Val(replaced) {
+        return replaced
+    }
     cell := LIVE_CELL.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()
@@ -362,7 +374,9 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
         registry := live_decode(seen) ?? return 0
         found := 0
         loop index in 0..<registry.records.len() {
-            if registry.records[index].source != source || registry.records[index].key != key -> next
+            if registry.records[index].source != source || registry.records[index].key != key {
+                next
+            }
             found = registry.records[index].id
             current: registry.records[index].every_ns
             if every_ns <= 0 || (current > 0 && current <= every_ns) -> return found
@@ -399,7 +413,7 @@ live_current: fn(id: Int, now: Int) -> String? {
     record: registry.records[index]
     if record.value == "" || record.dirty -> return None
     if record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return None
-    Val(record.value.copy()) // copy: the registry snapshot is dropped here
+    Val(record.value.copy())  // copy: the registry snapshot is dropped here
 }
 
 live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
@@ -415,18 +429,22 @@ live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> 
 // Stores `value` as binding `id`'s result, clean; a value that differs from
 // the stored one counts as a change. `now` < 0 keeps the last run time.
 live_store: fn(id: Int, value: String, now: Int) {
-    if value.len() > LIVE_MAX_PAYLOAD -> return
+    if value.len() > LIVE_MAX_PAYLOAD {
+        return
+    }
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
         index: live_index(registry, id) ?? return
         if registry.records[index].value != value {
-            registry.records[index].value = value.copy() // copy: a lost race retries with the same value
+            registry.records[index].value = value.copy()  // copy: a lost race retries with the same value
             registry.changes += 1
         }
         registry.records[index].dirty = false
         if now >= 0 -> registry.records[index].ran_ns = now
-        if live_cell_replace(seen, live_encode(registry)) -> return
+        if live_cell_replace(seen, live_encode(registry)) {
+            return
+        }
     }
 }
 
@@ -445,7 +463,9 @@ live_invalidate: fn(source: String, key: String?) {
             registry.records[index].dirty = true
             hit += 1
         }
-        if hit == 0 -> return
+        if hit == 0 {
+            return
+        }
         registry.invalidations += hit
         registry.ws_pushes += 1
         if live_cell_replace(seen, live_encode(registry)) {
@@ -494,7 +514,9 @@ live_put: fn(out: &[U8], text: String) {
 
 // An empty cell is the empty registry; None when the bytes are malformed.
 live_decode: fn(raw: [U8]) -> LiveRegistry? {
-    if raw.len() == 0 -> return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
+    if raw.len() == 0 {
+        return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
+    }
     fields: live_fields(raw) ?? return None
     if fields.len() < 5 || (fields.len() - 5) % 7 != 0 -> return None
     next_id: Int.parse(fields[0]) ?? return None
@@ -545,7 +567,9 @@ live_fields: fn(raw: [U8]) -> [String]? {
 // each change to the installed live transport subscribers; the native runtime
 // installs none.
 sync: fn(doc_show: String, over: String) -> String Never! {
-    if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) -> return "SyncError(invalid session)"
+    if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) {
+        return "SyncError(invalid session)"
+    }
     document: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
     loop {
         seen: live_cell_load()
@@ -563,9 +587,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
             stored: sync_session_decode(registry.records[found].value) ?? return "SyncError(session registry is unavailable)"
             generation = stored.generation
             current = stored.document.copy()
-        } else if sessions >= SYNC_MAX_ENTRIES {
-            return "SyncError(session limit exceeded)"
-        }
+        } else if sessions >= SYNC_MAX_ENTRIES { return "SyncError(session limit exceeded)" }
         changed := false
         if current != document {
             merged: sync_document_merge(current, document) ?? return "SyncError(document merge denied)"
@@ -582,9 +604,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         receipt: "SyncOver(session={over}, generation={generation}, doc={current})"
         if !changed -> return receipt
         value: "{generation}:{current}"
-        if found >= 0 {
-            registry.records[found].value = value
-        } else {
+        if found >= 0 -> registry.records[found].value = value else {
             id: registry.next_id + 1
             registry.next_id = id
             registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
@@ -608,7 +628,9 @@ sync_session_decode: fn(value: String) -> SyncSession? {
 // The canonical document `value` names, or None when it is malformed or not in
 // canonical order (JetSyncDocument::parse).
 sync_document_parse: fn(value: String) -> String? {
-    if value == "" || value.trim() != value || value.len() > SYNC_MAX_DOCUMENT || unicode.has_control(value) -> return None
+    if value == "" || value.trim() != value || value.len() > SYNC_MAX_DOCUMENT || unicode.has_control(value) {
+        return None
+    }
     if !value.ends_with(")") -> return None
     if value.starts_with("SyncText(") -> return Val(value.copy())
     canonical := ""
@@ -618,9 +640,7 @@ sync_document_parse: fn(value: String) -> String? {
         canonical = sync_list_show(sync_list_items(value) ?? return None)
     } else if value.starts_with("PNCounter(") {
         canonical = sync_counter_show(sync_counter_entries(value) ?? return None)
-    } else {
-        return None
-    }
+    } else { return None }
     if canonical != value -> return None
     Val(canonical)
 }
@@ -635,9 +655,7 @@ sync_document_merge: fn(left: String, right: String) -> String? {
             value: other.get(key) ?? next
             if entries.get(key) == .Val(existing) {
                 if existing != value -> return None
-            } else {
-                _: entries.add(key, value)
-            }
+            } else { _: entries.add(key, value) }
         }
         if entries.len() > SYNC_MAX_ENTRIES -> return None
         merged = sync_map_show(entries)
@@ -660,9 +678,7 @@ sync_document_merge: fn(left: String, right: String) -> String? {
         }
         if counts.len() > SYNC_MAX_REPLICAS -> return None
         merged = sync_counter_show(counts)
-    } else {
-        return None
-    }
+    } else { return None }
     sync_document_parse(merged)
 }
 
@@ -684,7 +700,9 @@ sync_map_entries: fn(value: String) -> [String:String]? {
         pair: sync_split_once(entry, "=") ?? return None
         key: sync_unescape(pair.first) ?? return None
         item: sync_unescape(pair.second) ?? return None
-        if !sync_token_valid(key) || item.len() > SYNC_MAX_TEXT || entries.get(key) != .None -> return None
+        if !sync_token_valid(key) || item.len() > SYNC_MAX_TEXT || entries.get(key) != .None {
+            return None
+        }
         _: entries.add(key, item)
     }
     Val(entries)
@@ -759,9 +777,9 @@ sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
     loop replica in counts.keys() {
         count: counts.get(replica) ?? next
         if total > 0 && count.positive > SYNC_MAX_INT - total -> return None
-        total = total + count.positive
+        total += count.positive
         if total < 0 && count.negative > SYNC_MAX_INT + total + 1 -> return None
-        total = total - count.negative
+        total -= count.negative
     }
     Val(counts)
 }
@@ -790,7 +808,9 @@ sync_count_parse: fn(text: String, sign: String) -> Int? {
 }
 
 sync_document_body: fn(value: String, prefix: String) -> String? {
-    if !value.starts_with(prefix) || !value.ends_with(")") || value.len() < prefix.len() + 1 -> return None
+    if !value.starts_with(prefix) || !value.ends_with(")") || value.len() < prefix.len() + 1 {
+        return None
+    }
     Val(value.slice(prefix.len(), value.len() - 1))
 }
 
@@ -821,13 +841,9 @@ sync_unescape: fn(value: String) -> String? {
             if scalar != "\\" && !sync_is_separator(scalar) -> return None
             out = "{out}{scalar}"
             escaped = false
-        } else if scalar == "\\" {
-            escaped = true
-        } else if sync_is_separator(scalar) {
+        } else if scalar == "\\" { escaped = true } else if sync_is_separator(scalar) {
             return None
-        } else {
-            out = "{out}{scalar}"
-        }
+        } else { out = "{out}{scalar}" }
     }
     if escaped -> return None
     Val(out)
@@ -842,14 +858,10 @@ sync_split: fn(value: String, separator: String) -> [String]? {
         if escaped {
             current = "{current}\\{scalar}"
             escaped = false
-        } else if scalar == "\\" {
-            escaped = true
-        } else if scalar == separator {
+        } else if scalar == "\\" { escaped = true } else if scalar == separator {
             parts.push(current)
             current = ""
-        } else {
-            current = "{current}{scalar}"
-        }
+        } else { current = "{current}{scalar}" }
     }
     if escaped -> return None
     parts.push(current)
@@ -863,11 +875,7 @@ sync_split_once: fn(value: String, separator: String) -> SyncPair? {
     at := 0
     loop scalar in unicode.scalars(value) {
         at += scalar.len()
-        if escaped {
-            escaped = false
-        } else if scalar == "\\" {
-            escaped = true
-        } else if scalar == separator {
+        if escaped -> escaped = false else if scalar == "\\" -> escaped = true else if scalar == separator {
             return Val(SyncPair{first: before, second: value.slice(at, value.len())})
         }
         before = "{before}{scalar}"
@@ -879,11 +887,7 @@ valid_provider: fn(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false
     loop byte in value.bytes() {
         n: Int{byte}
-        allowed:
-            (n >= 48 && n <= 57) ||
-            (n >= 65 && n <= 90) ||
-            (n >= 97 && n <= 122) ||
-            n == 95 || n == 45
+        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45
         if !allowed -> return false
     }
     true
@@ -894,16 +898,11 @@ valid_identifier: fn(value: String) -> Bool {
     if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
     loop byte in value.bytes() {
         n: Int{byte}
-        allowed:
-            (n >= 48 && n <= 57) ||
-            (n >= 65 && n <= 90) ||
-            (n >= 97 && n <= 122) ||
-            n == 95
+        allowed: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
         if !allowed -> return false
     }
     true
 }
-
 
 contains_string: fn(values: [String], value: String) -> Bool {
     loop item in values {

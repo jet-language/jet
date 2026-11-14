@@ -20,8 +20,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | NonExhaustiveOsDispatch | Compiler/JetSema/Source/Sema/Statements.jet:10130 | cover every OS, or add `else` |
 | E-OSTARGET-MIXED-AXIS | OsAndWebTargetConflict | Compiler/JetSema/Source/Sema/OSTarget.jet:81 | gate the item on one axis |
 | E-OSTARGET-UNMATCHED-CALL | OsGatedTypeUngatedUse | Compiler/JetSema/Source/Sema/OSTarget.jet:107 | gate the caller to the same OS |
-| E-SUBJECT-CALL | MemberShorthandAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:7000 | write the value, or a lambda where a callable is meant |
-| E-SUBJECT-CALL-ARITY | MemberShorthandArity | Compiler/JetSema/Source/Sema/Expressions.jet:6996 | a lambda names every parameter |
+| E-SUBJECT-CALL | MemberShorthandAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:7588 | write the value, or a lambda where a callable is meant |
+| E-SUBJECT-CALL-ARITY | MemberShorthandArity | Compiler/JetSema/Source/Sema/Expressions.jet:7582 | a lambda names every parameter |
 | E-WEB-ABI-TYPE | WebBoundaryTypeNotAllowed | Compiler/JetSema/Source/Sema/WebPartition.jet:318 | an ABI-safe type crosses the boundary |
 | E-WEB-CROSS-PARTITION | WebPartitionCrossed | Compiler/JetSema/Source/Sema/WebPartition.jet:113 | both functions live in one partition |
 | E-WEB-RUN | WebProgramRunNotSupported | Compiler/JetCli/Source/Cli/Front.jet:1910 | run it in a browser |
@@ -61,7 +61,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0119 | UnknownType | Compiler/JetSema/Source/Sema/Calls/Data.jet:215 | no opt-in uses a type that does not exist |
 | E0124 | BranchTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/Control.jet:2707 | the expression has one type |
 | E0126 | DefaultReadsLaterParameter | Compiler/JetSema/Source/Sema/FunctionHeaders.jet:267 | no opt-in gives a parameter its value early |
-| E0133 | UnsupportedDecimalOperator | Compiler/JetSema/Source/Sema/Expressions.jet:1400 | no opt-in runs an operator Decimal does not define |
+| E0133 | UnsupportedDecimalOperator | Compiler/JetSema/Source/Sema/Expressions.jet:1495 | no opt-in runs an operator Decimal does not define |
 | E0134 | UnknownUnitSuffix | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:175 | no opt-in gives an unknown unit a type |
 | E0135 | LiteralOutsideRange | Compiler/JetSema/Source/Sema/Calls/Static.jet:1681 | a value outside the bounds is not a value of the type |
 | E0136 | RangeValueWithoutCheck | Compiler/JetSema/Source/Sema/Calls/Static.jet:1777 | the fallible `?` form checks the bounds; nothing skips the check |
@@ -88,7 +88,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0211 | CopyNotSupported | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:298 | a function, trait value or opaque type has no copy to run |
 | E0213 | WriteMarkerNotOnPlace | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:50 | a value without storage has nothing to lend |
 | E0218 | PinWithoutWriteWindow | Compiler/JetSema/Source/Sema/Ownership/Pins.jet:29 | a temporary has no place to pin |
-| E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions.jet:1266 | a function type with the same marks reaches the program |
+| E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions.jet:1356 | a function type with the same marks reaches the program |
 | E0231 | InvalidReceiverFootprint | Compiler/JetSema/Source/Sema/Footprint.jet:217 | the footprint must name the fields the body touches |
 | E0301 | ImplOnBuiltinType | Compiler/JetSema/Source/Sema/CheckProgram.jet:1972 | an operator hook belongs to the package that declares an operand type |
 | E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:601 | no opt-in reaches a field the type does not declare |
@@ -119,10 +119,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0353 | InvalidValidateRule | Compiler/JetSema/Source/Sema/Registration/Validate.jet:106 | each rule is a `check` with `at:` and a message |
 | E0354 | UnknownValidateField | Compiler/JetSema/Source/Sema/Registration/Validate.jet:110 | `at:` names a declared field |
 | E0355 | InvalidScopedPolicy | Compiler/JetSema/Source/Sema/CallablePolicies.jet:93 | a narrower scope only narrows policy, and audited authority is granted at its own site |
-| E0356 | UninferableNewReceiver | Compiler/JetSema/Source/Sema/Expressions.jet:4200 | write the full `Type.new(...)` form |
-| E0359 | DimensionMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:2192 | `*` and `/` derive a new dimension |
-| E0360 | MissingOperatorHook | Compiler/JetSema/Source/Sema/Expressions.jet:5097 | an `impl` hook for the type defines the operation |
-| E0361 | RecursiveOperatorHook | Compiler/JetSema/Source/Sema/Expressions.jet:692 | a hook that recurses forever has no result |
+| E0356 | UninferableNewReceiver | Compiler/JetSema/Source/Sema/Expressions.jet:4505 | write the full `Type.new(...)` form |
+| E0359 | DimensionMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:2355 | `*` and `/` derive a new dimension |
+| E0360 | MissingOperatorHook | Compiler/JetSema/Source/Sema/Expressions.jet:5498 | an `impl` hook for the type defines the operation |
+| E0361 | RecursiveOperatorHook | Compiler/JetSema/Source/Sema/Expressions.jet:714 | a hook that recurses forever has no result |
 | E0362 | NestedHookedAssignment | Compiler/JetSema/Source/Sema/Statements.jet:7730 | bind the inner value, update it and assign it back |
 | E0363 | InvalidUnionMember | Compiler/JetSema/Source/Sema/FailureLaw.jet:931 | a named enum holds an open shape |
 | E0366 | PatternArmWithoutEquals | Compiler/JetParser/Source/Formatter/Formatter.jet:1794 | patterns bind under `==` |
@@ -135,7 +135,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0394 | TypeAliasCycle | Compiler/JetSema/Source/Sema/TypeRelations.jet:787 | a cycle has no type at its end |
 | E0395 | InvalidChannelCapacity | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:1100 | a capacity of at least 1, or an unbounded channel |
 | E0397 | SwitchConditionMismatch | Compiler/JetSema/Source/Sema/Statements.jet:10384 | `#Off` takes `.Release` and `#On` takes `.Deep` |
-| E0398 | BitArithmeticNeedsMethod | Compiler/JetSema/Source/Sema/Expressions.jet:4892 | `bit_not()` flips integer bits and an update assigns the method result back |
+| E0398 | BitArithmeticNeedsMethod | Compiler/JetSema/Source/Sema/Expressions.jet:5279 | `bit_not()` flips integer bits and an update assigns the method result back |
 | E0400 | InvalidMarkerGroupMember | Compiler/JetSema/Source/Sema/MarkerModules.jet:413 | gates and refusals are written at their site |
 | E0401 | FallibleWhereValueExpected | Compiler/JetSema/Source/Sema/Diagnostics.jet:417 | `?`, `??` or a branch handles the failure before the value is read |
 | E0403 | FailureDomainMismatch | Compiler/JetSema/Source/Sema/Expressions/Control.jet:984 | the failure is converted or handled before it leaves the context |
@@ -145,7 +145,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0409 | ErrAfterPatternMiss | Compiler/JetSema/Source/Sema/FailureLaw.jet:1382 | a shape test has no report to read |
 | E0414 | UnknownPrivQualifier | Compiler/JetParser/Source/Formatter/Formatter.jet:1794 | `priv` and `priv(package)` are the visibilities |
 | E0417 | PackagePrivField | Compiler/JetParser/Source/Formatter/Formatter.jet:1794 | a field is public or `priv` to its type's module |
-| E0420 | UninitializedRead | Compiler/JetSema/Source/Sema/Expressions.jet:4574 | write the storage before the first read |
+| E0420 | UninitializedRead | Compiler/JetSema/Source/Sema/Expressions.jet:4917 | write the storage before the first read |
 | E0421 | UntypedUninit | Compiler/JetParser/Source/Parser/Statements.jet:1605 | the type is written before `uninit` |
 | E0423 | UninitNotPlainData | Compiler/JetSema/Source/Sema/Statements.jet:6033 | `uninit` takes plain-data types only |
 | E0429 | PreludeNameUnderNoPrelude | Compiler/JetSema/Source/Sema/MarkerRules.jet:2305 | import the name, or remove `#NoPrelude` |
@@ -233,7 +233,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0766 | MissingArgument | Compiler/JetSema/Source/Sema/Calls/Binder.jet:193 | every parameter without a default receives an argument |
 | E0768 | PositionalAfterLabel | Compiler/JetSema/Source/Sema/Calls/Binder.jet:201 | positional arguments come before labelled ones |
 | E0770 | DuplicateParameterLabel | Compiler/JetParser/Source/Parser/Items.jet:821 | each parameter publishes its own label |
-| E0771 | FunctionValueLabelMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1258 | the function value's labels and zones match the expected type |
+| E0771 | FunctionValueLabelMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1346 | the function value's labels and zones match the expected type |
 | E0772 | AmbiguousCall | Compiler/JetSema/Source/Sema/Calls/Methods.jet:653 | labels pick one body |
 | E0774 | MarkerRowOutsideContract | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:355 | a template's row names `Meta.Generate` and nothing else |
 | E0775 | MarkerGeneratesOutsideRow | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:403 | the template's row names `Meta.Generate` |
@@ -311,7 +311,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0981 | OsConfigNotFound | Jetpack/JetOS/Source/LoadValidate.jet:53 | the config file exists where the host selects it |
 | E0986 | DetachedCallableMarker | Compiler/JetLexer/Source/Lexer/Terminators.jet:560 | the marker stays on the line of the closing `)` |
 | E0987 | UnknownLoopLabel | Compiler/JetSema/Source/Sema/Statements.jet:3284 | `break(name)` and `next(name)` target a visible named loop |
-| E0988 | LoopLabelAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:4522 | a loop name is not a value |
+| E0988 | LoopLabelAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:4861 | a loop name is not a value |
 | E0989 | CompileTimeIfNotConstant | Compiler/JetSema/Source/Sema/Registration/Derives.jet:1303 | a run-time condition uses a plain `if` |
 | E0992 | DispatchMissingComparison | Compiler/JetParser/Source/Formatter/Formatter.jet:1794 | value dispatch writes the comparison before the brace |
 | E0995 | MissingWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:941 | `workspace.jet` declares one `workspace` module |
@@ -470,7 +470,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1361 | DuplicateInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3406 | one `package:` block per file |
 | E1362 | MalformedInlinePackage | Compiler/JetDriver/Source/Driver/Loader.jet:3402 | the block is balanced |
 | E1363 | InlinePackageConflict | Compiler/JetDriver/Source/Driver/Loader.jet:1161 | the facts live in one place |
-| E1403 | NestingTooDeep | Compiler/JetSema/Source/Sema/Expressions.jet:6897 | deep nesting is split into named pieces |
+| E1403 | NestingTooDeep | Compiler/JetSema/Source/Sema/Expressions.jet:7475 | deep nesting is split into named pieces |
 | E1410 | DuplicateDevtoolsPanel | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:154 | one panel per identity |
 | E1411 | InvalidDevtoolsPanel | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:158 | the panel matches the public contract |
 | E1412 | UnknownDevtoolsField | Compiler/JetSema/Source/Sema/Calls/Devtools.jet:41 | the publication names a marked panel field |
@@ -515,7 +515,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:761 | the type leaves out `#DenyUnknownFields` |
 | E2414 | DefaultNotConstant | Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet:232 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:4108 | members have distinct wire shapes |
-| E2416 | EnvDecodeFailed | Core/Web/Web.jet:561 | the environment variable is fixed |
+| E2416 | EnvDecodeFailed | Core/Web/Web.jet:603 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:519 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:531 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:535 | one route per pair |
@@ -525,17 +525,17 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2423 | NeverFunctionReachesEnd | Compiler/JetSema/Source/Sema/FailureLaw.jet:1357 | every path diverges |
 | E2424 | NeverFunctionBareReturn | Compiler/JetSema/Source/Sema/FailureLaw.jet:1247 | every path diverges |
 | E2425 | NeverFunctionReturnsValue | Compiler/JetSema/Source/Sema/FailureLaw.jet:1252 | every path diverges |
-| E2426 | FunctionValueNotNever | Compiler/JetSema/Source/Sema/Expressions.jet:1351 | the function never completes |
-| E2427 | CallerSiteMisplaced | Compiler/JetSema/Source/Sema/Expressions.jet:4477 | `#caller` is a parameter default or sits in an `#Expand` macro |
+| E2426 | FunctionValueNotNever | Compiler/JetSema/Source/Sema/Expressions.jet:1445 | the function never completes |
+| E2427 | CallerSiteMisplaced | Compiler/JetSema/Source/Sema/Expressions.jet:4812 | `#caller` is a parameter default or sits in an `#Expand` macro |
 | E2474 | FormActionInputMismatch | Compiler/JetSema/Source/Sema/Calls/Http.jet:624 | the action accepts the form's type |
 | E2475 | UnknownTableColumn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:1981 | the column names a row field |
 | E2476 | LiveQueryNotTrackable | Compiler/JetSema/Source/Sema/Calls/Data.jet:359 | the query reads a `data.track` source |
 | E2501 | FileHandleDirectionMismatch | Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet:445 | open the file in the direction used |
 | E2502 | LineStreamOutsideLoop | Compiler/JetSema/Source/Sema/Statements.jet:5824 | iterate the stream in the loop |
 | E2510 | ReduceMarkerOutsideReduce | Compiler/JetSema/Source/Sema/Calls/MathLanes.jet:82 | the marker is an argument of `.reduce` |
-| E2511 | UndefinedOperator | Compiler/JetSema/Source/Sema/Expressions.jet:5123 | matching shapes, or an operator hook |
-| E2512 | MatrixShapeMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:5597 | the matrices have matching inner sides |
-| E2520 | CoordinateSpaceMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1717 | values are converted into one space first |
+| E2511 | UndefinedOperator | Compiler/JetSema/Source/Sema/Expressions.jet:5528 | matching shapes, or an operator hook |
+| E2512 | MatrixShapeMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:6078 | the matrices have matching inner sides |
+| E2520 | CoordinateSpaceMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1850 | values are converted into one space first |
 | E2521 | TransformCompositionMismatch | Compiler/JetSema/Source/Sema/Calls/Geometry.jet:221 | transforms are composed through a matching space |
 | E2602 | DependencyVersionConflict | Jetpack/Publication/Source/Resolve.jet:269 | the constraints agree on a version |
 | E2603 | SecurityAdvisoryMatch | Jetpack/Publication/Source/Advisory.jet:488 | upgrade to a fixed version |
@@ -551,12 +551,12 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2704 | EpochOutOfRange | Core/Time/Time.jet:1237 | a coarser unit |
 | E2712 | CheckedTextRejected | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1751 | the literal passes the check |
 | E2804 | AmbiguousRoute | Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:427 | each route has its own pattern |
-| E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:185 | the route binds decodable inputs by name |
+| E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:202 | the route binds decodable inputs by name |
 | E2806 | MissingPageFunction | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1272 | declare `page: fn`, or start the file name with `_` |
-| E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:405 | a standard method, or an RFC 9110 token |
-| E2809 | AppPortUnavailable | Core/Web/Web.jet:605 | free the port or choose another |
+| E2808 | RouteMethodTokenRefused | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:456 | a standard method, or an RFC 9110 token |
+| E2809 | AppPortUnavailable | Core/Web/Web.jet:648 | free the port or choose another |
 | E2811 | ImageSettingNotLiteral | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1414 | each setting is written where the app sets it |
-| E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:150 | a method is an endpoint only where its own marker says so |
+| E2812 | ServerOnlyMethod | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:163 | a method is an endpoint only where its own marker says so |
 | E2903 | InvalidPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:377 | the budget follows the grammar |
 | E2904 | PerformanceBudgetOverlap | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:359 | one budget per metric and scope |
 | E2905 | UnresolvedPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:323 | the attachment names one target |

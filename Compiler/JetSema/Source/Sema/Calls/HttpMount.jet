@@ -48,7 +48,9 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     // A route marker is named for its `Method` case: `#Get` registers `get`,
     // and `#Custom(token, path)` the custom method `token`.
     verb: declaration.name.lower()
-    if verb != sema_http_route_custom_verb() && !sema_http_route_verbs().contains(verb) -> return None
+    if verb != sema_http_route_custom_verb() && !sema_http_route_verbs().contains(verb) {
+        return None
+    }
     Val(verb)
 }
 
@@ -56,6 +58,7 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
 // their names: a method marked `#App.SignedIn` or `#App.Public` is an
 // endpoint.
 SEMA_APP_MARKER_MODULE: "app"
+
 SEMA_APP_ENDPOINT_MARKERS: [String]{"SignedIn", "Public"}
 
 // The app endpoint marker `marker` is, written in module `module_identity`:
@@ -66,7 +69,9 @@ sema_app_endpoint_access: fn(marker: Marker, graph: SemaRegistrationGraph, modul
     if resolved.status != "found" -> return None
     declaration: resolved.declaration ?? return None
     module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return None
-    if graph.modules[module_index].module_name != SEMA_APP_MARKER_MODULE || !SEMA_APP_ENDPOINT_MARKERS.contains(declaration.name) -> return None
+    if graph.modules[module_index].module_name != SEMA_APP_MARKER_MODULE || !SEMA_APP_ENDPOINT_MARKERS.contains(declaration.name) {
+        return None
+    }
     Val("{declaration.name}")
 }
 
@@ -83,7 +88,9 @@ sema_app_endpoint_marker: fn(marker: Marker, graph: SemaRegistrationGraph, modul
 // it. An argument that is no plain String literal shows as `…`.
 sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
     loop marker in func.markers {
-        if !sema_app_endpoint_marker(marker, graph, module_identity) && sema_http_route_marker_verb(marker, graph, module_identity) == None -> next
+        if !sema_app_endpoint_marker(marker, graph, module_identity) && sema_http_route_marker_verb(marker, graph, module_identity) == None {
+            next
+        }
         if marker.args.len() == 0 -> return "#{marker.name}"
         args := [String]{}
         loop argument in marker.args {
@@ -105,9 +112,13 @@ sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_iden
 // `app.Remote<S>`, the app module's client of a service, and the methods
 // the client calls of it lower to.
 SEMA_APP_REMOTE: "Remote"
+
 SEMA_APP_REMOTE_CALL: "__call"
+
 SEMA_APP_REMOTE_CALL_VALUE: "__call_value"
+
 SEMA_APP_REMOTE_ARG: "__arg"
+
 SEMA_APP_REMOTE_RAISE: "__raise"
 
 // Whether `ty`, a resolved type of one type argument, is `app.Remote<S>`.
@@ -133,7 +144,9 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
                 if declaration.name != method -> next
                 declared = true
                 endpoint: loop marker in declaration.markers {
-                    if sema_app_endpoint_marker(marker, graph, service_module) -> break true
+                    if sema_app_endpoint_marker(marker, graph, service_module) {
+                        break true
+                    }
                 } ?? false
                 if !endpoint -> next
                 if owner_type_args.len() != 0 || type_args.len() != 0 {
@@ -150,7 +163,9 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
             entry: diagnostic_registry_row("E2812") ?? panic("E2812 must have a registry row")
             diagnostics.push(sema_error("E2812", method_span, entry.what.replace("{{remote}}", shown).replace("{{method}}", method), entry.why, entry.fix.replace("{{method}}", method)))
         }
-        else -> diagnostics.push(sema_error("E0102", method_span, "`{shown}` has no method `{method}`", "`{shown}` offers only the methods of its service that `#App.SignedIn` or `#App.Public` marks", "call a marked method of the service"))
+        else -> {
+            diagnostics.push(sema_error("E0102", method_span, "`{shown}` has no method `{method}`", "`{shown}` offers only the methods of its service that `#App.SignedIn` or `#App.Public` marks", "call a marked method of the service"))
+        }
     }
     sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
     None
@@ -179,7 +194,9 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     method: declaration.name
     concrete: declaration.params.len() > 0 && declaration.params[0].name == "self" && declaration.params[0].convention == AccessConvention.Read && declaration.type_params.len() == 0
     read_only: loop index in 1..<declaration.params.len() {
-        if declaration.params[index].convention != AccessConvention.Read -> break false
+        if declaration.params[index].convention != AccessConvention.Read {
+            break false
+        }
     } ?? true
     if !concrete || !read_only {
         diagnostics.push(sema_error("E2805", method_span, "`{shown}.{method}` needs read-only self, read parameters and a concrete signature", "a remote call sends its arguments to the server as data and runs the method on the server's service", "write `{method}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -283,8 +300,11 @@ sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], 
 // table.column's name), never on another module's same-named ones; its
 // submodules declare theirs.
 SEMA_WEB_MARKER_MODULE: "core.web"
+
 SEMA_WEB_MARKER_ROUTE_TABLE: "RouteTable"
+
 SEMA_WEB_MARKER_FORM: "Form"
+
 SEMA_WEB_MARKER_COLUMN_OF: "ColumnOf"
 
 // Whether `marker`, written in the module `module_identity`, is the web
@@ -310,8 +330,12 @@ sema_web_param_marker: fn(graph: SemaRegistrationGraph, key: String, name: Strin
             loop application in graph.modules[module_index].program.applied_rules {
                 if application.site != (Val(RuleSite.Parameter)) -> next
                 target: application.target ?? next
-                if !sema_web_marker_is(application.marker, graph, graph.modules[module_index].module_identity, name) -> next
-                if sema_web_param_at(graph.modules[module_index].functions[index].declaration, target) == .Val(param) -> return Val(param)
+                if !sema_web_marker_is(application.marker, graph, graph.modules[module_index].module_identity, name) {
+                    next
+                }
+                if sema_web_param_at(graph.modules[module_index].functions[index].declaration, target) == .Val(param) {
+                    return Val(param)
+                }
             }
             None
         }
@@ -322,15 +346,23 @@ sema_web_param_marker: fn(graph: SemaRegistrationGraph, key: String, name: Strin
 sema_web_param_at: fn(function: Func, target: Span) -> Int? Never! {
     start := function.name_span.end
     loop param_index in 0..<function.params.len() {
-        if target.start >= start && target.end <= function.params[param_index].name_span.start -> return Val(param_index)
+        if target.start >= start && target.end <= function.params[param_index].name_span.start {
+            return Val(param_index)
+        }
         start = function.params[param_index].ty_span.end
     }
     None
 }
 
 sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: expression, span: span,
-        flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    CallArg{
+        convention: AccessConvention.Read,
+        expr: expression,
+        span: span,
+        flags: ast_empty_call_arg_flags(),
+        label: None,
+        spread: false,
+    }
 }
 
 // `app.mount(value)` and `app.mount(prefix, value)`: each route-marked method
@@ -359,14 +391,29 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     local_module: sema_scope_environment_module_text(environment, program)
     mux_key: symbol_key_text(SymbolKind.Local, local_module, owner, mux_name)
     mux_id: sema_symbol_id_of(program, context, mux_key)
-    mux_symbol: Symbol{id: mux_id, kind: SymbolKind.Local, name: mux_name,
-        module_identity: environment.module_identity, owner: Val(owner), span: span,
-        ty: Val(receiver_value.ty), visibility: 0}
+    mux_symbol: Symbol{
+        id: mux_id,
+        kind: SymbolKind.Local,
+        name: mux_name,
+        module_identity: environment.module_identity,
+        owner: Val(owner),
+        span: span,
+        ty: Val(receiver_value.ty),
+        visibility: 0,
+    }
     _ := sema_scope_declare_local(scopes, mux_symbol, mux_key, false, AccessConvention.Read, None, false)
     sema_ownership_declare_binding(state, mux_symbol, mux_key, false)
     mux_local: checked_symbol_local(mux_name, span, mux_id, receiver_value.ty)
-    body.push(TStmt.Let{local: mux_local, let_ty: TLetTy.Inferred,
-        init: receiver_value, gc_promotion: None, gc_transferred: false, span: span})
+    body.push(
+        TStmt.Let{
+            local: mux_local,
+            let_ty: TLetTy.Inferred,
+            init: receiver_value,
+            gc_promotion: None,
+            gc_transferred: false,
+            span: span,
+        },
+    )
     value_name: "__jet_http_mount_value_{span.start}"
     binding: ast_binding(value_name, span, false, value_arg.expr, None)
     checked_binding := sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -376,67 +423,73 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
         value_ty: scopes.bindings[binding_index].symbol.ty ?? panic("mounted value has no type")
         if sema_http_route_find_struct(environment, program, value_ty, environment.module_identity) == .Val(definition) {
             if program.registration_graph == .Val(graph) {
-            nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
-            method_module: graph.modules[nominal_row.module_index].module_identity
-            loop method in definition.methods {
-                // An endpoint method answers POST `{prefix}/{name}`, once
-                // whatever markers it carries.
-                loop marker in method.markers {
-                    access: sema_app_endpoint_access(marker, graph, method_module) ?? next
-                    endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, prefix, marker.span, environment, program, scopes, state, tail_store, context, diagnostics)
-                    if endpoint == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: marker.span})
-                    break
-                }
-                loop marker in method.markers {
-                    verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
-                    if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
-                        diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
-                        next
+                nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
+                method_module: graph.modules[nominal_row.module_index].module_identity
+                loop method in definition.methods {
+                    // An endpoint method answers POST `{prefix}/{name}`, once
+                    // whatever markers it carries.
+                    loop marker in method.markers {
+                        access: sema_app_endpoint_access(marker, graph, method_module) ?? next
+                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, prefix, marker.span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if endpoint == .Val(value) {
+                            body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                        }
+                        break
                     }
-                    // `#Custom` takes its method token before the path.
-                    marked := [CallArg]{}
-                    loop mark_arg in marker.args {
-                        if mark_arg == .Expr(mark_value) -> marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
-                    }
-                    custom: verb == sema_http_route_custom_verb()
-                    marked_count: if custom -> 2 else -> 1
-                    if marker.args.len() != marked_count || marked.len() != marked_count -> next
-                    if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
-                        diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
-                        next
-                    }
-                    if prefix != "" {
-                        path_at: marked_count - 1
-                        path: sema_http_route_constant_string(marked[path_at].expr, environment, program, scopes) ?? {
-                            diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
+                    loop marker in method.markers {
+                        verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
+                        if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
+                            diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
                             next
                         }
-                        marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
+                        // `#Custom` takes its method token before the path.
+                        marked := [CallArg]{}
+                        loop mark_arg in marker.args {
+                            if mark_arg == .Expr(mark_value) {
+                                marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
+                            }
+                        }
+                        custom: verb == sema_http_route_custom_verb()
+                        marked_count: if custom -> 2 else -> 1
+                        if marker.args.len() != marked_count || marked.len() != marked_count -> next
+                        if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
+                            diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
+                            next
+                        }
+                        if prefix != "" {
+                            path_at: marked_count - 1
+                            path: sema_http_route_constant_string(marked[path_at].expr, environment, program, scopes) ?? {
+                                diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
+                                next
+                            }
+                            marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
+                        }
+                        params := [LambdaParam]{}
+                        call_args := [CallArg]{}
+                        loop index in 1..<method.params.len() {
+                            parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
+                            params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
+                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
+                            argument.convention = method.params[index].convention
+                            call_args.push(argument)
+                        }
+                        invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
+                        meta := ast_empty_lambda_meta()
+                        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                        loop registered in nominal.methods {
+                            if registered.declaration.name == method.name {
+                                meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
+                            }
+                        }
+                        handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
+                        marked.push(sema_http_mount_arg(handler, marker.span))
+                        registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if registration.value == .Val(value) {
+                            body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                        }
                     }
-                    params := [LambdaParam]{}
-                    call_args := [CallArg]{}
-                    loop index in 1..<method.params.len() {
-                        parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
-                        params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
-                        argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
-                        argument.convention = method.params[index].convention
-                        call_args.push(argument)
-                    }
-                    invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
-                    meta := ast_empty_lambda_meta()
-                    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                    loop registered in nominal.methods {
-                        if registered.declaration.name == method.name -> meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
-                    }
-                    handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
-                    marked.push(sema_http_mount_arg(handler, marker.span))
-                    registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
-                    if registration.value == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: marker.span})
                 }
-            }
-            } else {
-                panic("mount has no registration graph")
-            }
+            } else { panic("mount has no registration graph") }
         } else {
             diagnostics.push(sema_error("E2805", value_arg.span, "app.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #Server.Get or another core.http.server verb marker"))
         }
@@ -458,7 +511,9 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     graph: program.registration_graph ?? return None
     concrete: method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && method.type_params.len() == 0
     read_only: loop index in 1..<method.params.len() {
-        if method.params[index].convention != AccessConvention.Read -> break false
+        if method.params[index].convention != AccessConvention.Read {
+            break false
+        }
     } ?? true
     if !concrete || !read_only {
         diagnostics.push(sema_error("E2805", span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -466,7 +521,9 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     }
     address: "{prefix}/{method.name}"
     path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
-    if access == "SignedIn" -> return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    if access == "SignedIn" {
+        return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, "__remote_public", [Type]{}, [Type]{}, span, environment, program, diagnostics)
     candidate: candidates.pop() ?? panic("App.__remote_public is not registered")
     params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("App.__remote_public has no parameter list")
@@ -502,7 +559,9 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     answer_arg := sema_http_mount_arg(handler, span)
     answer: sema_check_expression_with_lambda_escapes(answer_arg.expr, Val(answer_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
-    if !sema_call_http_check_middleware_callback(answer, environment, program, scopes, state, context, diagnostics) -> return None
+    if !sema_call_http_check_middleware_callback(answer, environment, program, scopes, state, context, diagnostics) {
+        return None
+    }
     answer_arg.convention = AccessConvention.Move
     sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, sema_call_http_static_tree_arg(answer, answer_arg)}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
 }
@@ -511,7 +570,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
 // and `/api/` both mount `#Get("/orders")` at `/api/orders`.
 sema_http_mount_prefix: fn(text: String) -> String Never! {
     end := text.len()
-    loop end > 0 && text.slice(end - 1, end) == "/" -> end = end - 1
+    loop end > 0 && text.slice(end - 1, end) == "/" -> end -= 1
     text.slice(0, end)
 }
 
@@ -545,7 +604,9 @@ sema_http_has_route_method: fn(graph: SemaRegistrationGraph) -> Bool {
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
             loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
                 loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
-                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) != None -> return true
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) != None {
+                        return true
+                    }
                 }
             }
         }
@@ -560,20 +621,31 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     mounted := [SymbolID]{}
     loop module_row in modules {
         identity: module_row.module_identity
-        loop function in module_row.functions -> sema_http_collect_mounted_body(function, graph, identity, mounted)
+        loop function in module_row.functions {
+            sema_http_collect_mounted_body(function, graph, identity, mounted)
+        }
     }
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start: diagnostics.len()
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id) -> next
+            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id) {
+                next
+            }
             loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
                 loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
-                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None -> next
-                    diagnostics.push(sema_lint("E2818", graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index].span,
-                        "HTTP route method `{graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.name}` belongs to a struct that is never mounted.",
-                        "Route markers record facts; only an explicit app.mount(value) exposes that struct's routes.",
-                        "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to app.mount, or remove the route marker."))
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None {
+                        next
+                    }
+                    diagnostics.push(
+                        sema_lint(
+                            "E2818",
+                            graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index].span,
+                            "HTTP route method `{graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.name}` belongs to a struct that is never mounted.",
+                            "Route markers record facts; only an explicit app.mount(value) exposes that struct's routes.",
+                            "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to app.mount, or remove the route marker.",
+                        ),
+                    )
                 }
             }
         }
