@@ -223,9 +223,28 @@ sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [Po
     sema_unsafe_visit_gate(function.span, function.unsafe_span ?? function.span, true, function.unsafe_reason, source_has_reason, function.body, source, declarations, gates, result)
 }
 
+// A body outside any `#Unsafe`: its nested gates, then each obligation
+// assertion outside them, which has no meaning there. One walk finds both;
+// the assertions are reported after the gates, in walk order.
 sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
-    sema_unsafe_nested_gates(body, source, declarations, gates, result)
-    sema_unsafe_reject_outside(body, source, result)
+    outside := [Span]{}
+    sema_unsafe_plain_walk(body, source, declarations, gates, result, outside)
+    loop span in outside {
+        sema_unsafe_diagnostic(result, source, "E3108", Val(span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
+    }
+}
+
+sema_unsafe_plain_walk: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection, outside: &[Span]) Never! {
+    loop statement in body {
+        if statement == .Unsafe(audit, audit_expr, nested, span) {
+            sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
+            next
+        }
+        if sema_unsafe_assertion_span(statement) == .Val(span) -> outside.push(span)
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_plain_walk(nested, source, declarations, gates, result, outside)
+        }
+    }
 }
 
 sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
@@ -328,10 +347,17 @@ sema_unsafe_assertion: fn(statement: Stmt) -> (names: [String], span: Span)? Nev
 // Whether `statement` is an obligation assertion (`assert valid_ptr,
 // aligned`). The obligation pass checks it; it has no runtime form.
 sema_unsafe_is_assertion: fn(statement: Stmt) -> Bool Never! {
+    sema_unsafe_assertion_span(statement) != None
+}
+
+// The span of an obligation assertion's call, None for any other statement.
+sema_unsafe_assertion_span: fn(statement: Stmt) -> Span? Never! {
     if statement == .Expr(expression) {
-        if expression == .Call(call, _) -> return call.name == "__jet_unsafe_assert"
+        if expression == .Call(call, _) {
+            if call.name == "__jet_unsafe_assert" -> return Val(call.name_span)
+        }
     }
-    false
+    None
 }
 
 sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
@@ -580,17 +606,5 @@ sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
             out
         }
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Yield(_, _) | .DeferClose(_, _) -> []
-    }
-}
-
-sema_unsafe_reject_outside: fn(body: [Stmt], source: String, result: &UnsafeInspection) Never! {
-    loop statement in body {
-        if sema_unsafe_assertion(statement) == .Val(assertion) {
-            sema_unsafe_diagnostic(result, source, "E3108", Val(assertion.span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
-        }
-        if statement == .Unsafe(_, _, _, _) -> next
-        loop nested in sema_unsafe_nested_bodies(statement) {
-            sema_unsafe_reject_outside(nested, source, result)
-        }
     }
 }
