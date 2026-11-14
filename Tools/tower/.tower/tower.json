@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6835,
-    "rev": 101852,
+    "nextNum": 6836,
+    "rev": 101855,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98051,6 +98051,47 @@
       "updated": "2026-11-14T00:14:34.701Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0afoylf",
+      "num": 6835,
+      "title": "json.to_string on a user struct cannot run at compile time: E0643 says core.encoding begin_object has no body here",
+      "body": "Found by G11Speed-5 on 2026-11-13 while fixing the comptime_diff JET_RECHECK_VERIFY ICE (#6759). The derived_equality_and_a_codec case asserted comptime.eval text of json.to_string on a user struct; that assertion never held on dev. Compile-time code must give the same meaning as run time (I9), so the encoder body must be available to comptime.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "json.to_string on a user struct runs at compile time with the same text it gives at run time. Proof: the case a_local_value_over_derived_equality_and_a_codec_is_computed_while_compiling passes (its known-failing row removed) on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T00:15:19.885Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T00:15:09.323Z",
+      "updated": "2026-11-14T00:15:21.580Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -204389,6 +204430,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T00:15:21.580Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0afoylf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T00:15:19.885Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0afoylf",
+      "note": "#1 json.to_string on a user struct runs at compile time with th"
+    },
+    {
+      "at": "2026-11-14T00:15:09.323Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0afoylf",
+      "note": "json.to_string on a user struct cannot run at compile time: E0643 says core.encoding begin_object has no body here"
+    },
     {
       "at": "2026-11-14T00:14:34.701Z",
       "by": "Main",
