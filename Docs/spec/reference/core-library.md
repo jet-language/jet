@@ -3367,6 +3367,39 @@ or ANSI 16 color. `core.ui`'s drawing and image functions take and return a
 `Color`, and `node_color` fills its node with one; a web page shows it as the
 CSS color its `to_hex` text names.
 
+### `core.image` — bounded raster images
+
+`core.image` reads encoded images into pixels a program can use. An `Image`
+is `width` x `height` pixels, row-major, four `U8` each: sRGB red, green and
+blue and a straight alpha. Every read takes `Limits`, three budgets that must
+each be at least 1: the encoded bytes, the pixels and the decoded bytes. Each
+budget is checked before the bytes it bounds are allocated, and malformed
+input, an unsupported format or an exceeded budget is an `ImageError`, never a
+panic or a partial image. Reading is pure; the caller reads the bytes, and
+`files.read_at(path, 0, limits.max_input_bytes + 1)` bounds that read.
+
+```jet
+use image: core.image
+
+run: fn() {
+    limits: image.Limits{max_input_bytes: 1000000, max_pixels: 1000000, max_output_bytes: 4000000}
+    bytes: [U8]{137, 80, 78, 71, 13, 10, 26, 10}
+    if image.inspect(bytes, limits) == {
+        .Ok(info) -> { print("{info.width}x{info.height}") }
+        .Err(error) -> { print("not read: {error:Debug}") }
+    }
+}
+```
+
+| Operation | Returns | Description |
+| --- | --- | --- |
+| `image.inspect(bytes, limits)` | `ImageInfo ImageError!` | The header's `width`, `height`, `format` (`ImageFormat`) and `color` (`ImageColor`: `Gray`, `GrayAlpha`, `RGB`, `RGBA` or `Indexed`), checked against `limits` without decoding the pixels. |
+| `image.decode(bytes, limits)` | `Image ImageError!` | The pixels. PNG decodes every color type and bit depth, PLTE and tRNS transparency, all five row filters and Adam7 interlacing; sixteen-bit samples keep their high byte. |
+| `ImageError` | enum | `Malformed` input, an `Unsupported` format, color type or bit depth (JPEG and GIF are not decoded yet), or `TooLarge` for an exceeded budget. |
+
+`core.ui` decodes texture atlases through `core.image` and premultiplies the
+pixels as they load.
+
 ### `core.math.random` — deterministic pseudorandom values
 
 `core.math.random` is a deterministic pseudorandom generator, not a
@@ -6492,6 +6525,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.http`
 - `core.http.client`
 - `core.http.server`
+- `core.image`
 - `core.jobs`
 - `core.log`
 - `core.math`

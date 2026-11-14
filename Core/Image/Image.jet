@@ -1,0 +1,447 @@
+use core: core
+
+// core.image: bounded raster images. An `Image` is `width` x `height`
+// pixels, row-major, four `U8` each: red, green and blue in sRGB and a
+// straight (not premultiplied) alpha. Every read takes a `Limits`: the
+// encoded bytes, the pixels and the decoded bytes each have a budget, and
+// each budget is checked before the bytes it bounds are allocated. Input
+// that is malformed, a format or bit depth this module does not read, or a
+// budget that is exceeded is an `ImageError`, never a panic or a partial
+// image. Reading is pure: the caller reads the bytes, and
+// `core.files.read_at(path, 0, limits.max_input_bytes + 1)` bounds that read.
+//
+// PNG decodes here: every color type and bit depth, PLTE and tRNS
+// transparency, all five row filters and Adam7 interlacing. Sixteen-bit
+// samples keep their high byte, and gray below eight bits scales to
+// 0..255. Chunk CRCs are not checked. The zlib stream inflates through
+// core.archive.
+
+#Error
+ImageError: enum {
+    // The bytes are not a well-formed image of their format.
+    Malformed
+    // A format, color type or bit depth this module does not decode.
+    Unsupported
+    // The input, its pixels or its decoded bytes exceed their budget.
+    TooLarge
+}
+
+// The encoded format, read from the first bytes.
+ImageFormat: enum {
+    PNG
+    JPEG
+    GIF
+}
+
+// How the encoded pixels carry color: gray or red, green and blue, with or
+// without an alpha channel, or indexes into a palette.
+ImageColor: enum {
+    Gray
+    GrayAlpha
+    RGB
+    RGBA
+    Indexed
+}
+
+// The budgets a read keeps within, each a count that must be at least 1:
+// the encoded bytes, the pixels (`width * height`) and the decoded bytes
+// (`width * height * 4`).
+Limits: struct {
+    max_input_bytes: Int
+    max_pixels: Int
+    max_output_bytes: Int
+}
+
+// What the header of an encoded image says, read without decoding it.
+ImageInfo: struct {
+    width: Int
+    height: Int
+    format: ImageFormat
+    color: ImageColor
+}
+
+// Decoded pixels: `height` rows of `width` RGBA pixels, 4 bytes each, alpha
+// straight.
+Image: struct {
+    width: Int
+    height: Int
+    pixels: [U8]
+}
+
+// The header of `data`: its size, format and color, checked against
+// `limits` the way `decode` checks it.
+inspect: fn(data: [U8], limits: Limits) -> ImageInfo ImageError! {
+    header: png_header(data, limits) ?? return Err(err)
+    Ok(ImageInfo{width: header.width, height: header.height, format: .PNG, color: png_color(header.color_type)})
+}
+
+// The pixels of `data`, an encoded image, within `limits`.
+decode: fn(data: [U8], limits: Limits) -> Image ImageError! {
+    header: png_header(data, limits) ?? return Err(err)
+    png_decode(data, header)
+}
+
+C_PNG_SIGNATURE: [Int]{137, 80, 78, 71, 13, 10, 26, 10}
+
+C_PNG_IHDR: 0x49484452
+
+C_PNG_PLTE: 0x504C5445
+
+C_PNG_TRNS: 0x74524E53
+
+C_PNG_IDAT: 0x49444154
+
+C_PNG_IEND: 0x49454E44
+
+// Adam7 pass origins and steps, in pass order.
+C_ADAM7_X: [Int]{0, 4, 0, 2, 0, 1, 0}
+
+C_ADAM7_Y: [Int]{0, 0, 4, 0, 2, 0, 1}
+
+C_ADAM7_DX: [Int]{8, 8, 4, 4, 2, 2, 1}
+
+C_ADAM7_DY: [Int]{8, 8, 8, 4, 4, 2, 2}
+
+// A PNG's IHDR: its size, its color type and bit depth with the samples per
+// pixel they imply, and its interlace method.
+PNGHeader: struct {
+    width: Int
+    height: Int
+    color_type: Int
+    depth: Int
+    channels: Int
+    interlace: Int
+}
+
+byte_at: fn(data: [U8], at: Int) -> Int {
+    Int{data[at]}
+}
+
+be32: fn(data: [U8], at: Int) -> Int {
+    (byte_at(data, at) << 24) + (byte_at(data, at + 1) << 16) + (byte_at(data, at + 2) << 8) + byte_at(data, at + 3)
+}
+
+starts_with_bytes: fn(data: [U8], prefix: [Int]) -> Bool {
+    if data.len() < prefix.len() -> return false
+    loop (at, byte) in prefix {
+        if byte_at(data, at) != byte -> return false
+    }
+    true
+}
+
+// The format the first bytes of `data` name, if any.
+sniff: fn(data: [U8]) -> ImageFormat? {
+    if starts_with_bytes(data, C_PNG_SIGNATURE) -> return Val(.PNG)
+    if starts_with_bytes(data, [Int]{0xFF, 0xD8, 0xFF}) -> return Val(.JPEG)
+    if starts_with_bytes(data, [Int]{71, 73, 70, 56}) -> return Val(.GIF)
+    None
+}
+
+// Checks the budgets themselves, the input size and the format, then reads
+// and checks the IHDR, the first chunk: a PNG's size against `limits`.
+png_header: fn(data: [U8], limits: Limits) -> PNGHeader ImageError! {
+    if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
+    if data.len() > limits.max_input_bytes -> return Err(.TooLarge)
+    format: sniff(data) ?? return Err(.Malformed)
+    if format != .PNG -> return Err(.Unsupported)
+    if data.len() < 33 || be32(data, 8) != 13 || be32(data, 12) != C_PNG_IHDR -> return Err(.Malformed)
+    width: be32(data, 16)
+    height: be32(data, 20)
+    depth: byte_at(data, 24)
+    color_type: byte_at(data, 25)
+    interlace: byte_at(data, 28)
+    if width < 1 || height < 1 || byte_at(data, 26) != 0 || byte_at(data, 27) != 0 || interlace > 1 -> return Err(.Malformed)
+    channels: png_channels(color_type, depth)
+    if channels == 0 -> return Err(.Unsupported)
+    if width > limits.max_pixels /% height -> return Err(.TooLarge)
+    if width * height > limits.max_output_bytes /% 4 -> return Err(.TooLarge)
+    Ok(PNGHeader{width: width, height: height, color_type: color_type, depth: depth, channels: channels, interlace: interlace})
+}
+
+png_color: fn(color_type: Int) -> ImageColor {
+    if color_type == {
+        2 -> ImageColor.RGB
+        3 -> ImageColor.Indexed
+        4 -> ImageColor.GrayAlpha
+        6 -> ImageColor.RGBA
+        else -> ImageColor.Gray
+    }
+}
+
+// Samples per pixel for a valid color type and bit depth, else 0.
+png_channels: fn(color_type: Int, depth: Int) -> Int {
+    low: depth == 1 || depth == 2 || depth == 4
+    whole: depth == 8 || depth == 16
+    if color_type == {
+        0 -> if low || whole -> 1 else -> 0
+        3 -> if low || depth == 8 -> 1 else -> 0
+        2 -> if whole -> 3 else -> 0
+        4 -> if whole -> 2 else -> 0
+        6 -> if whole -> 4 else -> 0
+        else -> 0
+    }
+}
+
+// The pixels of a PNG whose IHDR `header` has passed png_header: the chunks
+// after it, the inflated scanlines unfiltered pass by pass, each sample
+// expanded to RGBA.
+png_decode: fn(data: [U8], header: PNGHeader) -> Image ImageError! {
+    palette := [U8]{}
+    key := [U8]{}
+    compressed := [U8]{}
+    at := 33
+    ended := false
+    loop at + 8 <= data.len() {
+        length: be32(data, at)
+        kind: be32(data, at + 4)
+        start: at + 8
+        if length > data.len() - start - 4 || kind == C_PNG_IHDR -> return Err(.Malformed)
+        if kind == C_PNG_IEND {
+            ended = true
+            break
+        }
+        if {
+            kind == C_PNG_PLTE -> { loop i in 0..<length -> palette.push(data[start + i]) }
+            kind == C_PNG_TRNS -> { loop i in 0..<length -> key.push(data[start + i]) }
+            kind == C_PNG_IDAT -> { loop i in 0..<length -> compressed.push(data[start + i]) }
+            else -> {}
+        }
+        at = start + length + 4
+    }
+    if !ended -> return Err(.Malformed)
+    if header.color_type == 3 && (palette.len() == 0 || palette.len() % 3 != 0) -> return Err(.Malformed)
+    raw: core.archive.decompress(compressed) ?? return Err(.Malformed)
+    width: header.width
+    height: header.height
+    pixels := [U8]{}
+    loop _ in 0..<(width * height * 4) -> pixels.push(U8{0})
+    bits: header.channels * header.depth
+    step: if bits < 8 -> 1 else -> bits /% 8
+    passes: if header.interlace == 1 -> 7 else -> 1
+    offset := 0
+    loop index in 0..<passes {
+        origin_x: if header.interlace == 1 -> C_ADAM7_X[index] else -> 0
+        origin_y: if header.interlace == 1 -> C_ADAM7_Y[index] else -> 0
+        step_x: if header.interlace == 1 -> C_ADAM7_DX[index] else -> 1
+        step_y: if header.interlace == 1 -> C_ADAM7_DY[index] else -> 1
+        pass_width: if width > origin_x -> (width - origin_x + step_x - 1) /% step_x else -> 0
+        pass_height: if height > origin_y -> (height - origin_y + step_y - 1) /% step_y else -> 0
+        if pass_width == 0 || pass_height == 0 -> next
+        row_bytes: (pass_width * bits + 7) /% 8
+        previous := [U8]{}
+        loop _ in 0..<row_bytes -> previous.push(U8{0})
+        loop row in 0..<pass_height {
+            if offset + 1 + row_bytes > raw.len() -> return Err(.Malformed)
+            line: png_unfilter(raw, offset, row_bytes, step, previous) ?? return Err(.Malformed)
+            loop column in 0..<pass_width {
+                target: ((origin_y + row * step_y) * width + origin_x + column * step_x) * 4
+                put_rgba(pixels, target, png_sample(line, column, header, palette, key))
+            }
+            previous = line
+            offset += 1 + row_bytes
+        }
+    }
+    Ok(Image{width: width, height: height, pixels: pixels})
+}
+
+// One reconstructed scanline: raw[offset] names the filter and the row's
+// bytes follow it; `previous` is the reconstructed row above, zeros first.
+// An unknown filter is no row.
+png_unfilter: fn(raw: [U8], offset: Int, row_bytes: Int, step: Int, previous: [U8]) -> [U8]? {
+    filter: byte_at(raw, offset)
+    if filter > 4 -> return None
+    line := [U8]{}
+    loop i in 0..<row_bytes {
+        left: if i >= step -> byte_at(line, i - step) else -> 0
+        up: byte_at(previous, i)
+        corner: if i >= step -> byte_at(previous, i - step) else -> 0
+        predictor: if filter == {
+            1 -> left
+            2 -> up
+            3 -> (left + up) /% 2
+            4 -> paeth(left, up, corner)
+            else -> 0
+        }
+        value: (byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
+        line.push(U8{value})
+    }
+    Val(line)
+}
+
+distance: fn(a: Int, b: Int) -> Int {
+    if a < b -> return b - a
+    a - b
+}
+
+paeth: fn(left: Int, up: Int, corner: Int) -> Int {
+    estimate: left + up - corner
+    to_left: distance(estimate, left)
+    to_up: distance(estimate, up)
+    to_corner: distance(estimate, corner)
+    if to_left <= to_up && to_left <= to_corner -> return left
+    if to_up <= to_corner -> return up
+    corner
+}
+
+put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
+    pixels[at] = U8{rgba >> 24}
+    pixels[at + 1] = U8{(rgba >> 16).bit_and(255)}
+    pixels[at + 2] = U8{(rgba >> 8).bit_and(255)}
+    pixels[at + 3] = U8{rgba.bit_and(255)}
+}
+
+png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
+    (red << 24) + (green << 16) + (blue << 8) + alpha
+}
+
+// Whether tRNS's 16-bit key word at `index` equals the full sample value.
+png_key_match: fn(key: [U8], index: Int, value: Int) -> Bool {
+    (byte_at(key, index) << 8) + byte_at(key, index + 1) == value
+}
+
+// A palette entry with its tRNS alpha; an index past the palette is opaque
+// black, which the PNG specification permits decoders to show.
+png_palette: fn(palette: [U8], key: [U8], index: Int) -> Int {
+    at: index * 3
+    if at + 3 > palette.len() -> return png_rgba(0, 0, 0, 255)
+    alpha: if index < key.len() -> byte_at(key, index) else -> 255
+    png_rgba(byte_at(palette, at), byte_at(palette, at + 1), byte_at(palette, at + 2), alpha)
+}
+
+// A whole sample: two big-endian bytes when `size` is 2, else one.
+png_word: fn(line: [U8], at: Int, size: Int) -> Int {
+    if size == 2 -> return (byte_at(line, at) << 8) + byte_at(line, at + 1)
+    byte_at(line, at)
+}
+
+// The packed straight 0xRRGGBBAA of pixel `column` of a reconstructed
+// scanline.
+png_sample: fn(line: [U8], column: Int, header: PNGHeader, palette: [U8], key: [U8]) -> Int {
+    depth: header.depth
+    if depth < 8 {
+        bit: column * depth
+        value: (byte_at(line, bit /% 8) >> (8 - depth - bit % 8)).bit_and((1 << depth) - 1)
+        if header.color_type == 3 -> return png_palette(palette, key, value)
+        gray: value * (255 /% ((1 << depth) - 1))
+        alpha: if key.len() == 2 && png_key_match(key, 0, value) -> 0 else -> 255
+        return png_rgba(gray, gray, gray, alpha)
+    }
+    if header.color_type == 3 -> return png_palette(palette, key, byte_at(line, column))
+    size: if depth == 16 -> 2 else -> 1
+    base: column * header.channels * size
+    if header.color_type == 0 {
+        gray: byte_at(line, base)
+        alpha: if key.len() == 2 && png_key_match(key, 0, png_word(line, base, size)) -> 0 else -> 255
+        return png_rgba(gray, gray, gray, alpha)
+    }
+    if header.color_type == 4 {
+        gray: byte_at(line, base)
+        return png_rgba(gray, gray, gray, byte_at(line, base + size))
+    }
+    red: byte_at(line, base)
+    green: byte_at(line, base + size)
+    blue: byte_at(line, base + 2 * size)
+    if header.color_type == 6 -> return png_rgba(red, green, blue, byte_at(line, base + 3 * size))
+    keyed: key.len() == 6 && png_key_match(key, 0, png_word(line, base, size)) && png_key_match(key, 2, png_word(line, base + size, size)) && png_key_match(key, 4, png_word(line, base + 2 * size, size))
+    png_rgba(red, green, blue, if keyed -> 0 else -> 255)
+}
+
+C_TEST_LIMITS: Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 256}
+
+push_be32: fn(out: &[U8], value: Int) {
+    loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift).bit_and(255)})
+}
+
+push_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
+    push_be32(out, body.len())
+    push_be32(out, kind)
+    loop byte in body -> out.push(byte)
+    push_be32(out, 0)
+}
+
+// A PNG of one zlib stream of already filtered scanlines.
+png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
+    out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
+    header := [U8]{}
+    push_be32(header, width)
+    push_be32(header, height)
+    loop value in ([Int]{depth, color_type, 0, 0, interlace}) -> header.push(U8{value})
+    push_chunk(out, C_PNG_IHDR, header)
+    if palette.len() > 0 -> push_chunk(out, C_PNG_PLTE, palette)
+    if key.len() > 0 -> push_chunk(out, C_PNG_TRNS, key)
+    push_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
+    push_chunk(out, C_PNG_IEND, [U8]{})
+    out
+}
+
+// The size, then each pixel as one packed straight 0xRRGGBBAA.
+image_words: fn(image: Image) -> [Int] {
+    words := [Int]{image.width, image.height}
+    at := 0
+    loop at < image.pixels.len() {
+        words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
+        at += 4
+    }
+    words
+}
+
+gray_word: fn(value: Int) -> Int {
+    png_rgba(value, value, value, 255)
+}
+
+decoded_words: fn(data: [U8]) -> [Int] {
+    image_words(decode(data, C_TEST_LIMITS) ?? panic("decode: {err:Debug}"))
+}
+
+decode_error: fn(data: [U8], limits: Limits) -> ImageError {
+    if decode(data, limits) == {
+        .Ok(_) -> panic("decoded")
+        .Err(error) -> error
+    }
+}
+
+#Test("png rows reconstruct through every filter") {
+    raw: [U8]{1, 10, 20, 2, 5, 15, 3, 13, 18, 4, 0, 0}
+    assert_eq(decoded_words(png_bytes(2, 4, 8, 0, 0, [U8]{}, [U8]{}, raw)), [Int]{2, 4, gray_word(10), gray_word(30), gray_word(15), gray_word(45), gray_word(20), gray_word(50), gray_word(20), gray_word(50)})
+}
+
+#Test("png palettes, low depths and tRNS keys decode straight") {
+    palette: [U8]{255, 0, 0, 0, 255, 0, 0, 0, 255}
+    indexed: decoded_words(png_bytes(3, 1, 2, 3, 0, palette, [U8]{128}, [U8]{0, 0x18}))
+    assert_eq(indexed, [Int]{3, 1, 0xFF000080, 0x00FF00FF, 0x0000FFFF})
+    bits: decoded_words(png_bytes(3, 1, 1, 0, 0, [U8]{}, [U8]{0, 0}, [U8]{0, 0xA0}))
+    assert_eq(bits, [Int]{3, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF})
+    keyed: decoded_words(png_bytes(1, 1, 16, 2, 0, [U8]{}, [U8]{0, 1, 0, 2, 0, 3}, [U8]{0, 0, 1, 0, 2, 0, 3}))
+    assert_eq(keyed, [Int]{1, 1, png_rgba(0, 0, 0, 0)})
+}
+
+#Test("png sixteen-bit samples, gray alpha and Adam7") {
+    wide: decoded_words(png_bytes(1, 1, 16, 6, 0, [U8]{}, [U8]{}, [U8]{0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}))
+    assert_eq(wide, [Int]{1, 1, 0x12569ADE})
+    alpha: decoded_words(png_bytes(1, 1, 8, 4, 0, [U8]{}, [U8]{}, [U8]{0, 77, 33}))
+    assert_eq(alpha, [Int]{1, 1, png_rgba(77, 77, 77, 33)})
+    interlaced: decoded_words(png_bytes(2, 2, 8, 0, 1, [U8]{}, [U8]{}, [U8]{0, 1, 0, 2, 0, 3, 4}))
+    assert_eq(interlaced, [Int]{2, 2, gray_word(1), gray_word(2), gray_word(3), gray_word(4)})
+}
+
+#Test("inspect reads the header without decoding") {
+    info: inspect(png_bytes(3, 2, 8, 6, 0, [U8]{}, [U8]{}, [U8]{}), C_TEST_LIMITS) ?? panic("inspect: {err:Debug}")
+    assert_eq("{info.width}x{info.height}", "3x2")
+    assert(info.format == .PNG && info.color == .RGBA)
+}
+
+#Test("malformed input, other formats and budgets are typed errors") {
+    assert(decode_error([U8]{1, 2, 3}, C_TEST_LIMITS) == .Malformed)
+    assert(decode_error(png_bytes(2, 1, 8, 0, 0, [U8]{}, [U8]{}, [U8]{5, 1, 2}), C_TEST_LIMITS) == .Malformed)
+    assert(decode_error(png_bytes(1, 1, 8, 3, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Malformed)
+    assert(decode_error(png_bytes(2, 2, 8, 0, 0, [U8]{}, [U8]{}, [U8]{0, 1, 2}), C_TEST_LIMITS) == .Malformed)
+    assert(decode_error(png_bytes(1, 1, 3, 0, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Unsupported)
+    assert(decode_error([U8]{0xFF, 0xD8, 0xFF, 0xE0}, C_TEST_LIMITS) == .Unsupported)
+    assert(decode_error([U8]{71, 73, 70, 56, 57, 97}, C_TEST_LIMITS) == .Unsupported)
+    // 9 x 8 is 72 pixels, above the 64 the limits allow.
+    big: png_bytes(9, 8, 8, 0, 0, [U8]{}, [U8]{}, [U8]{})
+    assert(decode_error(big, C_TEST_LIMITS) == .TooLarge)
+    assert(decode_error(big, Limits{max_input_bytes: 8, max_pixels: 1000, max_output_bytes: 4000}) == .TooLarge)
+    assert(decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 1000, max_output_bytes: 100}) == .TooLarge)
+    assert(decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 0, max_output_bytes: 4000}) == .TooLarge)
+}
