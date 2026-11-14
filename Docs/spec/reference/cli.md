@@ -865,7 +865,11 @@ precedence over it, as for every control (`jet env vars` shows which one
 won); `--phase-counters` also prints each counter as a `JET_PHASE_COUNTERS`
 line on stderr. The phases are the CLI's
 `sources` walk, the driver's (`load` and its `parse` waves, `register`,
-`sema.check`, `comptime`, `sema.finalize`,
+`sema.check`, `comptime`, the landing of local comptime values
+(`comptime.land.open`, `comptime.land.splice`, `comptime.land.undo`,
+`comptime.land.carry` per round), `sema.finalize` (each body pass opened
+in `sema.pass_open`, the Core demand's `sema.core_demand.seeds` and one
+`sema.core_demand.name` per wave),
 `comptime.bodies` (holding, per body pass, `comptime.body.pending` and the
 `comptime.body.run`, `comptime.body.splice` and `comptime.body.recheck` spans,
 whose detail names the bodies the pass evaluates and whose index is the
