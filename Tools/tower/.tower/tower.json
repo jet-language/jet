@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102269,
+    "rev": 102272,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72770,20 +72770,20 @@
         {
           "n": 1,
           "text": "Every #Unsafe region added past the baseline (69 across Compiler, Core, Examples and tests) has a recorded review verdict: removed in favor of a safe form, or kept as vetted standard-library or memory internals with its reason checked; the baseline is updated only for kept regions, with the verdict list in the commit receipt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T15:44:12.739Z"
+          "evidence": "dev aa0d43c738: the verdict receipt for the original regions. G3Core-2 recovered them with 67fd7fdc47's own check-unsafe-ratchet.mjs --update: 82 rows, net +60, matching the per-area counts (the card's \"69\" did not reproduce). 47 were removed for safe forms (Tls 25 and Db 17 are Jet engines with 0 #Unsafe; Email 2, file deleted; Sign 1, crypto.wipe; RouteTerm stdin 2, rt_prove_stdin_read). 35 were kept, each with a reason. One Alloc.jet row shows GONE only because its reason was reworded (390bbdaa0b, 70793e4fdc). The baseline holds only kept regions (1a9546b037).",
+          "at": "2026-11-14T07:48:32.102Z"
         },
         {
           "n": 2,
           "text": "The 48 CoreLib audit problems are resolved: each function that opens #Unsafe is either an #Unsafe function or has a recorded safe-abstraction proof in the registry, and the CoreLib audit reports 0 problems.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T15:44:14.632Z"
+          "evidence": "dev 1a9546b037 (with 75d344bf6c's mem.window proof rows): `jet -A Tools/agent/UnsafeRatchet.jet --check` rc 0, \"CoreLib raw operations all gated; every safe abstraction has a recorded proof\" (Lander5, gate-p60 jet); guard cases unsafe_region_ratchet 2/0.",
+          "at": "2026-11-14T07:48:33.746Z"
         },
         {
           "n": 3,
@@ -72815,11 +72815,11 @@
         {
           "n": 6,
           "text": "Regressed after c3 was met (found 2026-11-12 by Lander5 on dev a2f74c6fae with the p57 jet): `jet -A Tools/agent/UnsafeRatchet.jet --check` exits 1. Region counts rose in every area: Compiler 770→781, Core 179→185, Docs 8→10, Examples 41→42, tests 454→484. The new sites include Compiler/JetRuntime CompilerMapped.jet (12 regions, 3692b19b94), SessionHost.jet:324 (66f2a5f13f), Main.jet:271 (782b3c88b0), Scheduler.jet:32 (bddd8905d3), Core/Mem/Mem.jet (bffcf7c078, ff7e4380c7, 241024c354), Docs syntax-surface.jet (ec4fd5c945), Examples/LowLevel/RawPointerTools.jet (0e845bdf67), and 30 test fixtures. There are two CoreLib audit failures: Core/Mem/Mem.jet:90 and :99, mem.window get and set, which open #Unsafe without being #Unsafe functions or having a safe-abstraction proof. One row is stale: Core/Encoding/Stream.jet text_from_bytes no longer opens #Unsafe. Each region gets the c1 verdict, the Core functions get c2 proofs or become #Unsafe functions, and the stale row goes. Proof: --check exits 0 on dev, with the verdict list in the commit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T07:17:08.966Z"
+          "evidence": "dev 1a9546b037 (G3Core2-6321c6-unsafe-baseline, on the mem-window-proof SUB: Window start/count priv, get/set proof rows, the stale Stream text_from_bytes row gone). UnsafeRatchet --check rc 0, \"1517 regions; baseline unchanged\", all CoreLib raw ops gated; unsafe_region_ratchet 2/0 (Lander5, gate-p60). The commit message has the per-region c1 verdicts for the 54 new regions, all kept with reasons.",
+          "at": "2026-11-14T07:48:35.037Z"
         }
       ],
       "refs": [],
@@ -72830,7 +72830,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:44:10.597Z",
-      "updated": "2026-11-14T07:17:08.966Z",
+      "updated": "2026-11-14T07:48:35.037Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -205107,6 +205107,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T07:48:35.037Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ff0n0i",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-14T07:48:33.746Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ff0n0i",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T07:48:32.102Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ff0n0i",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T07:46:25.741Z",
       "by": "Main",
