@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102025,
+    "rev": 102031,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,11 +30,12 @@
         "radar:e9",
         "radar:e14",
         "radar:e15",
-        "radar:e17",
-        "radar-sq"
+        "radar-sq",
+        "radar:e3",
+        "radar:e16"
       ]
     },
-    "completionCursor": "2026-11-13T23:58:35.409Z"
+    "completionCursor": "2026-11-14T02:24:33.777Z"
   },
   "epochs": [
     {
@@ -82197,6 +82198,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "c1, checked by Main 2026-11-14 on dev 7a649c3166. parallel_collection_adapters is 3/0 in b20proofs, including _select_across_runtime_failure_carriers, which runs o0, o1 and o2 inside one row. git grep of `#Context(deadline` over Compiler, Core, Examples and tests gives 0 hits; the only hits are historical evidence in Tools/agent-eval and Docs/audits. One item is left: Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:878 CTX_FIELD_DEADLINE \"deadline\" is a dead registry row for the retired spelling, with no reader. It goes to G3Core-2; c1 is met once it is removed."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-13): Examples/Concurrency/ContextTaskInherit keeps its 20 ms deadline (G3Core2-concfix). A 0 ms deadline has expired by the time the spawned task first polls, so E3003 from the post-call poll is the correct meaning. Splitting the loop or entry check from the post-call poll in the IR (Build ir_loop_check, the OptStops fold, X64Select, JetWeb) is not needed for c2, and it is not scheduled. c2`s fix (G3Core2-6539c2) is runtime only: a wait that returns its typed timeout clears the DEADLINE attention bit, so the poll after it does not also raise E3003."
         },
         {
@@ -82223,11 +82229,11 @@
         {
           "n": 2,
           "text": "A Core I/O loop that already honours the task deadline (the Jet DNS resolver under #Deadline) returns its typed timeout, as D-DEADLINE1 specifies, instead of the busy-loop deadline poll (Scheduler.jet scheduler_check_loop_deadline) stopping it with E3003 \"waiting in a loop\". Proof: jet test Compiler --profile cases --filter corelib_net/system_resolver_follows_go_against_a_local_dns_server passes, with its known-failing row removed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T01:19:30.744Z"
+          "evidence": "G3Core2-6539c2 landed in batch 20 together with Lander`s KF-row removal 6c77d0d369 (which drops the c9ef21c446 row). b20proofs on the batch-20 jet (gate-p26, dev 0a72518be8): jet test Compiler --profile cases --filter corelib_net/system_resolver_follows_go_against_a_local_dns_server PASS 1/0, with no known-failing row; corelib_net/ 15/0 + 1 KF (net_http_service_policy_tests_pass, unrelated); ContextTaskInherit 3/0.",
+          "at": "2026-11-14T02:25:05.812Z"
         }
       ],
       "refs": [],
@@ -82238,7 +82244,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:12:58.999Z",
-      "updated": "2026-11-14T01:44:43.503Z",
+      "updated": "2026-11-14T02:25:07.887Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -204879,6 +204885,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T02:25:07.887Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y5r79w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T02:25:05.812Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0y5r79w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T02:24:33.777Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-14T02:24:33.777Z"
+    },
     {
       "at": "2026-11-14T02:24:15.889Z",
       "by": "Main",
