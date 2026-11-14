@@ -67,20 +67,17 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication index protocol quote is byte exact, not CanonicalJSON") {
-    controls: String.from_bytes([U8]{13, 9, 8, 12, 127, 194, 128}) ?? panic("control fixture")
-    entry := publication_index_test_entry("é\"\\\n{controls}", "1.2.0", true)
+    entry := publication_index_test_entry("é\"\\\n\r\t\u{8}\u{c}\u{7f}\u{80}", "1.2.0", true)
     entry.public_key = "aa"
     entry.signature = "x=y"
     line: publication_index_to_jsonl(entry)
     // Core JSON escapes `\b` and `\f` by name and writes DEL and C1 raw.
-    raw: String.from_bytes([U8]{127, 194, 128}) ?? panic("raw fixture")
-    assert(line.starts_with([String]{"{{\"name\":\"é\\\"\\\\\\n\\r\\t\\b\\f", raw, "\""}.join("")))
+    assert(line.starts_with("{{\"name\":\"é\\\"\\\\\\n\\r\\t\\b\\f\u{7f}\u{80}\""))
     assert(!line.ends_with("\n"))
 }
 
 #Test("publication index escaped unicode roundtrip") {
-    controls: String.from_bytes([U8]{13, 9, 8, 12, 127, 194, 128}) ?? panic("control fixture")
-    entry: publication_index_test_entry("é\"\\\n{controls}", "1.2.0", true)
+    entry: publication_index_test_entry("é\"\\\n\r\t\u{8}\u{c}\u{7f}\u{80}", "1.2.0", true)
     assert_eq(publication_index_parse_line(publication_index_to_jsonl(entry)), Val(entry))
 }
 
