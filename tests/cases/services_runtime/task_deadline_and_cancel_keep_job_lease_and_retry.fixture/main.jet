@@ -1,0 +1,79 @@
+// The shared task operations don't erase the job queue's own rules.
+// 1. A worker task whose `#Deadline` runs out returns DeadlineBlown to the
+//    worker loop. The loop records it as the job's failure, and the queue's
+//    retry policy applies: Retrying, due again after its 1s backoff.
+// 2. The retried claim is attempt 2, and the first claim's lease is no longer
+//    honoured.
+// 3. A worker task cancelled mid-job leaves the job Running under its lease.
+//    recover_expired doesn't take a lease that hasn't expired, and the lease
+//    holder can still finish the job.
+package: {
+    name: "shared_ops_jobs"
+    authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
+}
+
+use jobs: core.jobs
+use time: core.time
+
+#Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
+
+work: fn() -> Int Never! {
+    time.sleep(300ms)
+    300
+}
+
+label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> { return "panicked: {reason}" }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
+}
+
+// The worker inherits the 20ms deadline in force where it is spawned. The
+// block returns, so the last line is never reached.
+worker_under_deadline: fn() -> Task<Int> {
+    #Deadline(20ms) { return task work() }
+    task work()
+}
+
+state_of: fn(queue: JobQueue, id: String) -> String {
+    receipt: queue.receipt(id) ?? return "receipt failed: {err}"
+    "{receipt.state} attempts {receipt.attempts}"
+}
+
+run: fn() {
+    queue := jobs.queue() ?? panic("queue")
+    job: queue.enqueue(process, "order-7", key: "order-7") ?? panic("enqueue")
+
+    first: (queue.claim("w1", 1) ?? panic("claim"))[0]
+    reason: if worker_under_deadline().join() == {
+        .Ok(_) -> "finished"
+        .Err(error) -> label(error)
+    }
+    print("worker 1: {reason}")
+    failure: JobError{type_id: first.payload.type_id, reason: "worker {reason}", detail: None}
+    failed: queue.fail(first, failure) ?? panic("fail")
+    print("after the failure: {failed.state} attempts {failed.attempts}")
+    print("claim before the backoff: {(queue.claim("w2", 1) ?? panic("claim")).len()}")
+
+    time.sleep(1100ms)
+    second: (queue.claim("w2", 1) ?? panic("claim"))[0]
+    print("retried claim: attempt {second.receipt.attempts}")
+    if queue.fail(first, failure) == {
+        .Ok(_) -> print("the first claim's lease: still honoured")
+        .Err(_) -> print("the first claim's lease: refused")
+    }
+
+    cancelled: task work()
+    cancelled.cancel()
+    if cancelled.join() == {
+        .Ok(_) -> print("worker 2: finished")
+        .Err(error) -> print("worker 2: {label(error)}")
+    }
+    queue.recover_expired() ?? panic("recover")
+    print("after recover_expired: {state_of(queue, job.id)}")
+    result: JobResult{type_id: second.payload.type_id, bytes: second.payload.bytes, publish: false}
+    done: queue.acknowledge(second, result) ?? panic("acknowledge")
+    print("the lease holder finishes: {done.state} attempts {done.attempts}")
+}

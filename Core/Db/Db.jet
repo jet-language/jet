@@ -699,10 +699,13 @@ __policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool
 // it. `close` shuts the driver down in place for all of them. `path` is the
 // location it was opened at, for display. `written` names the tables written
 // since the last begin or commit, so a rollback can re-run their live bindings.
+// `open` numbers the transaction open on it (0: none), out of `began` so far.
 __DBState: struct {
     driver: __Driver
     path: String
     written: [String]
+    open: Int{0}
+    began: Int{0}
 }
 
 DBConnection: struct {
@@ -764,12 +767,22 @@ DBScope: struct {
 // has to `commit` or `rollback` it, on every path, before a function returns
 // with success. Either call ends the transaction, even when it fails: a commit
 // that fails is rolled back, and its error says so; the caller can't ignore it.
+// One dropped while still open, by a cancelled task or a stop unwinding past
+// it, is rolled back: it writes nothing, and the connection can begin again.
 #SingleUse
 DBTransaction: struct {
     priv state: Shared<__DBState>
+    priv number: Int
 
     commit: fn(&&self) DBError! -[DB]> { __db_commit(self.state) }
     rollback: fn(&&self) DBError! -[DB]> { __db_rollback(self.state) }
+
+    impl Close {
+        close: fn(&&self) {
+            if !__db_open_is(self.state, self.number) -> return
+            __db_rollback(self.state).drop("an unwind ended the transaction; no caller is left to report a failed rollback to")
+        }
+    }
 }
 
 __db_open: fn(path: String, failure: String) -> DBConnection Never! {
@@ -785,12 +798,20 @@ __db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> DBTransaction DBErr
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
     if !began -> return Err(__db_error("could not begin a transaction: one is already open, or the database is busy"))
     guard.value.written = [String]{}
-    Ok(DBTransaction{state: state.copy()})
+    guard.value.began = guard.value.began + 1
+    guard.value.open = guard.value.began
+    Ok(DBTransaction{state: state.copy(), number: guard.value.open})
+}
+// Whether transaction `number` is the one still open on `state`.
+__db_open_is: fn(state: Shared<__DBState>, number: Int) -> Bool Never! {
+    guard: state.guard_read()
+    guard.value.open == number
 }
 // A commit that fails leaves the engine's transaction open, so it is rolled
 // back before the failure is reported: the transaction ends either way.
 __db_commit: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
+    guard.value.open = 0
     if __driver_closed(guard.value.driver) -> return Err(__db_error("could not commit: the database is closed"))
     if __driver_commit(guard.value.driver) {
         guard.value.written = [String]{}
@@ -805,6 +826,7 @@ __db_commit: fn(state: Shared<__DBState>) DBError! {
 // over a table they touched re-runs on its next read.
 __db_rollback: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
+    guard.value.open = 0
     if __driver_closed(guard.value.driver) -> return Err(__db_error("could not roll back: the database is closed"))
     rolled: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> app.__live_invalidate_all(__live_source(table))

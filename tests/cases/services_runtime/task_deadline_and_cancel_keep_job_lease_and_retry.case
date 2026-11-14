@@ -1,0 +1,12 @@
+# Claim (#3078 c6, Jobs): the shared task operations don't erase the queue's
+# retry or lease rules. A worker whose task `#Deadline` runs out records a job
+# failure. The queue retries it after its backoff as attempt 2, and refuses the
+# stale claim. A worker task cancelled mid-job leaves the job Running under its
+# lease. recover_expired leaves a live lease alone, and the lease holder still
+# finishes the job.
+fixture: task_deadline_and_cancel_keep_job_lease_and_retry.fixture
+env: NO_COLOR=1
+env: JET_JOB_QUEUE_DB={work}/state/jobs.db
+step: jet run main.jet
+exit: 0
+stdout: = "worker 1: deadline\nafter the failure: Retrying attempts 1\nclaim before the backoff: 0\nretried claim: attempt 2\nthe first claim's lease: refused\nworker 2: cancelled\nafter recover_expired: Running attempts 2\nthe lease holder finishes: Completed attempts 2\n"

@@ -5997,6 +5997,9 @@ migration cannot silently replace an applied one.
 consumes it. Dropping it, or a `return` that leaves with it still open, is
 E0140, and the result of either call is a failure the caller can't ignore.
 A commit that fails rolls the transaction back before it reports the error.
+An unwind that leaves a transaction still open, such as a task cancelled
+inside it, rolls it back, so it writes nothing and the connection can begin
+again.
 
 `DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
 `execute`, `begin`), which a generic bound names bare:

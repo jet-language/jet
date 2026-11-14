@@ -1,0 +1,14 @@
+# Claim (#3078 c6, HTTP): the shared task and deadline operations don't erase
+# HTTP admission. A worker task that blows its `#Deadline`, or panics, inside a
+# handler returns its TaskFailure to that handler's join as a value, so the
+# handler answers 504 or 500. The server goes on admitting: the next request
+# answers 200, and shutdown reports all four connections completed and none
+# cancelled.
+fixture: a_handler_task_failure_is_its_answer_and_admission_goes_on.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "deadline: 504 worker deadline\nnext: 200 ok\npanic: 500 worker panicked: broken (spawn site 2): worker broke\nnext: 200 ok\naccepted 4, completed 4, cancelled 0\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "deadline: 504 worker deadline\nnext: 200 ok\npanic: 500 worker panicked: broken (spawn site 2): worker broke\nnext: 200 ok\naccepted 4, completed 4, cancelled 0\n"

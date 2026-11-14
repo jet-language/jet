@@ -1,0 +1,91 @@
+// A handler that starts a worker task under a `#Deadline` gets the worker's
+// TaskFailure back from join, as a value. The deadline that the shared task
+// operation enforces becomes this handler's 504. A worker's panic becomes its
+// 500. Neither failure leaks into the server: the next request is admitted and
+// answered, and shutdown reports every connection completed and none cancelled.
+package: {
+    name: "handler_task_failure"
+    authority: { allow: [FS.Read, IO, Net, Time, Time.Wait] }
+}
+
+use {
+    http_server: core.http.server
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+// The status code and the body of one request on its own connection.
+fetch: fn(addr: String, path: String) -> String {
+    client: net.tcp_connect(addr) ?? return "connect failed"
+    client.write_all("GET {path} HTTP/1.1{crlf()}Host: local{crlf()}Connection: close{crlf()}{crlf()}".bytes()) ?? return "write failed"
+    parts := [String]{}
+    loop {
+        part: client.read_text(8192) ?? break
+        if part == "" -> break
+        parts.push(part)
+    }
+    text: parts.join("")
+    if text == "" -> return "no reply"
+    status: text.split(" ").to_list()
+    body: text.split("{crlf()}{crlf()}").to_list()
+    "{status[1]} {body[body.len() - 1]}"
+}
+
+nap: fn() -> Int Never! {
+    time.sleep(300ms)
+    300
+}
+
+answer: fn(outcome: Int TaskFailure!) -> HTTPResponse HTTPError! {
+    if outcome == {
+        .Ok(ms) -> return Ok(http_server.response(200, "slept {ms}"))
+        .Err(error) -> {
+            if error == {
+                .DeadlineBlown -> return Ok(http_server.response(504, "worker deadline"))
+                .Cancelled -> return Ok(http_server.response(503, "worker cancelled"))
+                .Panicked(reason) -> return Ok(http_server.response(500, "worker panicked: {reason}"))
+            }
+        }
+    }
+}
+
+// The worker inherits the 20ms deadline in force where it is spawned. The
+// block returns, so the last line is never reached.
+spawn_worker: fn() -> Task<Int> {
+    #Deadline(20ms) { return task nap() }
+    task nap()
+}
+
+broken: fn() -> Int Never! {
+    panic("worker broke")
+}
+
+deadline_handler: fn(_req: HTTPRequest) -> HTTPResponse HTTPError! {
+    worker: spawn_worker()
+    answer(worker.join())
+}
+
+panic_handler: fn(_req: HTTPRequest) -> HTTPResponse HTTPError! {
+    worker: task broken()
+    answer(worker.join())
+}
+
+run: fn() (HTTPError | RangeError | TaskFailure)! {
+    app: web.app()
+        .get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "ok")) })
+        .get("/deadline", deadline_handler)
+        .get("/panic", panic_handler)
+    server: app.bind("127.0.0.1:0") ?? panic("bind")
+    addr: server.local_addr() ?? panic("address")
+    serving: task { server.serve() ?? panic("serve") }
+    print("deadline: {fetch(addr, "/deadline")}")
+    print("next: {fetch(addr, "/")}")
+    print("panic: {fetch(addr, "/panic")}")
+    print("next: {fetch(addr, "/")}")
+    report: server.shutdown(100ms) ?? panic("shutdown")
+    serving.join() ?? panic("serve task")
+    print("accepted {report.accepted}, completed {report.completed}, cancelled {report.cancelled}")
+}

@@ -1,0 +1,14 @@
+# Claim (#3078 c6, DB): the shared task operations don't erase pool admission
+# or transaction outcome. A pool waiter whose task `#Deadline` runs out first
+# fails with the task's deadline, not a pool timeout, and leaves the queue, so
+# the next acquire is admitted. A pool refusal crosses a join as the pool's own
+# error. A task cancelled inside an open transaction writes nothing, and the
+# connection can begin again.
+fixture: task_deadline_and_cancel_keep_pool_admission_and_transaction_outcome.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "waiter under a 40ms task deadline: deadline\npool timeouts after it: 0\nnext lease: acquired\njoined: refused: database pool acquisition deadline exceeded\ndrain: db.pool lifecycle=drained max=1 available=0 leased=0 opening=0 ready=0 acquires=3 releases=3 timeouts=1 open_failures=0 unhealthy=0 replacements=0 replacement_failures=0\nwriter: cancelled\nrows after the cancelled writer: 0\na new transaction begins: true\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "waiter under a 40ms task deadline: deadline\npool timeouts after it: 0\nnext lease: acquired\njoined: refused: database pool acquisition deadline exceeded\ndrain: db.pool lifecycle=drained max=1 available=0 leased=0 opening=0 ready=0 acquires=3 releases=3 timeouts=1 open_failures=0 unhealthy=0 replacements=0 replacement_failures=0\nwriter: cancelled\nrows after the cancelled writer: 0\na new transaction begins: true\n"
