@@ -4,7 +4,7 @@
 // native pause and is not claimed here.
 
 use {
-    jet_debug.[DebugEvaluationUsage, DebugSnapshot, DebugValue, FrameSnapshot, ValueSnapshot, debug_path_segments, debug_render_snapshot_locals, evaluate_snapshot]
+    jet_debug.[DebugEvaluationUsage, DebugSnapshot, DebugValue, FrameSnapshot, ValueSnapshot, debug_render_snapshot_locals, evaluate_snapshot]
 }
 
 debug_snapshot_test_text: fn(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("test bytes are not UTF-8") }
@@ -99,15 +99,19 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     }
 }
 
-#Test("evaluate_snapshot_rejects_paths_outside_the_bounded_grammar") {
+#Test("evaluate_snapshot_rejects_what_the_parser_does_not_read_as_a_place") {
     refused: "only bounded read-only Jet local paths can be evaluated"
     bell: debug_snapshot_test_text([U8]{U8{7}})
     nul: debug_snapshot_test_text([U8]{U8{0}})
     c1: debug_snapshot_test_text([U8]{U8{194}, U8{133}})
-    hostile: [String]{"", "   ", "_total", "1total", "total.", "total.9", "total..x", "total[]", "total[x]", "total[1", "total]", "total x", "total()", "café", "é", "total\tx", "total{bell}", "{bell}total", "total.a{nul}", "total[1{c1}]", "to{c1}tal"}
+    hostile: [String]{"", "   ", "1total", "total.", "total.9", "total..x", "total[]", "total[x]", "total[1", "total]", "total x", "total()", "total + 1", "total\tx", "total{bell}", "{bell}total", "total.a{nul}", "to{c1}tal"}
     loop expression in hostile {
-        assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), expression), refused)
+        assert_eq("{expression}: {debug_snapshot_test_error(debug_snapshot_test_run(), expression)}", "{expression}: {refused}")
     }
+    // What the compiler's parser reads is what is evaluated: a name is
+    // looked up, and U+0085 inside an index is whitespace around a place.
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "_total"), "no readable local named `_total` at this stop")
+    assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "total[1{c1}]"), "nested debugger evaluation is unavailable until the paused backend publishes child facts")
     // Outer trimming is Rust str::trim (Unicode White_Space): U+0085 is
     // trimmed away, so the remaining root is evaluated rather than refused.
     nel: evaluate_snapshot(debug_snapshot_test_run(), "{c1}total{c1}") ?? panic("NEL is outer whitespace: {err.message}")
@@ -208,16 +212,6 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     unpublishable: [String]{"opaque", "[", "]", "{{", "Some(1", "(1) x"}
     loop raw in unpublishable {
         assert_eq(debug_snapshot_test_value_error("Widget", raw), shape)
-    }
-}
-
-#Test("debug_path_segments_split_validated_places_without_trimming") {
-    assert_eq(debug_path_segments("account.items[12].name") ?? panic("valid place"), [String]{"account", "items", "[12]", "name"})
-    assert_eq(debug_path_segments("a") ?? panic("valid root"), [String]{"a"})
-    assert_eq(debug_path_segments("a._b[0][7]") ?? panic("valid place"), [String]{"a", "_b", "[0]", "[7]"})
-    invalid: [String]{" a", "a ", "", "a[]", "a.", "a.1", "_a", "a[1"}
-    loop place in invalid {
-        assert(debug_path_segments(place) == None)
     }
 }
 

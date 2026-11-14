@@ -1,15 +1,14 @@
 // The expressions `jet debug --dap` evaluates at a stop: a breakpoint's
 // `condition`, the `{…}` parts of a logpoint's `logMessage`, and an
-// `evaluate` request. The compiler's parser reads each as one Jet
-// expression, and it is evaluated over the paused frame's locals as the
-// console shows them. The evaluator reads a local by its name, Int, Float,
-// Bool and String literals, `!` and unary `-`, `+ - *` on Ints and on
-// Floats, comparisons (chained too), and `&&` and `||`. Nothing runs in the
-// program.
+// `evaluate` request. jet_debug's debug_parse_expression (the compiler's
+// parser) reads each as one Jet expression, and it is evaluated over the
+// paused frame's locals as the console shows them. The evaluator reads a
+// local by its name, Int, Float, Bool and String literals, `!` and unary
+// `-`, `+ - *` on Ints and on Floats, comparisons (chained too), and `&&`
+// and `||`. Nothing runs in the program.
 use {
-    jet_debug.[NATIVE_DEBUG_UNAVAILABLE, NativeLocal, debug_unquote_text, native_debug_text_literal]
-    jet_foundation.[BinOp, DIAGNOSTIC_ERROR, Expr]
-    jet_parser.[parse_source]
+    jet_debug.[NATIVE_DEBUG_UNAVAILABLE, NativeLocal, debug_parse_expression, debug_parse_message, debug_unquote_text, native_debug_text_literal]
+    jet_foundation.[BinOp, Expr]
 }
 
 // A value an expression has is a debugger value row, as a local is: its Jet
@@ -66,25 +65,6 @@ JetCLIDapEvalError: struct { message: String }
 
 jet_cli_dap_eval_error: fn(message: String) -> JetCLIDapEvalError Never! {
     JetCLIDapEvalError{message: message}
-}
-
-// `text` read as one Jet expression.
-jet_cli_dap_parse: fn(text: String) -> Expr JetCLIDapEvalError! {
-    if text.trim() == "" -> return Err(jet_cli_dap_eval_error("the expression is empty"))
-    parsed: parse_source("dap_expression: fn() {{\n{text}\n}}\n".bytes())
-    loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(jet_cli_dap_eval_error("`{text}` is not a Jet expression: {diagnostic.what}"))
-    }
-    if parsed.program.items.len() == 1 && parsed.program.items[0] == .Func(function) && function.body.len() == 1 && function.body[0] == .Expr(expr) {
-        return Ok(expr)
-    }
-    Err(jet_cli_dap_eval_error("`{text}` is not one Jet expression"))
-}
-
-// A logpoint's `logMessage`, read as the Jet string literal it would be
-// between double quotes: `{expr}` parts interpolate.
-jet_cli_dap_parse_message: fn(message: String) -> Expr JetCLIDapEvalError! {
-    jet_cli_dap_parse("\"{message.replace("\"", "\\\"")}\"")
 }
 
 // A breakpoint condition's truth over `locals`.
@@ -240,7 +220,7 @@ jet_cli_dap_test_locals: fn() -> [NativeLocal] Never! {
 // `text`'s value over the test locals as interpolation shows it, or
 // `error: <why>`.
 jet_cli_dap_test_eval: fn(text: String) -> String Never! {
-    expr: jet_cli_dap_parse(text) ?? return "error: {err.message}"
+    expr: debug_parse_expression(text) ?? return "error: {err.message}"
     value: jet_cli_dap_eval(expr, jet_cli_dap_test_locals()) ?? return "error: {err.message}"
     jet_cli_dap_text(value)
 }
@@ -259,12 +239,12 @@ jet_cli_dap_test_eval: fn(text: String) -> String Never! {
     assert_eq(jet_cli_dap_test_eval("gone == 1"), "error: `gone` has no readable value here")
     assert_eq(jet_cli_dap_test_eval("i == rate"), "error: the operands are not two Ints, two Floats, two Strings or two Bools")
     assert(jet_cli_dap_test_eval("name.len()").starts_with("error: the debugger evaluates locals"))
-    condition: jet_cli_dap_parse("i + 1") ?? panic(err.message)
+    condition: debug_parse_expression("i + 1") ?? panic(err.message)
     assert(jet_cli_dap_condition(condition, jet_cli_dap_test_locals()) == .Err(_))
 }
 
 #Test("A logpoint message fills in its expressions") {
-    message: jet_cli_dap_parse_message("i is {{i}}, twice {{i * 2}}, \"{{name}}\"") ?? panic(err.message)
+    message: debug_parse_message("i is {{i}}, twice {{i * 2}}, \"{{name}}\"") ?? panic(err.message)
     value: jet_cli_dap_eval(message, jet_cli_dap_test_locals()) ?? panic(err.message)
     assert_eq(jet_cli_dap_text(value), "i is 3, twice 6, \"ab\"")
 }

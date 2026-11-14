@@ -7,9 +7,6 @@ use {
     jet_foundation.[sha256_hex, Record, Variant]
 }
 
-// Rust split_debug_expression's 16 KiB UTF-8 byte bound.
-DEBUG_EXPRESSION_MAX_BYTES: 16384
-
 // Rust ValueSnapshot: one value captured at a real paused source statement.
 ValueSnapshot: struct {
     name: String
@@ -119,16 +116,17 @@ debug_evaluation_error: fn(message: String) -> DebugEvaluationError Never! {
     DebugEvaluationError{message: message}
 }
 
-// Rust evaluate_snapshot: resolve one bounded read-only Jet local path.
-// Only a readable root is published; nested suffixes wait for child facts.
+// Rust evaluate_snapshot: resolve one bounded read-only Jet local path,
+// read by the compiler's parser. Only a readable root is published; nested
+// places wait for child facts.
 evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvaluation DebugEvaluationError! {
-    trimmed := expression.trim()
-    split: debug_split_expression(trimmed) ?? return Err(debug_evaluation_error("only bounded read-only Jet local paths can be evaluated"))
-    if split.suffix != "" {
-        return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
-    }
+    trimmed: expression.trim()
+    refused: "only bounded read-only Jet local paths can be evaluated"
+    parsed: debug_parse_expression(trimmed) ?? return Err(debug_evaluation_error(refused))
+    if !debug_is_place(parsed) -> return Err(debug_evaluation_error(refused))
+    root: if parsed == .Ident(name, _, _) -> name else -> return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
     loop local in snapshot.locals {
-        if local.name == split.root {
+        if local.name == root {
             typed: debug_value(local) ?? return Err(err)
             bytes: if typed == {
                 .Text(text) -> text.bytes().len()
@@ -143,85 +141,7 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
             })
         }
     }
-    Err(debug_evaluation_error("no readable local named `{split.root}` at this stop"))
-}
-
-// Rust split_debug_expression's `(root, suffix)` pair as a named carrier
-// (#4357: tuples lack JetDebug/JetShow in the Rust emitter).
-DebugExpressionSplit: struct {
-    root: String
-    suffix: String
-}
-
-// Rust split_debug_expression: a nonempty <=16 KiB `root(.field|[digits])*`
-// path. Rust also rejects any `char::is_control` scalar up front; that check
-// is subsumed here because this grammar accepts only ASCII letters, digits,
-// `_`, `.`, `[` and `]` and must consume every scalar, so each Cc (and every
-// other scalar) is already rejected with the same `None`.
-debug_split_expression: fn(value: String) -> DebugExpressionSplit? Never! {
-    bytes: value.bytes()
-    if bytes.len() == 0 || bytes.len() > DEBUG_EXPRESSION_MAX_BYTES -> return None
-    root_end: debug_ident_end(bytes, 0)
-    // Root must start with an ASCII letter: rejects empty, `_` and digit starts.
-    if root_end == 0 || !debug_is_ascii_alpha(Int{bytes[0]}) -> return None
-    index := root_end
-    loop index < bytes.len() {
-        lead: Int{bytes[index]}
-        if {
-            lead == 46 -> {
-                start: index + 1
-                end: debug_ident_end(bytes, start)
-                if end == start -> return None
-                first: Int{bytes[start]}
-                if !debug_is_ascii_alpha(first) && first != 95 -> return None
-                index = end
-            }
-            lead == 91 -> {
-                start: index + 1
-                close: debug_index_close(bytes, start) ?? return None
-                if close == start -> return None
-                loop digit in start..<close {
-                    if !debug_is_ascii_digit(Int{bytes[digit]}) -> return None
-                }
-                index = close + 1
-            }
-            else -> { return None }
-        }
-    }
-    root: String.from_bytes(bytes[0..<root_end]) ?? return None
-    suffix: String.from_bytes(bytes[root_end..<bytes.len()]) ?? return None
-    Val(DebugExpressionSplit{root: root, suffix: suffix})
-}
-
-// Rust debug_path_segments: the validated path as `root`, `field` and
-// `[digits]` segments. Does not trim; callers pass the place as written.
-debug_path_segments: fn(value: String) -> [String]? Never! {
-    split: debug_split_expression(value) ?? return None
-    segments := [String]{split.root}
-    bytes: split.suffix.bytes()
-    index := 0
-    loop index < bytes.len() {
-        lead: Int{bytes[index]}
-        if {
-            lead == 46 -> {
-                end: debug_ident_end(bytes, index + 1)
-                if end == index + 1 -> return None
-                segments.push(String.from_bytes(bytes[(index + 1)..<end]) ?? return None)
-                index = end
-            }
-            lead == 91 -> {
-                close: debug_index_close(bytes, index + 1) ?? return None
-                if close == index + 1 -> return None
-                loop digit in (index + 1)..<close {
-                    if !debug_is_ascii_digit(Int{bytes[digit]}) -> return None
-                }
-                segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
-                index = close + 1
-            }
-            else -> { return None }
-        }
-    }
-    Val(segments)
+    Err(debug_evaluation_error("no readable local named `{root}` at this stop"))
 }
 
 // Rust render_snapshot_locals: stable name-ordered `name = value` dump.
@@ -392,30 +312,4 @@ debug_unquote_text: fn(raw: String) -> String Never! {
     }
     if escaped -> out.push(U8{92})
     String.from_bytes(out) ?? panic("debugger text unquoting preserves UTF-8")
-}
-
-// ASCII classifiers for the Rust `is_ascii_*` predicates on the path grammar.
-debug_is_ascii_alpha: fn(code: Int) -> Bool Never! { (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
-debug_is_ascii_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
-
-// First index at or after `start` that is not ASCII alphanumeric or `_`.
-debug_ident_end: fn(bytes: [U8], start: Int) -> Int Never! {
-    index := start
-    loop index < bytes.len() {
-        code: Int{bytes[index]}
-        if !debug_is_ascii_alpha(code) && !debug_is_ascii_digit(code) && code != 95 -> return index
-        index += 1
-    }
-    index
-}
-
-// Rust `index.find(']')`: first `]` byte at or after `start` (ASCII `]` never
-// occurs inside a multibyte UTF-8 scalar).
-debug_index_close: fn(bytes: [U8], start: Int) -> Int? Never! {
-    index := start
-    loop index < bytes.len() {
-        if (Int{bytes[index]}) == 93 -> return Val(index)
-        index += 1
-    }
-    None
 }
