@@ -3269,36 +3269,34 @@ sema_function_check_generics_in_graph: fn(graph: SemaRegistrationGraph, job: Sem
 sema_function_check_registered_shared: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if sema_function_check_registered_unregistered(job, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) -> return unavailable
     generics := sema_function_check_registered_generics(job, module_index, memory_plan, memory_position, environment, program)
-    // copy: `previous_location` restores module_scopes.location_function after this function's
-    // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
-    previous_location: module_scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, memory_position, environment, program, module_scopes)
-    checked := sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-    module_scopes.location_function = previous_location
-    checked
+    sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
 // A body check on a compiler thread. A function that declares generic
 // parameters of its own, or a method its owner gives some (`generic_params`,
 // SemaMethodInput.generic_params), checks as the module check does
-// (sema_function_check_registered): a check reads those parameters from the
-// environment, so it runs on this job's own copy of the shared environment
-// with them set. The copy shares the environment's rows until the check sets
-// its generic parameters and name. Any other body reads the shared environment
-// as it is (sema_function_check_registered_shared).
+// (sema_function_check_registered_with_generics). Any other body reads the
+// shared environment as it is (sema_function_check_registered_shared).
 sema_function_check_registered_on_thread: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
-    if generic_params.len() == 0 && !sema_function_registered_declares_generics(job, module_index, memory_plan, memory_position, program) {
-        return sema_function_check_registered_shared(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-    }
-    job_environment := environment.copy()
-    job_environment.generic_params = generic_params.copy()
     // copy: `previous_location` restores module_scopes.location_function after this function's
     // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: module_scopes.location_function.copy()
-    sema_function_check_registered_location(job, module_index, memory_plan, memory_position, job_environment, program, module_scopes)
-    checked: sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    checked: if generic_params.len() == 0 && !sema_function_registered_declares_generics(job, module_index, memory_plan, memory_position, program) -> sema_function_check_registered_shared(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references) else -> sema_function_check_registered_with_generics(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, generic_params, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     module_scopes.location_function = previous_location
     checked
+}
+
+// A thread's check of a body with generic parameters
+// (sema_function_check_registered_on_thread): a check reads those parameters
+// from the environment, so it runs on this job's own environment with them
+// set, which shares the shared environment's rows until the check sets its
+// generic parameters and name.
+sema_function_check_registered_with_generics: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    job_environment := environment
+    job_environment.generic_params = generic_params
+    sema_function_check_registered_location(job, module_index, memory_plan, memory_position, job_environment, program, module_scopes)
+    sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
 // Whether the function `job` checks declares generic parameters of its own:
