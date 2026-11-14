@@ -634,13 +634,32 @@ record_reader_failure: fn(problem: String) -> RecordReaderResult Never! {
 // not decoded until asked for.
 record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
     if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
+    if !record_has_magic(bytes) -> return record_reader_failure("record magic is not `JETR`")
     body_end: bytes.len() - RECORD_CHECKSUM_BYTES
-    if (Int{bytes[0]}) != 74 || (Int{bytes[1]}) != 69 || (Int{bytes[2]}) != 84 || (Int{bytes[3]}) != 82 {
-        return record_reader_failure("record magic is not `JETR`")
-    }
+    if sha256_bytes(bytes[0..<body_end]) != bytes.slice(body_end, bytes.len()) -> return record_reader_failure("record checksum does not match its bytes")
+    record_index(bytes)
+}
+
+// Open bytes whose integrity something else already vouches for, such as a
+// part of the running executable, whose bytes are the toolchain's identity:
+// the framing is verified and every section indexed, as `record_open` does,
+// but the checksum is not recomputed, so opening costs the index, not a hash
+// of every byte.
+record_open_trusted: fn(bytes: [U8]) -> RecordReaderResult Never! {
+    if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
+    if !record_has_magic(bytes) -> return record_reader_failure("record magic is not `JETR`")
+    record_index(bytes)
+}
+
+record_has_magic: fn(bytes: [U8]) -> Bool Never! {
+    (Int{bytes[0]}) == 74 && (Int{bytes[1]}) == 69 && (Int{bytes[2]}) == 84 && (Int{bytes[3]}) == 82
+}
+
+// The framing of a record already checked for length and magic: the format,
+// schema, string table and the bounds of every element.
+record_index: fn(bytes: [U8]) -> RecordReaderResult Never! {
+    body_end: bytes.len() - RECORD_CHECKSUM_BYTES
     checksum: bytes.slice(body_end, bytes.len())
-    body: bytes[0..<body_end]
-    if sha256_bytes(body) != checksum -> return record_reader_failure("record checksum does not match its bytes")
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
     format: record_read_uvarint(bytes, cursor)
     if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
@@ -687,10 +706,20 @@ record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
 // Open and require `schema`: the checksum and framing are verified before the
 // schema is compared; element payloads still decode on demand.
 record_open_schema: fn(bytes: [U8], schema: String) -> RecordReaderResult Never! {
-    opened: record_open(bytes)
-    reader: opened.reader ?? return opened
-    if reader.schema != schema -> return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")
-    opened
+    record_schema_check(record_open(bytes), schema)
+}
+
+// `record_open_trusted`, then require `schema`.
+record_open_schema_trusted: fn(bytes: [U8], schema: String) -> RecordReaderResult Never! {
+    record_schema_check(record_open_trusted(bytes), schema)
+}
+
+record_schema_check: fn(opened: &&RecordReaderResult, schema: String) -> RecordReaderResult Never! {
+    result := opened.move()
+    if result.reader == .Val(reader) {
+        if reader.schema != schema -> return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")
+    }
+    result
 }
 
 record_section_index: fn(reader: RecordReader, id: Int) -> Int? Never! {

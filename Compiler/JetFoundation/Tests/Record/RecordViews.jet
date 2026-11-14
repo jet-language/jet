@@ -2,7 +2,7 @@
 // debugging JSON rendering of the canonical record codec.
 use jet_foundation.[
     RecordField, RecordSection, RecordValue, record_digest, record_digest_hex, record_element,
-    record_elements, record_encode, record_json, record_open_schema, record_parse_digest_hex,
+    record_elements, record_encode, record_json, record_open_schema, record_open_schema_trusted, record_parse_digest_hex,
     record_value_as_bool, record_value_as_digest, record_value_as_int, record_value_as_list,
     record_value_as_optional_str, record_value_as_str, record_value_as_usize, record_value_field,
     record_value_is_null, record_value_list_of_str, record_value_optional_str, record_value_str_list,
@@ -62,6 +62,20 @@ record_views_test_sample: fn() -> [RecordSection] Never! {
     loop _ in 0..<32 -> upper = "{upper}AB"
     assert_eq(record_parse_digest_hex(upper), [U8]?{None})
     assert_eq(record_parse_digest_hex("00"), [U8]?{None})
+}
+
+#Test("a trusted open skips the checksum but not the framing") {
+    encoded: record_encode("jet.test/v1", record_views_test_sample())
+    bytes := encoded.bytes ?? panic("encodes: {encoded.problem ?? ""}")
+    last: bytes.len() - 1
+    bytes[last] = wrapping(U8{Int{bytes[last]} + 1})
+    assert_eq(record_open_schema(bytes, "jet.test/v1").problem, Val("record checksum does not match its bytes"))
+    reader: record_open_schema_trusted(bytes, "jet.test/v1").reader ?? panic("opens trusted")
+    element: record_element(reader, 7, 0).value ?? panic("element")
+    name: record_value_field(element, "name").value ?? panic("name field")
+    assert_eq(record_value_as_str(name).value, Val("core.text"))
+    assert_eq(record_open_schema_trusted(bytes, "jet.other/v1").problem, Val("record schema is `jet.test/v1`, expected `jet.other/v1`"))
+    assert_eq(record_open_schema_trusted(bytes[0..<3].copy(), "jet.test/v1").problem, Val("record is truncated"))
 }
 
 #Test("record JSON renders the decoded tree") {
