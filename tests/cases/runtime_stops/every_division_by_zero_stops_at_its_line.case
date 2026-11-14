@@ -1,0 +1,64 @@
+# Exact `/`, floor `/%` and remainder `%` by a zero divisor all give the
+# same E3010 "divided by zero" stop at the division's own file and line on
+# o0, o1 and o2. None reports line 0, quotes a source line, or uses the
+# retired "invalid exact quotient" wording. A written zero divisor passes
+# `jet check` and stops at its line once the lines before it have run.
+fixture: fixtures/every_division_by_zero_stops_at_its_line
+env: NO_COLOR=1
+step exact_o0: jet run -O0 exact.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> exact.jet:7" # the division's line
+stderr: !~ "invalid exact quotient" # the retired wording
+stderr: !~ "exact.jet:0" # never line 0
+stderr: !~ " | " # no quoted source line
+step exact_o1: jet run -O1 exact.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> exact.jet:7" # the division's line
+stderr: !~ "invalid exact quotient" # the retired wording
+step exact_o2: jet run -O2 exact.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> exact.jet:7" # the division's line
+stderr: !~ "invalid exact quotient" # the retired wording
+step floor_o0: jet run -O0 floor.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> floor.jet:6" # the division's line
+stderr: !~ " | " # no quoted source line
+step floor_o1: jet run -O1 floor.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> floor.jet:6" # the division's line
+step floor_o2: jet run -O2 floor.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> floor.jet:6" # the division's line
+step rem_o0: jet run -O0 rem.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> rem.jet:6" # the division's line
+stderr: !~ " | " # no quoted source line
+step rem_o1: jet run -O1 rem.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> rem.jet:6" # the division's line
+step rem_o2: jet run -O2 rem.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> rem.jet:6" # the division's line
+step constant_check: jet check constant.jet
+exit: 0
+step constant_o0: jet run -O0 constant.jet
+exit: 70
+stdout: ~ "start" # the line before the division ran
+stderr: ~ "Stop [E3010]: `divided by zero`" # the shared stop
+stderr: ~ "--> constant.jet:5" # the division's line
+step constant_o2: jet run -O2 constant.jet
+exit: 70
+stdout: ~ "start" # the line before the division ran
+stderr: ~ "--> constant.jet:5" # the division's line
