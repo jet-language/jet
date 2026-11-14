@@ -1,0 +1,47 @@
+package: {
+    name: "choices_one_app"
+    authority: { allow: [Net] }
+}
+
+use {
+    app
+    web: core.web
+}
+
+Board: struct {
+    name: String
+
+    // A signed-in caller reaches `move_card`, which records the move.
+    #App.SignedIn
+    move_card: fn(self, id: Int) -> Int {
+        self.audit(id) + 1
+    }
+
+    // No endpoint marker: `audit` is server-only.
+    audit: fn(self, id: Int) -> Int {
+        id
+    }
+}
+
+// `view` is pinned to the client (JS), and nothing else places `badge`, so
+// its JS caller takes it into JS.
+#Target(JS)
+view: fn() -> Int {
+    badge()
+}
+
+badge: fn() -> Int {
+    2
+}
+
+// `budget` reads two context fields, `deadline` first.
+budget: fn() -> Int {
+    left: context.deadline ?? 0
+    left + context.thread
+}
+
+run: fn() {
+    mux: web.app()
+    mux.mount(Board{name: "board"})
+    print("{budget()}")
+}
