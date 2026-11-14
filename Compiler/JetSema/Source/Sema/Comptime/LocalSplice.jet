@@ -1,7 +1,9 @@
 // A body comptime pass whose landed sites are all local values
-// (LocalValues.jet) changes only the bodies that hold them: a binding checks
-// its initializer in full before its value replaces the call, so the facts
-// that check records are the same with the value as without it. Instead of
+// (LocalValues.jet) or explicit `name: #run value` locals
+// (sema_stmt_check_prepared_binding) changes only the bodies that hold them:
+// a binding checks its initializer in full before its value replaces the
+// call, and the name keeps its type, so the facts that check records are
+// the same with the value as without it. Instead of
 // finalizing the whole program again (sema_finalize_graph), the pass checks
 // only the owner functions again, the way a Core demand wave checks named
 // bodies (graph.core_wave_rows), once with the values the finalized result
@@ -45,7 +47,8 @@
 // whole-program pass after the body pass (failure solve and recheck,
 // effects, taint, Core usage, names) reads what it read in the finalization,
 // so its rows stand, and the stamps it put on the owners carry over. When any
-// of this fails, or a site is not a local value, the caller finalizes again.
+// of this fails, a site is neither kind, or an explicit local got a failure
+// (sema_local_splice_binding_failed), the caller finalizes again.
 //
 // Run before the whole-program half of a finalization (sema_local_value_land),
 // the splice lands a pass in the modules of its body half, and the
@@ -551,15 +554,30 @@ SemaLocalValueSplice: struct {
     valued: [String:Bool]
 }
 
-// The `module\nkey` of every site of `landed`; None when one is not a local
-// value.
+// The `module\nkey` of every site of `landed`; None when one is neither a
+// local value nor an explicit `name: #run value` local (local_binding).
 sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> [String:Bool]? Never! {
     keys := [String:Bool]{}
     loop source in landed {
-        if !source.local_value -> return None
+        if !source.local_value && !source.local_binding -> return None
         keys["{source.module_identity.id}\n{source.key}"] = true
     }
     Val(keys)
+}
+
+// Whether an explicit `name: #run value` local of `landed` got a failure in
+// `values`. Its report stops the compile, and only a local value's failure
+// keeps its initializer as run-time code, so its pass finalizes again.
+sema_local_splice_binding_failed: fn(landed: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) -> Bool Never! {
+    bindings := [String:Bool]{}
+    loop source in landed {
+        if source.local_binding -> bindings["{source.module_identity.id}\n{source.key}"] = true
+    }
+    if bindings.len() == 0 -> return false
+    loop value in values {
+        if bindings.get("{value.module_identity.id}\n{value.key}") != None && sema_comptime_local_value_reason(value.value) != None -> return true
+    }
+    false
 }
 
 // Whether a value of `values` at a site of `landed` (by `module\nkey`) holds
@@ -602,7 +620,7 @@ sema_local_value_splice: fn(
     pass_diagnostics := [Diagnostic]{}
     pass_complete: sema_comptime_function_diagnostics(comptime_functions, pass_diagnostics)
     if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics) != sema_local_splice_kept_diagnostics(pass_diagnostics) -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
-    if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) || sema_local_splice_binding_failed(landed, values) -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     splice := sema_local_splice_owners(graph, trail, finalized.modules, landed_keys, SemaLocalSpliceInto.Finalized, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
     if splice.spliced -> sema_local_splice_unlanded(finalized.comptime_body_sources, splice.valued)
     splice
@@ -652,6 +670,10 @@ sema_local_value_land: fn(
     landed_keys := sema_local_splice_landed_keys(landed) ?? return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     if sema_local_splice_holds_host_value(values, landed_keys) {
         sema_local_splice_refused(trace_sink, "host_value", landed_keys.len())
+        return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    }
+    if sema_local_splice_binding_failed(landed, values) {
+        sema_local_splice_refused(trace_sink, "binding_failed", landed_keys.len())
         return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     }
     sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)

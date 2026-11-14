@@ -569,7 +569,8 @@ JetDriverLanding: struct {
 // the next round (`demand_round`), which the full recheck gives them too, so
 // they may name any Core body as well. A pass that cannot land cleanly (an
 // error other than a failure obligation or an incomplete check so far, a
-// site that is not a local value or that an earlier pass already took, a run
+// site that is neither a local value nor an explicit `name: #run value`
+// local (jet_driver_local_sources_only) or that an earlier pass already took, a run
 // that reports anything, stops, does not complete or adds no value, or a
 // splice that does not hold) is dropped, and the body passes after
 // finalization (jet_driver_orchestrate_comptime_bodies) take its sites as
@@ -669,10 +670,11 @@ jet_driver_local_values_open: fn(bodies: SemaFinalizeBodies, stage: SemaComptime
     sema_comptime_function_diagnostics(functions, function_diagnostics) && !sema_local_values_blocked(function_diagnostics)
 }
 
-// Whether every source of `sources` is a local value.
+// Whether every source of `sources` is a local value or an explicit
+// `name: #run value` local (SemaComptimeItemSource.local_binding).
 jet_driver_local_sources_only: fn(sources: [SemaComptimeItemSource]) -> Bool Never! {
     loop source in sources {
-        if !source.local_value -> return false
+        if !source.local_value && !source.local_binding -> return false
     }
     true
 }

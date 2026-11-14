@@ -1,0 +1,18 @@
+# Card #6759 c14: an explicit `name: #run value` local in a function body
+# lands in the body that holds it (JetSema Comptime/LocalSplice.jet), as an
+# implicit local value does, instead of checking the whole program again
+# after finalization. Until its value lands, the name reads as a run-time
+# local of the initializer's type, so the rest of the body checks in full.
+# Under JET_RECHECK_VERIFY=1 the compile also checks the whole program again
+# and stops on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "fact: fn(n: Int) -> Int {\n    if n <= 1 -> return 1\n    n * fact(n - 1)\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    out := \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nshout: fn(text: String) -> String {\n    \"{text}!\"\n}\n\nrun: fn() {\n    big: #run fact(10)\n    word: #run repeat(\"ab\", 3)\n    print(\"{big} {big + 1} {shout(word)} {shout(word)}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "3628800 3628801 ababab! ababab!\n"
+stderr: ~ "# sema.local_values_spliced = " # `big` and `word` land in `run`
+stderr: !~ "# sema.local_values_refused" # no pass falls back to the full recheck
+stderr: !~ "> comptime.body.recheck" # the program is not checked again after finalization
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

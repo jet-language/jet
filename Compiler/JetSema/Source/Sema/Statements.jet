@@ -6247,6 +6247,11 @@ sema_stmt_is_path_op: fn(operation: THandleOp, normalize: Bool) -> Bool Never! {
 // as a fact read on a local, binds at once; any other value is staged through
 // the body comptime evaluator and binds when the owner body is checked again.
 // The name then reads as that value and the binding emits no runtime code.
+// Until then the name is declared with the initializer's checked type, so
+// the rest of the body checks in full and records what it records with the
+// value, except for the reads of the name: the staged local lands in its
+// owner body like a local value (Comptime/LocalSplice.jet) instead of
+// finalizing the program again.
 sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     fact_start: context.call_facts.len()
     scopes.comptime_execution_depth += 1
@@ -6265,17 +6270,23 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
     ty := init.ty
     init_span: expr_span(binding.init)
     if value == None {
-        staged: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), init_span, binding.name_span)
-        if staged == .Val(body_value) {
-            value = Val(body_value.value)
-            ty = body_value.ty
-        } else {
-            _ := sema_comptime_body_capture(context, environment, program, scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
-            sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, context)
+        body_value: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), init_span, binding.name_span) ?? {
+            sema_comptime_body_capture_binding(context, environment, scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
+            _ := sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, state, context, diagnostics)
             return None
         }
+        value = Val(body_value.value)
+        ty = body_value.ty
     }
     known: value ?? return None
+    if !sema_stmt_declare_comptime_local(binding, ty, Val(known), environment, program, scopes, state, context, diagnostics) -> return None
+    sema_origin_prepared_projection(binding.init, ty, known, context)
+    Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
+}
+
+// Declares the local of `name: #run value` with type `ty`, holding `known`
+// when its value is known; false when the name is taken (reported).
+sema_stmt_declare_comptime_local: fn(binding: Binding, ty: Type, known: TComptimeValue?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     owner := sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, binding.name)
@@ -6283,17 +6294,16 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
     symbol := Symbol{id: id, kind: SymbolKind.Local, name: binding.name, module_identity: environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(ty), visibility: 0}
     if !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) {
         diagnostics.push(sema_already_defined(binding.name, binding.name_span))
-        return None
+        return false
     }
-    if binding.name != "_" {
+    if binding.name != "_" && known == .Val(value) {
         last: scopes.bindings.len() - 1
         sema_scope_note_binding_edit(scopes, last)
-        scopes.bindings[last].prepared = Val(known)
+        scopes.bindings[last].prepared = Val(value)
     }
     sema_ownership_declare_binding(state, symbol, key, false)
     sema_stmt_track_origin(binding, environment, program, scopes)
-    sema_origin_prepared_projection(binding.init, ty, known, context)
-    Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
+    true
 }
 
 // A compile-time site whose calls (from `fact_start` on) reach `core.net`

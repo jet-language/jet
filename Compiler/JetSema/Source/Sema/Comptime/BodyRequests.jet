@@ -255,7 +255,22 @@ sema_comptime_body_capture: fn(
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodySource Never! {
-    sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false)
+    sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, false)
+}
+
+// An explicit local `name: #run value` whose value is not known yet, staged
+// to be computed while compiling; its failures are reported.
+sema_comptime_body_capture_binding: fn(
+    context: &SemaCheckContext,
+    environment: SemaScopeEnvironment,
+    scopes: SemaScopeTable,
+    name: String,
+    expression: Expr,
+    expected_type: Type,
+    source_span: Span,
+    site_span: Span,
+) Never! {
+    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, true)
 }
 
 // An immutable local `name: value` that calls code, staged to be computed
@@ -270,7 +285,7 @@ sema_comptime_body_capture_local: fn(
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, true)
+    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, true, false)
 }
 
 sema_comptime_body_capture_site: fn(
@@ -283,6 +298,7 @@ sema_comptime_body_capture_site: fn(
     source_span: Span,
     site_span: Span,
     local_value: Bool,
+    local_binding: Bool,
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
@@ -305,6 +321,7 @@ sema_comptime_body_capture_site: fn(
         impure: sema_scope_inside_impure(scopes),
         runtime_locals: sema_comptime_body_runtime_locals(scopes),
         local_value: local_value,
+        local_binding: local_binding,
     }
     sema_comptime_body_source_append(context, source)
     source
@@ -381,6 +398,7 @@ sema_comptime_body_item_source: fn(source: SemaComptimeBodySource) -> SemaCompti
         impure: source.impure,
         runtime_locals: source.runtime_locals,
         local_value: source.local_value,
+        local_binding: source.local_binding,
     }
 }
 
