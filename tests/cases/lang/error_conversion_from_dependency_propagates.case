@@ -1,0 +1,11 @@
+# An `impl ParseError -> AppError` declared in package logic applies in every
+# package that depends on logic: an implicit propagation of logic.parse into a
+# `logic.AppError!` function converts through it, in a named function and
+# inside a closure, as it does inside logic itself. seed-b14 gave E2404
+# ErrorNotPropagatable here (#6819 c7).
+fixture: error_conversion_from_dependency_propagates.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: app
+exit: 0
+stdout: = "4\n4\napp: empty\n"

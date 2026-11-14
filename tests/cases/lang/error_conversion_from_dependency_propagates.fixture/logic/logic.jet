@@ -1,0 +1,18 @@
+#Error
+ParseError: struct {
+    text: String
+    impl Display { display: fn(self) -> String { "parse: {self.text}" } }
+}
+
+#Error
+AppError: struct {
+    message: String
+    impl Display { display: fn(self) -> String { "app: {self.message}" } }
+}
+
+impl ParseError -> AppError { AppError{message: self.text} }
+
+parse: fn(text: String) -> Int ParseError! {
+    if text == "" -> return Err(ParseError{text: "empty"})
+    Ok(text.len())
+}

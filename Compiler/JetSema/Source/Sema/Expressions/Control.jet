@@ -595,7 +595,11 @@ sema_failure_declared_conversion: fn(source: Type, target: Type, environment: Se
     if sema_expr_unwrap_tag(source) == .Apply(applied, _) -> head = Val(sema_error_conversion_leaf(applied))
     instance: head != None
     name: sema_failure_declared_conversion_name(head ?? sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
-    index: sema_scope_resolve_index(scopes, name) ?? return if instance -> None else -> sema_failure_namespace_conversion(name, environment, program)
+    index: sema_scope_resolve_index(scopes, name) ?? {
+        if instance -> return None
+        if sema_failure_namespace_conversion(name, environment, program) == .Val(key) -> return Val(key)
+        return sema_failure_dependency_conversion(name, source, target, environment, program)
+    }
     if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
     if instance && !sema_failure_conversion_takes_instance(sema_scope_binding_symbol(environment, scopes, index).ty) -> return None
     Val(scopes.bindings[index].key.copy())
@@ -619,6 +623,28 @@ sema_failure_namespace_conversion: fn(name: String, environment: SemaScopeEnviro
             if module_row.package_identity != environment.package_identity -> next
             loop function in module_row.functions {
                 if function.symbol.name == name -> return Val(symbol_table_key(graph.symbols, function.symbol.id))
+            }
+        }
+    }
+    None
+}
+
+// A conversion declared in a package this one depends on: `impl A -> B`
+// lives with A or B, so it is found in the package that declares either
+// side and applies here as it does there.
+sema_failure_dependency_conversion: fn(name: String, source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    if module_is_core(environment.module_identity) -> return None
+    if program.registration_graph == .Val(graph) {
+        sides: [Type]{sema_expr_unwrap_tag(source), sema_expr_unwrap_tag(target)}
+        loop side in sides {
+            row: sema_type_resolve_nominal_row(graph, side, environment.module_identity) ?? next
+            package: graph.modules[row.module_index].package_identity
+            if package == environment.package_identity -> next
+            loop module_row in graph.modules {
+                if module_row.package_identity != package -> next
+                loop function in module_row.functions {
+                    if function.symbol.name == name -> return Val(symbol_table_key(graph.symbols, function.symbol.id))
+                }
             }
         }
     }
