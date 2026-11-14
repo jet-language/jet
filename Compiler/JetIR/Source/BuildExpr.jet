@@ -486,7 +486,12 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if local.place_borrow && ir_text_piece(m, p, b, local, init, span) {
                 return
             }
+            // A place-borrowing `place ?? leave` lends its payload
+            // (ir_or_fallback): the value is the payload where the place
+            // holds it, not fresh, and binds below as any place does.
+            if local.place_borrow && !ir_masking(b) && ir_body_node(p, b, init).kind == .OrFallback(operand, _, _) -> b.or_lend = operand
             value: ir_expr(m, p, b, init)
+            b.or_lend = -1
             if ir_failed(b) {
                 return
             }
@@ -497,10 +502,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // (TLocal.place_borrow) is read in place: the binding aliases its
             // value like a read pin and never owns it, so every use that hands
             // the value on copies it (ir_own). Only for a value that copies as
-            // a share or a clone and never closes. A text piece's mark that
+            // a share or a clone and never closes. A string view's mark that
             // ir_text_piece does not build (a slice) is not a place: its
             // value is built as an owned copy.
-            piece: let_ty == .StrView || ir_body_node(p, b, init).kind == .OrFallback(_, _, _)
+            piece: let_ty == .StrView
             if local.place_borrow && !piece && !b.fresh[value] && ir_place_borrow_type(m, p, b, value, span) {
                 symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
                 b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
@@ -6841,7 +6846,10 @@ ir_failure_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_
 // the storage address of either view and is read as a view of it; with a
 // plain fallback value the result takes a copy of the Ok. A narrowing
 // conversion's Result whose error the fallback does not read is never built
-// (ir_try_from_or).
+// (ir_try_from_or). For a place-borrowing Let's `place ?? leave` (JetSema
+// PlaceBorrows.jet; IRBuilder.or_lend names its operand) a payload the held
+// carrier keeps is the result itself: no copy, and not fresh, so the binding
+// reads it in place.
 ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
     value_ty: ir_ty(p, b, value)
     if ir_body_node(p, b, value).kind == .NumericMethod(receiver, .TryFrom(_)) && !ir_fallback_reads_error(p, b, fallback, ambient) {
@@ -6918,6 +6926,8 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     // fallback moves (`x ?? return keep(owner.move())`) still owns its value
     // on the present path, where ir_meet_paths reconciles the two.
     before: ir_own_states(b, b.bindings.len())
+    lends: b.or_lend == value && !view && !view_box && !owned_subject && !b.fresh[subject] && b.moving != subject && result >= 0 && ambient == None && ir_fallback_leaves(p, b, fallback)
+    lent := false
     ir_open_if(b.f, test, b.line)
     if view {
         address: ir_view_result_address(m, p, b, subject)
@@ -6925,18 +6935,25 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         ir_release(m, b, subject)
     } else {
         payload: if view_box -> ir_view_result_payload(m, p, b, subject, payload_row) else if owned_subject -> ir_box_take(m, p, b, subject, offset, payload_row) else if is_result -> ir_load_at(m, b, subject, offset, payload_row) else -> ir_option_payload(m, b, subject, payload_row)
-        if result >= 0 && payload >= 0 {
-            target_row: b.f.slot_type[result]
-            adapted: ir_adapt(m, p, b, payload, target_row, span)
-            if ir_failed(b) -> return -1
-            ir_store(m, p, b, result, adapted)
-            // A held carrier lends its payload: the result is that part of
-            // the carrier, so a move out of it (a binding) moves the part out
-            // of the carrier's closing variable (ir_close_disarm).
-            if !owned_subject && !view_box {
-                ir_close_note(m, p, b, result, subject, IRPartStep{selector: if is_result -> 1 else -> -1, offset: offset})
+        if {
+            lends && payload >= 0 && b.f.slot_type[payload] == b.f.slot_type[result] && ir_place_borrow_type(m, p, b, payload, span) -> {
+                ir_emit(b.f, IROp.Move, result, payload, -1, -1, b.line)
+                lent = true
             }
-        } else { ir_release(m, b, payload) }
+            result >= 0 && payload >= 0 -> {
+                target_row: b.f.slot_type[result]
+                adapted: ir_adapt(m, p, b, payload, target_row, span)
+                if ir_failed(b) -> return -1
+                ir_store(m, p, b, result, adapted)
+                // A held carrier lends its payload: the result is that part of
+                // the carrier, so a move out of it (a binding) moves the part out
+                // of the carrier's closing variable (ir_close_disarm).
+                if !owned_subject && !view_box {
+                    ir_close_note(m, p, b, result, subject, IRPartStep{selector: if is_result -> 1 else -> -1, offset: offset})
+                }
+            }
+            else -> ir_release(m, b, payload)
+        }
     }
     then_states: ir_own_states(b, before.len())
     ir_set_own_states(b, before)
@@ -6975,7 +6992,7 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         if viewed >= 0 -> b.fresh[viewed] = false
         return viewed
     }
-    if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
+    if result >= 0 -> b.fresh[result] = !lent && ir_has_drop(m, b, result)
     result
 }
 

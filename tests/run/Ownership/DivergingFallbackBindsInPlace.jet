@@ -1,0 +1,44 @@
+// A read-only binding of a place that leaves on a miss
+// (`inner: holder.inner ?? return`, `?? next`, `?? panic`) reads the payload
+// where the place holds it: the binding copies nothing, a use that hands it
+// on reads it as any place, and the place stays whole afterwards.
+Inner: struct {
+    rows: [Int]
+    name: String
+}
+
+Holder: struct {
+    inner: Inner?
+    label: String?
+    count: Int?
+}
+
+size: fn(inner: Inner) -> Int { inner.rows.len() * 10 + inner.name.len() }
+
+measure: fn(holder: Holder) -> Int {
+    inner: holder.inner ?? return -1
+    label: holder.label ?? return -2
+    count: holder.count ?? return -3
+    size(inner) + label.len() * 100 + count * 1000
+}
+
+first_len: fn(holders: [Holder]) -> Int {
+    loop holder in holders {
+        inner: holder.inner ?? next
+        return inner.name.len()
+    }
+    -1
+}
+
+run: fn() {
+    full: Holder{inner: Val(Inner{rows: [Int]{1, 2, 3}, name: "ab"}), label: Val("xyz"), count: Val(4)}
+    bare: Holder{inner: None, label: Val("q"), count: Val(1)}
+    unlabeled: Holder{inner: Val(Inner{rows: [Int]{}, name: "c"}), label: None, count: None}
+    total := 0
+    loop _ in 0..<3 -> total += measure(full)
+    print("measure {measure(full)} {measure(bare)} {measure(unlabeled)} total {total}")
+    holders: [Holder]{Holder{inner: None, label: None, count: None}, Holder{inner: Val(Inner{rows: [Int]{5}, name: "de"}), label: None, count: None}}
+    print("first {first_len(holders)}")
+    inner: full.inner ?? panic("full has an inner")
+    print("after {inner.name} {inner.rows.len()} {size(inner)} {full.label ?? ""}")
+}

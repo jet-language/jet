@@ -20,6 +20,11 @@
 // binding lives; lowering builds the pieces as frame views without a copy
 // (JetIR ir_text_piece) and every use that hands one on copies it.
 //
+// So does the payload of a place that diverges on a miss
+// (`graph: program.graph ?? return`): an Option or Result read in place
+// whose fallback leaves, with no error binding. Lowering reads the payload
+// where the place holds it (JetIR ir_or_fallback) instead of copying it.
+//
 // A loop variable is a root for the Lets of its body: it holds one item
 // for a whole pass, and every Let of the body ends with the pass.
 //
@@ -96,7 +101,7 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
                     root: if {
                         !symbol_is_none(piece.key) -> piece
                         sema_place_borrow_place(init, false, arena) -> sema_place_borrow_root(init, arena)
-                        else -> SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
+                        else -> sema_place_borrow_payload_root(init, arena)
                     }
                     if !symbol_is_none(root.key) && table.roots.get(root.key.id) != None && table.blocked.get(root.key.id) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
                 }
@@ -155,6 +160,28 @@ sema_place_borrow_piece_root: fn(init: TExpr, let_ty: TLetTy, arena: BodyTree) -
         }
     }
     none
+}
+
+// The root of `place ?? leave`: an Option or Result read in place, whose
+// fallback leaves (not a value) and binds no error. The payload is part of
+// the place, so the binding borrows it as it would the place (JetIR
+// ir_or_fallback lends it); a none id for any other initializer.
+sema_place_borrow_payload_root: fn(init: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
+    if init.kind == .Flat(index) -> return sema_place_borrow_row_payload_root(arena, index)
+    if init.kind == .OrFallback(value, fallback, ambient) {
+        if fallback == .Value(_) || ambient != None -> return SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
+        if sema_place_borrow_place(value, false, arena) -> return sema_place_borrow_root(value, arena)
+    }
+    SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
+}
+
+// sema_place_borrow_payload_root of node row `index` of `tree`.
+sema_place_borrow_row_payload_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
+    if tree.nodes[index - tree.node_base].kind == .OrFallback(value, fallback, ambient) {
+        if fallback == .Value(_) || ambient != None -> return SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
+        if sema_place_borrow_row_place(tree, value, false) -> return sema_place_borrow_row_root(tree, value)
+    }
+    SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
 }
 
 // sema_place_borrow_piece_root of node row `index` of `tree`.
