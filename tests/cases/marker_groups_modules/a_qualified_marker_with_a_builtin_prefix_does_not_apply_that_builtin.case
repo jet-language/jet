@@ -1,6 +1,7 @@
 # tests/marker_groups_modules.rs::a_qualified_marker_with_a_builtin_prefix_does_not_apply_that_builtin at tests/marker_groups_modules.rs:288; hand-port
 # Claim: a qualified marker whose import alias is a builtin marker name (Inline, Test, HTML, PubFile, Policy) is rejected with E0357 (tests/marker_groups_modules.rs:289-306)
-# Claim: jet fmt keeps the qualified spelling '#ALIAS.LibraryNote' (tests/marker_groups_modules.rs:293-299, parser projection; formatter stdout asserted instead)
+# Claim: jet fmt keeps the qualified spelling '#ALIAS.LibraryNote' (tests/marker_groups_modules.rs:293-299, parser projection; jet fmt rewrites in place, so the file is asserted)
+# Claim: under a lowercase alias the qualified marker names the library's (public by default) LibraryNote, so the file checks clean and no builtin applies: `#Test.LibraryNote` is no test (no L2901) and `#HTML.LibraryNote` no file rule
 # Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/Modules/MarkerGroups uses no pub
 # Not ported: parser projections is_inline false / is_job / pub_file / html_path via Parser::parse_for_fmt (tests/marker_groups_modules.rs:293-299) read Rust parser structs
 fixture: a_qualified_marker_with_a_builtin_prefix_does_not_apply_that_builtin.fixture
@@ -29,32 +30,28 @@ exit: 1 # tests/marker_groups_modules.rs:289-306 alias Policy -> E0357
 stderr: ~ "E0357" # tests/marker_groups_modules.rs:289-306 alias Policy -> E0357
 step: jet fmt main.jet
 cwd: a
-exit: 0 # tests/marker_groups_modules.rs:293-299 formatter keeps #Inline.LibraryNote (fmt exit code assumed; check)
-stdout: ~ "#Inline.LibraryNote" # tests/marker_groups_modules.rs:293-299 formatter keeps #Inline.LibraryNote (fmt exit code assumed; check)
+exit: 0 # tests/marker_groups_modules.rs:293-299 formatter keeps #Inline.LibraryNote
+file: a/main.jet ~ "#Inline.LibraryNote" # tests/marker_groups_modules.rs:293-299 formatter keeps #Inline.LibraryNote
 step: jet check main.jet
 cwd: la
-exit: 1 # lowercase alias la: no builtin applied, no E0357 casing error
-stderr: ~ "E0605" # lowercase alias la: no builtin applied, no E0357 casing error
+exit: 0 # lowercase alias la: no builtin applied, no E0357 casing error
 stderr: !~ "E0357" # lowercase alias la: no builtin applied, no E0357 casing error
 step: jet check main.jet
 cwd: lt
-exit: 1 # lowercase alias lt: no builtin applied, no E0357 casing error
-stderr: ~ "E0605" # lowercase alias lt: no builtin applied, no E0357 casing error
+exit: 0 # lowercase alias lt: no builtin applied, no E0357 casing error
 stderr: !~ "E0357" # lowercase alias lt: no builtin applied, no E0357 casing error
+stderr: !~ "L2901" # `#Test.LibraryNote` is not a `#Test` block
 step: jet check main.jet
 cwd: lh
-exit: 1 # lowercase alias lh: no builtin applied, no E0357 casing error
-stderr: ~ "E0605" # lowercase alias lh: no builtin applied, no E0357 casing error
+exit: 0 # lowercase alias lh: no builtin applied, no E0357 casing error
 stderr: !~ "E0357" # lowercase alias lh: no builtin applied, no E0357 casing error
 step: jet check main.jet
 cwd: lpu
-exit: 1 # lowercase alias lpu: no builtin applied, no E0357 casing error
-stderr: ~ "E0605" # lowercase alias lpu: no builtin applied, no E0357 casing error
+exit: 0 # lowercase alias lpu: no builtin applied, no E0357 casing error
 stderr: !~ "E0357" # lowercase alias lpu: no builtin applied, no E0357 casing error
 step: jet check main.jet
 cwd: lpo
-exit: 1 # lowercase alias lpo: no builtin applied, no E0357 casing error
-stderr: ~ "E0605" # lowercase alias lpo: no builtin applied, no E0357 casing error
+exit: 0 # lowercase alias lpo: no builtin applied, no E0357 casing error
 stderr: !~ "E0357" # lowercase alias lpo: no builtin applied, no E0357 casing error
 step: jet fmt main.jet
 cwd: la

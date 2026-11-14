@@ -10,14 +10,16 @@ use {
         expr_span,
     ]
     jet_lexer.[
+        TOKEN_DOT,
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_KW_FN,
     ]
 }
 
+// `#Test.X` is a qualified marker from a module aliased `test`, not a test.
 parser_test_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Test"
+    parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Test" && parser_kind_at(state, 2) != TOKEN_DOT
 }
 
 parser_test_name: fn(value: Expr) -> (name: String?, span: Span) {

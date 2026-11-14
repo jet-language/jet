@@ -1038,6 +1038,8 @@ parser_marked_module_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
 
 // File rules bare
 // `#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]` list of them.
+// A qualified marker (`#HTML.LibraryNote` through `use html: library`) names
+// an imported declaration, never the builtin rule its alias spells.
 // `#Target(Wasm|JS)` attaches only to the `fn` or
 // `module` it heads (the Target row's sites); before any other item it is the
 // file ceiling. `#Target(OS.X)` attaches to the `impl` it heads.
@@ -1045,7 +1047,7 @@ parser_file_directive_ahead: fn(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_HASH -> return false
     if parser_kind_at(state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(state)
     name: parser_lookahead(state, 1)
-    if name.kind != TOKEN_IDENT -> return false
+    if name.kind != TOKEN_IDENT || parser_kind_at(state, 2) == TOKEN_DOT -> return false
     rule: parser_value(state, name)
     if rule == "NoPrelude" || rule == "HTML" -> return true
     if rule != "Target" -> return false
@@ -1097,7 +1099,7 @@ parser_file_marker_group_ahead: fn(state: &JetParserState) -> Bool Never! {
     loop {
         if parser_kind_at(state, offset) == TOKEN_BANG -> offset += 1
         name: parser_lookahead(state, offset)
-        if name.kind != TOKEN_IDENT || !parser_is_file_rule(parser_value(state, name)) -> return false
+        if name.kind != TOKEN_IDENT || parser_kind_at(state, offset + 1) == TOKEN_DOT || !parser_is_file_rule(parser_value(state, name)) -> return false
         if parser_value(state, name) != "Target" || parser_target_selects_file_web_at(state, offset) -> every_entry_fits_function = false
         offset += 1
         if parser_kind_at(state, offset) == TOKEN_LPAREN {

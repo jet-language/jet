@@ -2459,10 +2459,11 @@ jet_cli_owned_flags: fn(raw: [String]) -[FS]> [String] Never! {
     jet_cli_prefix(raw, jet_cli_owned_end(raw))
 }
 
-// `OutputMode::json`: `--json` before `--`, or the `compiler` inspect plane,
-// which is machine output by construction.
+// `OutputMode::json`: `--json` before `--`, or the `inspect compiler` plane,
+// which is machine output by construction. A bare `compiler` is only the
+// moved-command refusal (E2101), which answers as every moved word does.
 jet_cli_wants_json: fn(owned: [String]) -> Bool Never! {
-    json := owned.contains("--json") || (owned.len() > 0 && owned[0] == "compiler")
+    json := owned.contains("--json")
     loop index in 1..<owned.len() {
         if owned[index - 1] == "inspect" && owned[index] == "compiler" -> json = true
     }

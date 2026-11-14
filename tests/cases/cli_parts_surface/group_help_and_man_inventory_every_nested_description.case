@@ -1,5 +1,7 @@
 # tests/cli_parts/surface.rs::group_help_and_man_inventory_every_nested_description at tests/cli_parts/surface.rs:904; hand-port
-# Claim: the man page lists every nested action with its summary; exhaustive group help lists every action (tests/cli_parts/surface.rs:904)
+# Claim: the man page lists every ported nested action with its summary; exhaustive group help lists every action (tests/cli_parts/surface.rs:904)
+# The man page leaves out each form JET_CLI_FORMS marks unported (db migrate, inspect sbom, self update, self exec, os push), while a group's own help page lists its whole family (CLICommands.jet's command model)
+# Group help shows the help-only summaries of the actions whose output carries the effect projection (jet_cli_action_help_summary); man keeps the registry summaries
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
@@ -15,8 +17,7 @@ stdout: ~ ".B registry key" # tests/cli_parts/surface.rs:905-909,937-947 man pag
 stdout: ~ "Manage the package-signing key" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B registry vendor" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Copy dependencies into vendor/" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ ".B db migrate" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ "Create, preview, inspect, apply, resume, and roll back versioned database migrations" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
+stdout: !~ ".B db migrate" # `db` is unported (JET_CLI_FORMS), so man leaves it out
 stdout: ~ ".B inspect types" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Show registered type and operator facts" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B inspect rights" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
@@ -67,8 +68,7 @@ stdout: ~ ".B inspect codemod" # tests/cli_parts/surface.rs:905-909,937-947 man 
 stdout: ~ "Preview or apply code changes" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B inspect audit" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Inspect implicit copies, exercised memory witnesses, or dependencies" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ ".B inspect sbom" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ "Create a software bill of materials" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
+stdout: !~ ".B inspect sbom" # `inspect sbom` is unported (JET_CLI_FORMS), so man leaves it out
 stdout: ~ ".B inspect bind" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Generate Jet bindings from a foreign header" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B inspect logs" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
@@ -83,8 +83,7 @@ stdout: ~ ".B project parts" # tests/cli_parts/surface.rs:905-909,937-947 man pa
 stdout: ~ "List loaded and skipped project modules" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B self toolchain" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Show the Jet version selected for this project" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ ".B self update" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ "Verify or install a signed Jet toolchain release" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
+stdout: !~ ".B self update" # `self update` is unported (JET_CLI_FORMS), so man leaves it out
 stdout: ~ ".B self doctor" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Find and fix toolchain problems" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B self completions" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
@@ -95,8 +94,7 @@ stdout: ~ ".B self devtools" # tests/cli_parts/surface.rs:905-909,937-947 man pa
 stdout: ~ "Run Jet maintenance tools" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B self lsp" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Start the language server" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ ".B self exec" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ "Execute one command in an authority-bound workspace" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
+stdout: !~ ".B self exec" # `self exec` is unported (JET_CLI_FORMS), so man leaves it out
 stdout: ~ ".B env test" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Run environment checks in a clean environment" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B env hook" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
@@ -111,8 +109,7 @@ stdout: ~ ".B cache prune" # tests/cli_parts/surface.rs:905-909,937-947 man page
 stdout: ~ "Prune the artifact store to a target size" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B cache limit" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Set the host-wide artifact store limit" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ ".B os push" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
-stdout: ~ "Deploy one or more Jetos machines" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
+stdout: !~ ".B os push" # `os push` is unported (JET_CLI_FORMS), so man leaves it out
 stdout: ~ ".B os bridge" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ "Convert an existing system configuration to Jet" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
 stdout: ~ ".B os services" # tests/cli_parts/surface.rs:905-909,937-947 man page lists every group action as .B <group> <action> with its summary
@@ -152,19 +149,19 @@ stdout: ~ "Explore code, builds, packages, and bindings" # tests/cli_parts/surfa
 stdout: ~ "types" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Show registered type and operator facts" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "rights" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show required and granted rights" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read required, granted, denied effects, and their authority source" # the help-only summary of inspect rights
 stdout: ~ "claims" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show receipt-backed claims" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read receipt-backed claims and their current status" # the help-only summary of inspect claims
 stdout: ~ "shapes" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show semantic shapes and projections" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read semantic shapes and their checked projections" # the help-only summary of inspect shapes
 stdout: ~ "decisions" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Show compiler decisions and their evidence" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "structure" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Show structure and lifecycle facts" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "build" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show build identity, provenance, and coverage" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read build identity, inputs, and provenance" # the help-only summary of inspect build
 stdout: ~ "gates" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show the complete compile-time gate ledger" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read gates with required, granted, denied effects, and authority" # the help-only summary of inspect gates
 stdout: ~ "memory" # the exhaustive group inspect help lists the memory plane
 stdout: ~ "Show worst-case stack per entry point" # the memory plane's summary in the group help
 stdout: ~ "choices" # the exhaustive group inspect help lists the choices plane
@@ -177,22 +174,22 @@ stdout: ~ "explain-build" # tests/cli_parts/surface.rs:916-933 exhaustive group 
 stdout: ~ "Explain why a target, action, or file is rebuilt" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "compiler" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Read compiler facts as versioned JSON" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "facts --store=schema" # exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "facts --store=<schema|program|run>" # exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Query typed compiler facts by store and kind" # exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "impact" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Show code affected by a symbol" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "provenance" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Read dependency provenance" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Read dependency provenance with required, granted, denied effects, and authority" # the help-only summary of inspect provenance
 stdout: ~ "digest" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Write the one-file LLM surface digest" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "env" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "List typed environment reads in a config surface" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "semindex" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Search the code index" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Search code facts plus required, granted, denied effects, and authority" # the help-only summary of inspect semindex
 stdout: ~ "output" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Inspect one selected Output" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Inspect one Output with required, granted, denied effects, and authority" # the help-only summary of inspect output
 stdout: ~ "expand" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
-stdout: ~ "Show expanded meaning of Jet code (use --json for canonical facts)" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
+stdout: ~ "Show expanded meaning with required, granted, denied effects, and authority" # the help-only summary of inspect expand
 stdout: ~ "schema" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "Inspect saved data schema versions" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary
 stdout: ~ "codemod" # tests/cli_parts/surface.rs:916-933 exhaustive group inspect help lists its summary and every action name and summary

@@ -1821,9 +1821,11 @@ sema_marker_rules_validate_sites: fn(registry: SemaScopeMembersMarkerRegistry, p
     }
 }
 
-// A source-declared marker rule names its legal sites (`sites: [.Type]`).
+// A source-declared marker rule names its legal sites (`sites: [.Type]`). A
+// group has no sites of its own: its members are checked where it expands.
 sema_marker_rules_user_site_error: fn(registry: SemaScopeMembersMarkerRegistry, application: AppliedRuleApplication, site: RuleSite) -> Diagnostic? {
     user_index: sema_marker_rules_user_rule_index(registry, application.marker) ?? return None
+    if registry.marker_rules[user_index].group -> return None
     if registry.marker_rules[user_index].sites.contains(sema_marker_rules_site_name(site)) -> return None
     Val(sema_marker_rules_declared_site_error(application.marker, registry.marker_rules[user_index]))
 }
@@ -1842,11 +1844,15 @@ sema_marker_rules_validate_user_sites: fn(registry: SemaScopeMembersMarkerRegist
 
 // A source-declared rule's arguments bind its declared signature (E0930). A
 // literal argument fails only when its own type contradicts the parameter's
-// declared type; names and calls stay open for ordinary inference.
+// declared type; names and calls stay open for ordinary inference. A group
+// takes no parameters, so any parentheses after its name are E0930.
 sema_marker_rules_user_argument_error: fn(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic? {
     user_index: sema_marker_rules_user_rule_index(registry, marker) ?? return None
     rule: registry.marker_rules[user_index]
-    if rule.group -> return None
+    if rule.group {
+        if marker.args.len() == 0 && marker.span.end <= marker.name_span.end -> return None
+        return Val(sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` is a marker group and takes no arguments", "a group names a fixed stack of markers; it has no parameters for arguments to bind", "write `#{marker.name}` without parentheses"))
+    }
     declared: sema_marker_rules_declared_signature(rule)
     bindings: sema_marker_rules_marker_signature_bindings(marker, declared.signature) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
     loop binding in bindings {
