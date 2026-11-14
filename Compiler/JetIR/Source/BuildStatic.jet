@@ -227,7 +227,9 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
         if !frozen {
             s = IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
             _: ir_static_new(s, size)
-            name_rows_set(m.constant_rows, deferred, 1)
+            // The mark names no data row (-1), so a merge shares no row by
+            // it (BuildMerge.jet ir_merge_prepare).
+            name_rows_set(m.constant_rows, deferred, -1)
         }
         object = ir_static_commit(m, s.move()) + cell
         name_rows_set(m.constant_rows, memo, object)
