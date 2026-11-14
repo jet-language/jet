@@ -301,7 +301,7 @@ Requests carry:
 | `source_id` | Optional project-relative source selected in the Files rail. |
 | `revision` | Source revision from the graph document. |
 | `session_id` | Returned by a running response to continue or stop that session. |
-| `tier` | `native-recorded` (default) records one complete LLDB run of the compiled program, then navigates that history; `native-lldb` keeps one live paused LLDB inferior. Continuations keep the tier. |
+| `tier` | `native-recorded` records one complete LLDB run of the compiled program, then navigates that history; `native-lldb` keeps one live paused LLDB inferior. This jet builds only `native-lldb`, the default until recording lands: `native-recorded` and `jet-dev-replay` are refused `unsupported`, and any other tier `bad_request`. Continuations keep the tier. |
 | `commands` | `step`, `next`, `continue`, `finish`, `locals`, `print`, or `backtrace`. |
 | `breakpoint_spans` | Local source anchors encoded as `start:end`. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |

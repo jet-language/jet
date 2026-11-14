@@ -6,8 +6,9 @@
 // to the package's sources. A failed check keeps the last good graph and puts
 // the session in its error state. The dev loop also applies the source
 // transactions the page posts, one at a time: each candidate text is checked
-// before it replaces the entry. The session ends only when its server stops,
-// or with the process on Ctrl-C.
+// before it replaces the entry. It answers the page's debug requests from its
+// debug sessions too (CanvasDebug.jet). The session ends only when its
+// server stops, or with the process on Ctrl-C.
 use {
     cli_files: core.files
     cli_process: core.process
@@ -97,8 +98,9 @@ jet_cli_dev_canvas_flag_alone: fn(jet_argv: [String], color: Bool) -> JetCLIPlan
 
 // The Canvas session of `jet dev <file> --canvas`: the first check and
 // projection, the listener, then the dev clock (an 80 ms tick that ages the
-// session's clients and applies the transactions taken since the last tick)
-// and the change watch until the server stops.
+// session's clients and answers the transactions and debug requests taken
+// since the last tick) and the change watch until the server stops. The
+// debug sessions end with it.
 jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) -> JetDriverVerbOutput {
     parent: jet_cli_parent(file) ?? "."
     root: jet_cli_manifest_root(parent) ?? parent
@@ -120,6 +122,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
         cli_term.eprint("Canvas: {url}")
     }
     stop: Shared{JetCLIDevWebState{stopped: None}}
+    debugs := jet_cli_canvas_debug_sessions()
     task.group dev_canvas {
         serving: task {
             if bound.serve() == {
@@ -135,6 +138,10 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
             // A transaction's own write is not a change to check again.
             loop {
                 edit: taken.try_receive() ?? break
+                if edit.debug {
+                    jet_cli_canvas_debug_answer(debugs, state, file, source_id, edit)
+                    next
+                }
                 if jet_cli_dev_canvas_transact(state, file, source_id, edit) -> stamp = jet_cli_dev_stamp(root, [String]{})
             }
             ticks += 1
@@ -147,6 +154,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
         }
         serving.join().drop("the Canvas server's stop is reported from its state")
     }
+    debugs.release_all()
     reason: jet_cli_dev_web_stopped(stop) ?? "the Canvas server stopped"
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "the Canvas on http://{address}/ stopped: {reason}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }

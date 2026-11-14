@@ -1,17 +1,16 @@
 # tests/debug.rs::canvas_debug_session_replays_one_source_bound_session
-# Exact production WebHost Canvas requests/subclaims, original source unchanged.
-# PENDING-SAME-HEAD, runtime UNRUN. Core.net client mirrors the existing raw HTTP fixture pattern.
+# Exact production WebHost Canvas requests on the native tier, original source unchanged.
+# Core.net client mirrors the existing raw HTTP fixture pattern.
+requires: tool:lldb
 fixture: canvas_debug_session_replays_one_source_bound_session.fixture
 env: NO_COLOR=1
 step: jet build client/run.jet
 exit: 0
 copy: client/.jet/build/run canvas-client
-spawn canvas: jet dev jet_debug_canvas_live_protocol.jet --canvas --canvas-port 0
+session canvas raw: jet dev jet_debug_canvas_live_protocol.jet --canvas --canvas-port 0
 env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
-stdout: file canvas.stdout
-stderr: file canvas.stderr
-await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms # transport readiness bridge: Source/CmdDevTools.rs:777-783 emits the Canvas URL on configured browser launch failure; retain the ported 60s/50ms gate
-capture: url = text file.after_first("Canvas: ").line(0) canvas.stderr
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
 capture: revision = sha256 file jet_debug_canvas_live_protocol.jet
 capture: original_source = text file jet_debug_canvas_live_protocol.jet
 write: request.json canvas_debug_session_replays_one_source_bound_session.first.json
@@ -22,7 +21,7 @@ env: S1_PATH=/__jet_canvas/debug
 exit: 0
 stdout: ^= "HTTP/1.1 200" # original success vs expect_err projection
 stdout: ~ "\"state\":\"running\"" # original contains predicate
-stdout: ~ "\"tier\":\"jet-dev-replay\"" # original contains predicate
+stdout: ~ "\"tier\":\"native-lldb\"" # Canvas debugs on the native tier only
 stdout: ~ "\"revision\":\"sha256-{cap:revision}\"" # original contains predicate
 stdout: ~ "run()" # original contains predicate
 capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
