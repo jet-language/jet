@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102220,
+    "rev": 102222,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33013,7 +33013,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nFinish D-CONSTGEN1, with the spelling now fixed by D-CONSTGEN2=A: a compile-time `Int` may be a type parameter of an existing type constructor. The declaration is `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-DECL-COLON1=A, D-COMPTIME-WORD1=A), and uses write the plain value, as in `Packet<64>` or `Packet<lanes>` after `lanes: comptime { 64 }`. It is monomorphized like `<T>`.\n\nThis is not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, and no dispatch on comptime results. It is comptime ladder rung R4; the owner chose \"R0-R4 now\".\n\n## Current state\n- The grammar and AST have shipped (#3662, logged 2026-09-28 in `Docs/spec/syntax-decisions.md:7455`; syntax row at `:34`).\n  - Jet: `TypeParam.prep: PrepParam?` in `Compiler/JetAst/Source/AST/Items.jet:447-464`, with the parser at `Compiler/JetParser/Source/Parser/Items.jet:531`.\n  - Rust: `crates/jet-parser/src/Parser/Types.rs:473`.\n  - This supersedes the card's older `<@N: Int>` spelling.\n- Every `prep` parameter is rejected with E0390 until this card lands:\n  - Jet sema: `Compiler/JetSema/Source/Sema/Registration/Items.jet:438-441`;\n  - Rust sema: `crates/jet-sema/src/Sema/Casing.rs:120-128`;\n  - UI fixture: `tests/ui/prep_number_param_unsupported.jet`.\n- There is no substitution, instance identity or layout for number parameters in `Compiler/JetSema` or `Compiler/JetCodegen/Source/Codegen/TypeInstances.jet`.\n- Criteria 1-4 and 9-12 (Syntax entry, log entry, grammars, snapshots) are met for the declaration grammar by #3662. Only the E0390 snapshot changes here.\n\n## Changes\n1. JetSema (`Registration/Items.jet` plus generic substitution):\n   - Replace the E0390 rejection with number-parameter binding. `N` is in scope as a value inside the declaration, including array sizes such as `[U8#N]`.\n   - A use-site argument must be an Int literal or a comptime constant. A runtime value in that slot gets a new registered diagnostic with a UI snapshot.\n   - Instance identity includes the value, so `Packet<64>` and `Packet<32>` are different types.\n2. JetCodegen (`TypeInstances.jet`, `Types.jet`): monomorphize and lay out each instance, with deterministic naming that includes the number.\n3. Mirror the change in the shipped Rust sema, TIR and MIR so the goldens run on the shipped binary. Delete the E0390 path in both compilers and retire the row, or keep E0390 only for a non-Int number type.\n4. Add `Examples/features/generics/const_packet.jet`: a firmware-style `Packet: struct<comptime N: Int>` with literal and comptime arguments, two distinct sizes and a nested use, printing sizes and bytes.\n5. Update `Docs/spec/reference/metaprogramming.md`: S26 is amended narrowly, citing D-CONSTGEN1 and D-CONSTGEN2.\n\n## Proof\n- `jet test Compiler --profile golden generics/const_packet`: identical on O0, O1 and O2.\n- `jet test Compiler --profile ui prep_number_param`: the old E0390 fixture is replaced by a runtime-argument rejection fixture.\n- `jet test Compiler --profile cases generics/`: passes.\n\n## Batch\nbatch-jetc-sema: substitution and identity are the core. Codegen layout lands in the same build.\n\n## Dependencies\nNone real. #3520's naming reconciliation was settled by D-CONSTGEN2=A (#3662 shipped).\n",
       "checkSteps": "\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nAdd the Packet<@N: Int> witness with literal and prepared arguments, distinct sizes and nested use. Exercise AOT, run and interpreter. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.\n\nExact witness: struct Packet<@N: Int> { data: [U8#N] }; lanes :: prep { 64 }; instantiate Packet<64> and Packet<lanes>. Verify equal intended specialization and reject obsolete ordinary-value @ references outside metadata queries or template holes.",
@@ -33022,6 +33022,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met (c18, c20 and c24 by 194d343898 and c2182c976a; c19 04ce9799d2; c1 obsolete, covered by c9)."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -33089,8 +33094,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Jet syntax registry entry present: wave/9b/tree Compiler/JetFoundation/Data/Syntax/Spellings.jet:30 `{ spelling: \"<comptime N: Int>\", meaning: \"compile-time number parameter declaration\", decision: \"D-CONSTGEN2=A\" }` (D-CONSTGEN2 re-spells the D-CONSTGEN1 const-generic parameter)",
-          "at": "2026-10-31T14:21:29.628Z"
+          "evidence": "Obsolete: Syntax.rs no longer exists. The registry is Compiler/JetFoundation/Data/Syntax, and c9 (met with commits) covers its row, the syntax-decisions entry and the grammars for struct<comptime N: Int>.",
+          "at": "2026-11-14T06:09:56.521Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -33175,12 +33181,13 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-14T06:09:07.633Z",
+      "updated": "2026-11-14T06:09:58.298Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 24,
+      "completedAt": "2026-11-14T06:09:58.298Z"
     },
     {
       "id": "c0yfcz0w",
@@ -204799,6 +204806,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:09:58.298Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tsbf3w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T06:09:56.521Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tsbf3w",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T06:09:45.490Z",
       "by": "Main",
