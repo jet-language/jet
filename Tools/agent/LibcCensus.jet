@@ -232,9 +232,9 @@ FAMILIES: [Family]{
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "pathconf fpathconf", variants: "", jet: "", coverage: .Language, note: "a name past the file system's limits fails its own call with a typed IOError"},
     // ---- File descriptors ----
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "close posix_close", variants: "", jet: "core.sys.close_fd", coverage: .Covered, note: "handles close when dropped"},
-    {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "dup dup2 dup3", variants: "", jet: "", coverage: .Gap, note: "no descriptor duplication (child stdio redirection is ProcessSpec's)"},
+    {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "dup dup2 dup3", variants: "", jet: "core.sys.Fd.duplicate", coverage: .Partial, note: "a new close-on-exec descriptor for the same open file; an Fd hides its number, so nothing duplicates onto a chosen number (child stdio redirection is ProcessSpec's)"},
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "pipe pipe2", variants: "", jet: "core.sys.pipe", coverage: .Covered, note: ""},
-    {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "isatty ttyname ttyname_r", variants: "", jet: "", coverage: .Gap, note: "terminal detection is internal to core.term"},
+    {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "isatty ttyname ttyname_r", variants: "", jet: "core.term.StdinHandle.is_tty core.term.Stdout.is_tty core.term.Stderr.is_tty", coverage: .Partial, note: "whether a standard stream is a terminal; no terminal device name"},
     {area: "File descriptors", header: "poll.h", standard: POSIX, names: "poll ppoll", variants: "", jet: "core.net.ready_readable core.net.ready_writable core.net.tcp_ready", coverage: .Partial, note: "readiness of sockets; no general descriptor set"},
     {area: "File descriptors", header: "sys/select.h", standard: POSIX, names: "select pselect FD_CLR FD_ISSET FD_SET FD_ZERO", variants: "", jet: "core.net.ready_readable core.net.ready_writable", coverage: .Partial, note: "readiness of sockets; no general descriptor set"},
     {area: "File descriptors", header: "aio.h", standard: POSIX, names: "aio_read aio_write aio_error aio_return aio_cancel aio_suspend aio_fsync lio_listio", variants: "", jet: "", coverage: .NotNeeded, note: "Jet tasks run blocking I/O concurrently (owner ruling on #6696)"},
@@ -346,7 +346,7 @@ FAMILIES: [Family]{
     // ---- Networking ----
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "socket bind listen accept accept4 connect shutdown", variants: "", jet: "core.net.tcp_listen core.net.tcp_accept core.net.tcp_connect core.net.udp_bind core.net.unix_listen core.net.unix_connect core.net.tcp_shutdown", coverage: .Covered, note: "TCP, UDP and Unix-domain sockets"},
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "send recv sendto recvfrom", variants: "", jet: "core.net.tcp_write core.net.tcp_read core.net.udp_send_to core.net.udp_recv_from", coverage: .Covered, note: ""},
-    {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "sendmsg recvmsg", variants: "", jet: "", coverage: .Gap, note: "no scatter-gather or ancillary data (descriptor passing)"},
+    {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "sendmsg recvmsg", variants: "", jet: "core.net.unix_send core.net.unix_receive", coverage: .Partial, note: "descriptor passing (SCM_RIGHTS) on Unix streams; no scatter-gather or other ancillary data"},
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "getsockopt setsockopt", variants: "", jet: "core.net.set_nodelay core.net.set_ttl core.net.ttl core.net.nodelay", coverage: .Partial, note: "the named options only"},
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "getpeername getsockname", variants: "", jet: "core.net.tcp_peer_addr core.net.tcp_local_addr core.net.udp_local_addr", coverage: .Covered, note: ""},
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "socketpair sockatmark", variants: "", jet: "", coverage: .Gap, note: ""},
@@ -357,7 +357,7 @@ FAMILIES: [Family]{
     {area: "Networking", header: "net/if.h", standard: POSIX, names: "if_nameindex if_freenameindex if_nametoindex if_indextoname", variants: "", jet: "", coverage: .Gap, note: "no network interface listing"},
     // ---- Interprocess communication ----
     {area: "Interprocess communication", header: "mqueue.h", standard: POSIX, names: "mq_open mq_close mq_unlink mq_send mq_timedsend mq_receive mq_timedreceive mq_getattr mq_setattr mq_notify", variants: "", jet: "", coverage: .Gap, note: "no POSIX message queues"},
-    {area: "Interprocess communication", header: "sys/mman.h", standard: POSIX, names: "shm_open shm_unlink", variants: "", jet: "", coverage: .Gap, note: "no shared memory objects"},
+    {area: "Interprocess communication", header: "sys/mman.h", standard: POSIX, names: "shm_open shm_unlink", variants: "", jet: "core.sys.shared_memory core.sys.SharedMemory.descriptor", coverage: .Partial, note: "anonymous shared memory handed to another process by its descriptor; no named object to open or unlink"},
     {area: "Interprocess communication", header: "sys/msg.h", standard: POSIX, names: "msgget msgsnd msgrcv msgctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
     {area: "Interprocess communication", header: "sys/sem.h", standard: POSIX, names: "semget semop semctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
     {area: "Interprocess communication", header: "sys/shm.h", standard: POSIX, names: "shmget shmat shmdt shmctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
