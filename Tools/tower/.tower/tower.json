@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102453,
+    "rev": 102454,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72995,7 +72995,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-14T14:52:53.456Z",
+      "updated": "2026-11-14T15:04:02.955Z",
       "updatedBy": "Main"
     },
     {
@@ -197767,38 +197767,38 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "language",
-      "title": "Branching on an enum: a single check stays free, and two or more checks of one value must name every case",
+      "title": "Branching on an enum: one test stays free, and two or more tests of one value must name every case",
       "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. A program can check one case and act only on it, which is normal logic and stays free. When it checks the same value against two or more cases, it is choosing among them, and today an else at the end quietly takes any case added later. This vote picks the form that makes such a choice name every case, and the spelling for the rest that still stops the build when a case is added.",
       "gist": "When code checks one enum value against two or more cases, how must it name every case, including the rest?",
-      "lesson": "A single check, such as doing something only for a circle, stays free. Two or more checks of one value are a decision over the enum, and Jet already has a table that must name every case. The missing piece is a short, safe way to say the rest. It must still stop the build when someone adds a case, so no case slips into an else unnoticed.",
-      "explainer": "Words used here. An enum is a type with a fixed list of cases. A case test is a check such as shape == .Circle(r), which asks whether a value is one case.\n\nA chain is if ... else if ... else, with one test per branch. A table is if shape == { ... }: shape is named once and each arm is one case or several cases joined by |. Over an enum, a table must name every case, and an else arm there is refused.\n\nA decision is a chain or table that tests one value against two or more cases.",
+      "lesson": "One test of one case, such as doing something only for a circle, stays free. Two or more tests of one value choose among the enum's cases. Jet already has a table, if shape == { ... }, that must name every case. The missing piece is a short, safe way to write the rest. It must still stop the build when someone adds a case, so no case slips into an else unnoticed.",
+      "explainer": "Words used here, shown on the one program this ballot uses throughout.\n\n```jet\nShape: enum {                  // an enum: a type with a fixed list of cases\n    Circle(radius: Int)        // a case that carries a value, its radius\n    Square(side: Int)          // a case that carries its side length\n    Line                       // a case that carries nothing\n    Dot\n}\n```\n\nA case test asks whether a value is one case. shape == .Circle(r) is true for a circle, and r is then its radius.\n\nA chain is if ... else if ... else, with one case test per branch. Its final else takes every case not tested above, including cases added later.\n\nA table names the value once and gives one arm per case, as in if shape == { .Circle(r) -> 3 * r * r ... }. The arrow -> gives the arm's result, and | joins cases in one arm. A table over an enum must name every case, so an else arm there is refused.\n\nThe rest means the cases that code does not handle one by one, such as Line and Dot in area.",
       "story": "Ana writes area(shape) as a chain: a circle, then a square, then else for the rest. Months later Ben adds a Triangle case. Today Ana's code runs and returns 0 for every triangle, and no one is told.\n\nUnder A and B, Ana's chain is refused when she writes it, and jet fix turns it into a table. When Ben adds Triangle, every table that does not name it stops the build, and he decides each one. Under A, Ana can name the rest with a case set such as Flat, declared beside the cases. Under C, Ana keeps her chain, but its last branch must name the line and the dot instead of saying else.",
       "inWild": "OCaml: warning 4, off by default, flags a fragile match, one whose wildcard would silently take constructors added later. A polymorphic variant type can be named, type flat = [ `Line | `Dot ], and the pattern #flat matches any of its members.\n\nSwift: a switch over an enum must be exhaustive. For an enum that may grow, @unknown default runs for unknown cases, and the compiler warns when a known case is not named.\n\nRust: a match must be exhaustive, and the wildcard _ takes the rest silently. The opt-in Clippy lint wildcard_enum_match_arm flags that wildcard.\n\nKotlin and Java: a when or switch over an enum or sealed type must be exhaustive, and else or default may take the rest.\n\nThese outside facts were not re-checked for this ballot.",
-      "detail": "What Jet does today. Probes ran with the gate-p66 jet on dev 03d5f7b309.\n\nA single test, if shape == .Circle(r) with no else, gets no finding. A single test with an else gets warning L0507, which suggests an arm table. It does not get L0302.\n\nA chain with two tests and an else gets L0302 and L0507, and runs. With Triangle added to the enum, that chain still checks clean and prints 0 for a triangle.\n\nA table that misses Triangle stops with E0307, which names the missing case. A table with else -> 0 is E0641, whose fix writes .Line | .Dot.\n\nFour gaps in today's rules. A second test hidden inside an else block, else { if shape == .Square(s) ... }, gets no L0302. A table whose arms include a plain true-or-false test, such as verbose == true, may keep an else over an enum. That else takes Dot silently. A guarded arm, .Circle(r) && r > 10, does not count as covering Circle, and that part is already right: E0307 names Circle.\n\nRuns of single ifs get no finding at all. A leaving run reads if shape == .Circle(r) -> return 3 * r * r, then if shape == .Square(s) -> return s * s, then 0. A falling-through run reads result := 0, then if shape == .Circle(r) -> result = 3 * r * r, then if shape == .Square(s) -> result = s * s. With Triangle added, both check clean and give 0 for a triangle (v3 probes r1 and r4).\n\nThe rule every option shares. A decision is two or more case tests of one value, a name or a field path. They may sit in one chain, one table, or one run of if statements. A run is consecutive ifs in one block, each a single test of that value, with nothing between them and no body that writes the value. It must name every case, and else cannot stand for the rest.\n\nAn else whose whole body is another if on the same value continues the chain. In a run whose bodies leave (return, next, break or panic), the rest is the code after it. In a run that falls through, the rest is doing nothing. Either way, a case added later is stopped. A true-or-false arm may sit in a decision, but it covers no case.\n\nWhat stays free. One test is a single check whatever its pattern, with or without an else, so if shape == .Line | .Dot { … } else { … } is free. So are tests with other code between them, a run whose body writes the value (a state machine stepping state), and a test through a helper such as shape.is_round(). The rule covers every closed set: an enum, an optional, a result and a union. L0302 retires under every option, since Jet has no warnings.\n\nHow big the change is. A rough scan of dev finds 35 chains with two or more tests of one value. A rerun on 03d5f7b309 finds 11 of them ending in else, where the first count said 13. It also finds 5 if { } tables that test one value twice or more, all ending in else, so 16 sites have an else to replace.\n\nRuns are the commonest form. Scans of one-line ifs alone find 130 runs whose bodies leave and 33 that fall through, over two or more cases. The scans are v3/exitscan.awk and v3/sepscan.awk. They skip block bodies, so these counts are lower bounds. The scans read text, not types, so the chain and table counts are upper bounds.\n\nSome rests are long under every option. Two chains ending in else test the compiler's Type, which has 24 cases, so each else stands for 22. Expr has 51 cases. And ir_builtin in BuildRoutes.jet tests 13 of TBuiltinOp's 214 cases before handing the rest to ir_builtin_on.\n\nNo option adds a glyph. A's case set is written Name: .A | .B, the binding colon and the dotted or-pattern a table arm already writes. So | keeps its pattern meaning, peer alternatives.\n\nThe undotted Name: A | B is a union type wherever a Name: line sits today. In a struct body it is a field of type Line | Dot, and at file scope it is a union alias (v3 probes r2 and r2a). So it would give | a second meaning in one position. The dotted form is a parse error in an enum body today (r3), so it is free. The range .. and the spread ... are not used.",
+      "detail": "What Jet does today. Every example here ran with the gate-p66 jet on dev 03d5f7b309. The v4 probes hold the exact programs this ballot shows, with their outputs.\n\nThe table form of area checks clean and runs (t1). Add Triangle to Shape, and it stops with E0307: This `if` doesn't cover every case — missing: Triangle. The fix line says: Add an arm for: Triangle (t2).\n\nThe chain form of area, ending in else, gets two warnings, L0302 and L0507, and runs (t3). With Triangle added, it still runs and returns 0 for a triangle (t4).\n\nArea can also be written as separate ifs, one after another, that each return:\n\n```jet\narea: fn(shape: Shape) -> Int {\n    if shape == .Circle(r) -> return 3 * r * r   // one test; return leaves area\n    if shape == .Square(s) -> return s * s\n    0                                            // the rest: every other case gives 0\n}\n```\n\nThat form gets no finding at all. With Triangle added, it checks clean and returns 0 for a triangle (t5, and v3 probe r1). The same holds when the ifs assign to a result instead of returning (v3 probe r4).\n\nTwo more escapes. A second test hidden in an else block, else { if shape == .Square(s) ... }, gets no L0302. A table with a plain true-or-false arm, such as verbose == true, may keep an else over an enum, and that else takes Dot silently. A guarded arm, .Circle(r) && r > 10, does not count as covering Circle, and that part is already right: E0307 names Circle.\n\nThe rule every option shares. It applies when code tests one value, a name or a field path, against two or more cases. The tests may sit in one chain, one table, or separate ifs in a row in one block. Those ifs have nothing between them and no body that changes the value. Such code must name every case, and else cannot stand for the rest.\n\nAn else whose whole body is another if on the same value counts as part of the chain. When separate ifs each leave (return, next, break or panic), the rest is the code after them. When they fall through, the rest is doing nothing. Either way, a case added later stops the build. A true-or-false arm may sit among the tests, but it covers no case.\n\nWhat stays free. One test is free whatever its pattern, with or without an else, so if shape == .Line | .Dot { … } else { … } is free. So are tests with other code between them, and ifs whose body changes the value (a state machine stepping state). So is a test through a helper such as shape.is_round(). The rule covers every closed set: an enum, an optional, a result and a union.\n\nL0302 retires under every option, since Jet has no warnings.\n\nHow big the change is. A rough scan of dev finds 35 chains with two or more tests of one value. A rerun on 03d5f7b309 finds 11 of them ending in else, where the first count said 13. It also finds 5 if { } tables that test one value twice or more, all ending in else, so 16 sites have an else to replace.\n\nSeparate ifs are the commonest form. Scans of one-line ifs alone find 130 groups whose bodies leave and 33 that fall through, over two or more cases. The scans are v3/exitscan.awk and v3/sepscan.awk. They skip block bodies, so these counts are lower bounds. The scans read text, not types, so the chain and table counts are upper bounds.\n\nSome rests are long under every option. Two chains ending in else test the compiler's Type, which has 24 cases, so each else stands for 22. Expr has 51 cases. And ir_builtin in BuildRoutes.jet tests 13 of TBuiltinOp's 214 cases before handing the rest to ir_builtin_on.\n\nWhich syntax is new. Options B and C add no syntax: every line of their programs runs today (t1, t6 and t7). They add only the new error E0644. Option A adds the case set line, Flat: .Line | .Dot, and the pattern .Flat. Today that line is a parse error (t8).\n\nWhy A's case set is written with dots. Name: .A | .B reuses the colon that declares a name and the dotted or-pattern a table arm already writes. So | keeps its meaning, one case or another.\n\nThe undotted Name: A | B already means a union type wherever a Name: line sits today. In a struct body it is a field of type Line | Dot, and at file scope it is a union alias (v3 probes r2 and r2a). No option adds a glyph, and the range .. and the spread ... are not used.",
       "options": [
         {
           "key": "A",
-          "name": "A table for every decision, and named case sets for the rest",
+          "name": "A table whenever one value is tested twice or more, and named case sets for the rest",
           "gist": "Two or more tests of one value must be a table that names every case; an enum may declare case sets, and .Flat names the rest.",
-          "detail": "A chain, if { } table or run of single ifs with two or more tests of one value is the error E0644. Its fix writes the subject table. The cases that an else, or the code after a leaving run, stood for become one arm joined by |. A statement chain or a falling-through run gets an arm that does nothing, -> (), for the cases it skips.\n\nAn enum may declare a case set beside its cases: Flat: .Line | .Dot. The right side is an or-pattern, written with the dots a table arm uses, so it never reads as the union type Line | Dot. In a pattern, .Flat matches any member and binds nothing, like a variant group.\n\nA set lists cases, groups or other sets of its own enum, by dotted name. A set is neither a type nor a value. No set can mean all cases but some, so a new case joins a set only when someone writes it in.\n\nAdding a case stops every decision that names neither it nor a set holding it. Beginner path: write the chain or the run, then take E0644's fix. Expert path: declare the sets the code keeps naming, such as Scalar or Place, and use them in tables and single checks.",
-          "technical": "Sema counts case tests per chain, per if { } table and per run of consecutive single-test ifs in a block, keyed on the subject place. A body that writes the place ends the run. It reports E0644 jet.EnumDecisionNeedsTable with a SourceEdit that writes the table. That edit reuses E0641's case-list writer. E0641 loses its exemption for a table with a true-or-false arm, once the table has two or more case tests.\n\nThe parser accepts Name: .member | .member inside an enum body. Sema resolves a set like a variant group in pattern tests and exhaustiveness. A set used as a value is E0332, as a group is; as a type it is an unknown type. An unknown member is a new error. The language server shows a set's members on hover.\n\nL0302 becomes a Retired row naming this decision. Its five fixtures become E0644 snapshots, and the spec's branching section and D-IFGUARD1 text are updated. The 40 chains and tables and at least 163 runs become tables.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n\n    Flat: .Line | .Dot\n}\n\n// one test: free\nbonus: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) -> result = r\n    result\n}\n\n// two or more tests: a table that names every case\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) && r > 10 -> 1000\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0\n    }\n}\n\n// the chain form of area, and the form that returns early per case, are E0644;\n// the fix writes the table\n// adding Triangle stops area until an arm or Flat names it"
+          "detail": "Two or more tests of one value, in a chain, a table or separate ifs in a row, are the new error E0644. Its fix, applied by jet fix, writes the table. The cases an else stood for, or the code after ifs that return, become one arm joined by |. Code made of statements gets an arm that does nothing, -> (), for the cases it skips.\n\nAn enum may declare a case set beside its cases: Flat: .Line | .Dot. It gives a name to a group of the enum's own cases. In a pattern, .Flat matches any member and binds nothing, like a variant group. A set lists cases, groups or other sets of its own enum, by dotted name. A set is neither a type nor a value.\n\nNo set can mean all cases but some, so a new case joins a set only when someone writes it in. Adding a case stops every table that names neither it nor a set holding it. Beginner path: write the chain or the ifs, then take E0644's fix. Expert path: declare the sets the code keeps naming, such as Scalar or Place, and use them in tables and single tests.",
+          "technical": "Sema counts case tests per chain, per if { } table and per group of consecutive single-test ifs in a block, keyed on the tested place. A body that writes the place ends the group. It reports E0644 jet.EnumTestsNeedTable with a SourceEdit that writes the table. That edit reuses E0641's case-list writer. E0641 loses its exemption for a table with a true-or-false arm, once the table has two or more case tests.\n\nThe parser accepts Name: .member | .member inside an enum body. Sema resolves a set like a variant group in pattern tests and exhaustiveness. A set used as a value is E0332, as a group is; as a type it is an unknown type. An unknown member is a new error. The language server shows a set's members on hover.\n\nL0302 becomes a Retired row naming this choice. Its five fixtures become E0644 snapshots, and the spec's branching section and D-IFGUARD1 text are updated. The 40 chains and tables and at least 163 groups of separate ifs become tables.",
+          "code": "// Option A. Lines marked NEW are syntax or rules that A adds.\n// Every other line runs today (v4 probe t1); the Flat line is a parse error today (t8).\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n\n    // NEW: a case set. This line declares the name Flat for \"a Line or a Dot\".\n    // The dots are the ones a table arm writes (.Line), so the line reads as\n    // \"these cases\", never as the union type Line | Dot.\n    Flat: .Line | .Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Flat -> 0                 // NEW: .Flat matches any case in Flat, a Line or a Dot\n    }                              // the table must name every case; else is refused\n}\n\n// NEW: written as a chain or as separate ifs, area is error E0644.\n// jet fix writes the table, listing the rest as .Line | .Dot -> 0;\n// the writer may then shorten that arm to .Flat -> 0.\n// For code made of statements, the fix gives skipped cases an arm that does nothing:\n//     .Line | .Dot -> ()          // () means \"nothing\": a Line or a Dot changes nothing\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later. area stops, as today:\n//     Error [jet.NonExhaustiveDispatch]: This `if` doesn't cover every case — missing: Triangle\n//      Fix: Add an arm for: Triangle\n// They add a .Triangle arm, or write Triangle into Flat,\n// which also decides it for every other table that names .Flat."
         },
         {
           "key": "B",
-          "name": "A table for every decision, and the rest listed case by case",
+          "name": "A table whenever one value is tested twice or more, and the rest listed case by case",
           "gist": "Two or more tests of one value must be a table that names every case; the rest is always a list such as .Line | .Dot.",
           "detail": "The rule and E0644 are A's. The rest is always written out as cases joined by |, which E0644's fix and E0641's fix write for you. Nothing new is declared in an enum.\n\nA long rest has two shorter spellings today. A variant group nests cases in the enum, as Flat { Line, Dot }, and .Flat names them all; values are then written Shape.Flat.Dot. A classifier function holds one table that maps the big enum to a small one, and other code branches on the small one.\n\nBeginner path: A's. Expert path: group the enum, or write a classifier.",
-          "technical": "A's sema rule, E0644 with its fix, the E0641 change and the L0302 retirement, with no parser change. The 40 chains and tables and at least 163 runs become tables. Those with a rest list every case it stood for, 22 for a chain over Type and about 200 for ir_builtin over TBuiltinOp, or move to a group or a classifier.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// one test: free\nbonus: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) -> result = r\n    result\n}\n\n// two or more tests: a table that names every case\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) && r > 10 -> 1000\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Line | .Dot -> 0\n    }\n}\n\n// the chain form of area is E0644; its fix writes the table\n// adding Triangle stops area until an arm names it"
+          "technical": "A's sema rule, E0644 with its fix, the E0641 change and the L0302 retirement, with no parser change. The 40 chains and tables and at least 163 groups of separate ifs become tables. Those with a rest list every case it stood for, 22 for a chain over Type and about 200 for ir_builtin over TBuiltinOp, or move to a group or a classifier.",
+          "code": "// Option B. No new syntax: every line below runs today (v4 probe t1).\n// B adds only the rule marked NEW.\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Line | .Dot -> 0          // the rest, listed case by case; | joins cases\n    }                              // the table must name every case; else is refused\n}\n\n// NEW: written as a chain or as separate ifs, area is error E0644,\n// and jet fix writes the table above.\n// For code made of statements, the fix gives skipped cases an arm that does nothing:\n//     .Line | .Dot -> ()          // () means \"nothing\": a Line or a Dot changes nothing\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later. area stops, as today:\n//     Error [jet.NonExhaustiveDispatch]: This `if` doesn't cover every case — missing: Triangle\n//      Fix: Add an arm for: Triangle\n// They add a .Triangle arm, or add .Triangle to the .Line | .Dot list."
         },
         {
           "key": "C",
-          "name": "Chains stay, and every decision is checked",
-          "gist": "A chain or a table may hold the decision; either must name every case, so a chain's last branch lists the rest.",
-          "detail": "A chain with two or more tests of one value stays legal, and it is checked like a table. A final plain else in it is the error E0644. Its fix replaces the else with a branch that names the remaining cases. A statement chain that misses a case gets an empty branch naming it.\n\nTables keep today's rules, and E0641 loses its exemption for a true-or-false arm, as in A. Adding a case stops every chain and table that does not name it.\n\nBeginner path: keep writing chains, and take E0644's fix for the last branch. Expert path: as in B.",
-          "technical": "Sema runs the table's exhaustiveness check over a chain's case tests, and over a run of single-test ifs, keyed on the subject place. It reports E0644 jet.ChainElseOverClosedSet with a fix that writes the remaining cases. L0302 retires as in A. The 16 sites that end in else get a last branch naming their cases. Chains and falling-through runs get an empty branch for the cases they skip. Each of the 130 or more leaving runs gets a last test naming the rest, around the code that followed it.",
-          "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\n// one test: free\nbonus: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) -> result = r\n    result\n}\n\n// two or more tests: the chain names every case\narea: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) && r > 10 {\n        result = 1000\n    } else if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else if shape == .Line | .Dot {\n        result = 0\n    }\n    result\n}\n\n// a final plain else in area is E0644\n// adding Triangle stops area until a branch names it"
+          "name": "Chains stay, and every chain or table on one value must name every case",
+          "gist": "A chain or a table may hold the tests; either must name every case, so a chain's last branch lists the rest.",
+          "detail": "A chain with two or more tests of one value stays legal, and it is checked like a table. A final plain else in it is the error E0644. Its fix replaces the else with a branch that names the remaining cases. A chain of statements that misses a case gets an empty branch naming it.\n\nTables keep today's rules, and E0641 loses its exemption for a true-or-false arm, as in A. Adding a case stops every chain and table that does not name it.\n\nBeginner path: keep writing chains, and take E0644's fix for the last branch. Expert path: as in B.",
+          "technical": "Sema runs the table's exhaustiveness check over a chain's case tests, and over a group of single-test ifs, keyed on the tested place. It reports E0644 jet.ChainElseOverClosedSet with a fix that writes the remaining cases. L0302 retires as in A.\n\nThe 16 sites that end in else get a last branch naming their cases. Chains and ifs that fall through get an empty branch for the cases they skip. Each of the 130 or more groups of ifs that leave gets a last test naming the rest, around the code that followed it.",
+          "code": "// Option C. No new syntax: every line below runs today (v4 probe t6).\n// C adds only the rules marked NEW.\nShape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    result := 0                            // the answer, 0 until a branch sets it\n    if shape == .Circle(r) {               // a chain: one case test per branch\n        result = 3 * r * r                 // a circle with radius r\n    } else if shape == .Square(s) {        // a square with side s\n        result = s * s\n    } else if shape == .Line | .Dot {      // the rest, named; | joins cases\n        result = 0\n    }                                      // NEW: a plain else here is error E0644\n    result\n}\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later.\n// NEW: area stops the build with a missing-case error naming Triangle,\n// as a table's E0307 does today. They add a branch for Triangle.\n// Today, without C, this chain still runs and returns 0 for a triangle (t10)."
         }
       ],
       "comparisons": [
@@ -197821,12 +197821,12 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A gives a decision over an enum one form, the table, and a short, named spelling for the rest. Adding a case stops every decision until it names the case or puts it in a set.",
+        "why": "A gives two or more tests of one enum value one form, the table, and a short, named spelling for the rest. Adding a case stops every such table until it names the case or puts it in a set.",
         "gains": [
-          "A new case stops every decision that has not placed it",
-          "One form for a decision, the table, with order and guards kept",
+          "A new case stops every table that has not placed it",
+          "One form for tests of one value, the table, with order and guards kept",
           "A long rest gets a short name that says what it means",
-          "A single check stays free, with or without an else"
+          "A single test stays free, with or without an else"
         ],
         "losses": [
           {
@@ -197838,8 +197838,8 @@
             "mitigation": "E0644's fix writes the table, and a single test with an else stays a plain if."
           },
           {
-            "loss": "Runs of single ifs, at least 163 sites, become tables with long rests.",
-            "mitigation": "E0644's fix writes the list, even ir_builtin's 200-case rest, and a set names it once. Every option pays this list; free runs would keep the bug."
+            "loss": "Separate ifs on one value, at least 163 sites, become tables with long rests.",
+            "mitigation": "E0644's fix writes the list, even ir_builtin's 200-case rest, and a set names it once. Every option pays this list; free ifs would keep the bug."
           }
         ],
         "whyNot": [
@@ -197849,26 +197849,26 @@
           },
           {
             "key": "C",
-            "reason": "C keeps two spellings of one decision. A reader must scan every branch of a chain to learn it is a decision, and long rests stay lists, as in B."
+            "reason": "C keeps two spellings for the same tests. A reader must scan every branch of a chain to learn that it tests one value, and long rests stay lists, as in B."
           }
         ],
-        "tradeoff": "Every decision over an enum names its cases, at the cost of a set's members deciding for every table that names the set."
+        "tradeoff": "Every test of one enum value against two or more cases names its cases, at the cost of a set's members deciding for every table that names the set."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: GoalsA-1. CardCloser-2, the author, ran the first pass (D-GUARD-LINT1.v2-review.md), closing the else-block and true-or-false arm escapes and naming the set loss. GoalsA-1, a fresh Claude Opus reader, then wrote D-GUARD-LINT1.v3-review.md, landing as Docs/audits/2026-11-14-D-GUARD-LINT1-v3-review.md: it closed the run-of-single-ifs escape, respelled the set Flat: .Line | .Dot, and corrected the counts."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: GoalsA-1. CardCloser-2, the author, ran the first pass (D-GUARD-LINT1.v2-review.md), closing the else-block and true-or-false arm escapes and naming the set loss. GoalsA-1, a fresh Claude Opus reader, then wrote D-GUARD-LINT1.v3-review.md, landing as Docs/audits/2026-11-14-D-GUARD-LINT1-v3-review.md: it closed the separate-ifs escape, respelled the set Flat: .Line | .Dot, and fixed the counts."
       },
-      "checkInstructions": "The probes are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-GUARD-LINT1/v2, with outputs in results.txt. They ran with the gate-p66 jet on dev 03d5f7b309, each as jet check main.jet and jet run main.jet in its folder.\n\np1: one test, one test with else, a chain with else, and a test hidden in an else block. Only the chain gets L0302.\np2: a table with a guarded arm, an or-pattern rest and a -> () arm runs.\np3: a guarded arm alone does not cover Circle (E0307).\np4: a true-or-false arm lets a table over Shape keep else, and Dot takes it.\n\np5 and p10: a table missing Dot or Triangle stops with E0307.\np6: a variant group arm, .Flat, covers its members.\np7: Flat: Line | Dot in an enum body is a parse error today.\np8: a one-off .Line | .Dot test is accepted; a two-test if { } table gets L0302.\n\np9: else in a table over Shape is E0641, whose fix writes .Line | .Dot.\np11: with Triangle added, the chain checks clean and prints 0.\np12: the first ballot's chain probe.\n\nThe fresh review's probes are in v3, with outputs beside each folder. r1: two leaving one-test ifs then 0, with Triangle added, check clean and print 9 then 0. r4: the same with result := 0 and two falling-through ifs, also clean, 9 then 0.\n\nr2: Flat<T>: Line | Dot at file scope is a union alias of two structs and runs. r2a: Flat: Line | Dot in a struct body is a field of type Line | Dot, refused only for its casing (E0357). r3: Flat: .Line | .Dot in an enum body is a parse error today, so the dotted spelling is free.\n\nThe site counts come from chainscan.awk in the parent folder, tablescan.awk here, and v3/exitscan.awk and v3/sepscan.awk. Run each over the .jet files of dev 03d5f7b309, outside tests; v3/exitscan-03d5.txt and v3/sepscan-03d5.txt list the 130 leaving and 33 falling-through runs. Type has 24 cases, in Compiler/JetFoundation/Source/Types/Types.jet; Expr has 51 and TBuiltinOp 214.",
+      "checkInstructions": "The probes are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-GUARD-LINT1. They ran with the gate-p66 jet on dev 03d5f7b309, each as jet check main.jet and jet run main.jet in its folder.\n\nThe v4 probes hold the exact programs this ballot shows, with outputs in v4/results.txt. JET=<jet> bash v4/run.sh reruns them all.\nt1: the table form of area runs and prints 12, 9, 0 and 0.\nt2: with Triangle added, the table stops with E0307, missing: Triangle.\nt3 and t4: the chain form gets L0302 and L0507 and runs; with Triangle added it prints 0.\nt5: separate ifs that return, with Triangle added, check clean and print 9 then 0.\n\nt6: option C's chain, whose last branch names .Line | .Dot, runs today.\nt10: with Triangle added, that chain runs and prints 0.\nt7: a table of statements with a -> () arm runs.\nt8: option A's Flat: .Line | .Dot line is a parse error today (E0003).\nt9: an enum written on one line, cases separated by commas, runs.\n\nThe v2 probes, with outputs in v2/results.txt:\np1: one test, one test with else, a chain with else, and a test hidden in an else block. Only the chain gets L0302.\np2: a table with a guarded arm, an or-pattern rest and a -> () arm runs.\np3: a guarded arm alone does not cover Circle (E0307).\np4: a true-or-false arm lets a table over Shape keep else, and Dot takes it.\n\np5 and p10: a table missing Dot or Triangle stops with E0307.\np6: a variant group arm, .Flat, covers its members.\np7: Flat: Line | Dot in an enum body is a parse error today.\np8: a one-off .Line | .Dot test is accepted; a two-test if { } table gets L0302.\n\np9: else in a table over Shape is E0641, whose fix writes .Line | .Dot.\np11: with Triangle added, the chain checks clean and prints 0.\np12: the first ballot's chain probe.\n\nThe fresh review's probes are in v3, with outputs beside each folder. r1: two one-test ifs that return, then 0, with Triangle added, check clean and print 9 then 0. r4: the same with result := 0 and two ifs that fall through, also clean, 9 then 0.\n\nr2: Flat<T>: Line | Dot at file scope is a union alias of two structs and runs. r2a: Flat: Line | Dot in a struct body is a field of type Line | Dot, refused only for its casing (E0357). r3: Flat: .Line | .Dot in an enum body is a parse error today, so the dotted spelling is free.\n\nThe site counts come from chainscan.awk at the top, v2/tablescan.awk, and v3/exitscan.awk and v3/sepscan.awk. Run each over the .jet files of dev 03d5f7b309, outside tests; v3/exitscan-03d5.txt and v3/sepscan-03d5.txt list the 130 and 33 groups. Type has 24 cases, in Compiler/JetFoundation/Source/Types/Types.jet; Expr has 51 and TBuiltinOp 214.",
       "surface": {
         "gist": "When code checks one enum value against two or more cases, how must it name every case, including the rest?",
-        "lesson": "One check of one case stays free. Two or more checks of one value are a choice among the cases, so they must name every case. The vote is on the form and on a safe way to say the rest. Adding a case must still stop every such choice that has not handled it.",
+        "lesson": "One test of one case stays free. Two or more tests of one value choose among its cases, so they must name every case. The vote is on the form and on a safe way to write the rest. Adding a case must still stop every such test that has not handled it.",
         "trio": {
           "current": {
-            "note": "The chain gets a warning and runs; a Triangle added later returns 0 silently.",
-            "code": "if shape == .Circle(r) {\n    result = 3 * r * r\n} else if shape == .Square(s) {\n    result = s * s\n} else { result = 0 } // Triangle lands here"
+            "note": "How Jet writes this today. The table names every case, so a new case stops it. A chain's else silently takes it.",
+            "code": "// How Jet writes this today. Every line runs on today's compiler.\nShape: enum {                      // an enum: a type with a fixed list of cases\n    Circle(radius: Int)            // a case that carries a value, its radius\n    Square(side: Int)              // a case that carries its side length\n    Line                           // a case that carries nothing\n    Dot                            // another case that carries nothing\n}\n\narea: fn(shape: Shape) -> Int {    // a function from a Shape to an Int\n    if shape == {                  // a table: test shape once, then one arm per case\n        .Circle(r) -> 3 * r * r    // a circle with radius r; -> gives this arm's result\n        .Square(s) -> s * s        // a square with side s\n        .Line | .Dot -> 0          // | joins cases: a Line or a Dot gives 0\n    }                              // the table must name every case; else is refused\n}\n\n// The same area as a chain, which Jet also accepts today, with two warnings:\n//     result := 0\n//     if shape == .Circle(r) {          // a chain: one case test per branch\n//         result = 3 * r * r\n//     } else if shape == .Square(s) {\n//         result = s * s\n//     } else {                          // else: every case not tested above\n//         result = 0\n//     }\n//     result\n\n// Someone adds Triangle(base: Int, height: Int) to Shape later:\n//   the table stops: This `if` doesn't cover every case — missing: Triangle (E0307)\n//   the chain still runs, and area returns 0 for every triangle"
           },
           "wild": {
             "lang": "OCaml",
@@ -197880,25 +197880,25 @@
           {
             "key": "A",
             "name": "Table plus case sets",
-            "gist": "A decision is a table naming every case; an enum may declare sets such as Flat.",
+            "gist": "Two or more tests of one value must be a table; an enum may name case sets such as Flat.",
             "gains": [
-              "A new case stops every unplaced decision",
+              "A new case stops every table that misses it",
               "A long rest gets a short, meaningful name"
             ],
             "losses": [
               "Adding a case to a set decides it for its tables",
-              "A short chain or early-exit run must become a table"
+              "A short chain or early-return ifs must become a table"
             ],
             "proposed": {
-              "code": "Shape: enum { Circle(radius: Int), Square(side: Int), Line, Dot, Flat: .Line | .Dot }\n\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Flat -> 0\n}"
+              "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n    Flat: .Line | .Dot         // NEW: names \"a Line or a Dot\"; dots as in an arm\n}\narea: fn(shape: Shape) -> Int {    // NEW: as a chain, this is error E0644\n    if shape == {                  // a table, as today\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Flat -> 0                 // NEW: .Flat matches a Line or a Dot\n    }\n}   // add Triangle later: E0307 names it until an arm or Flat does"
             }
           },
           {
             "key": "B",
             "name": "Table plus listed cases",
-            "gist": "A decision is a table naming every case; the rest is written out case by case.",
+            "gist": "Two or more tests of one value must be a table; the rest is written out case by case.",
             "gains": [
-              "A new case stops every decision",
+              "A new case stops every table that misses it",
               "Nothing new to declare"
             ],
             "losses": [
@@ -197906,32 +197906,32 @@
               "A short chain must become a table"
             ],
             "proposed": {
-              "code": "if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
+              "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\narea: fn(shape: Shape) -> Int {    // NEW: as a chain, this is error E0644\n    if shape == {                  // a table, as today\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Line | .Dot -> 0          // the rest, listed; | joins cases\n    }\n}   // add Triangle later: E0307 names it until an arm does"
             }
           },
           {
             "key": "C",
             "name": "Checked chains",
-            "gist": "Chains stay; any decision, chain or table, must name every case.",
+            "gist": "Chains stay; any chain or table on one value must name every case.",
             "gains": [
-              "A new case stops every decision",
+              "A new case stops every chain and table",
               "Existing chains keep their shape"
             ],
             "losses": [
-              "Two spellings for one decision",
+              "Two spellings for the same tests",
               "The rest of a big enum is a long list"
             ],
             "proposed": {
-              "code": "if shape == .Circle(r) {\n    result = 3 * r * r\n} else if shape == .Square(s) {\n    result = s * s\n} else if shape == .Line | .Dot { result = 0 }"
+              "code": "Shape: enum { Circle(radius: Int), Square(side: Int), Line, Dot }\narea: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {               // a chain, as today\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else if shape == .Line | .Dot {      // names the rest; runs today\n        result = 0\n    }                                      // NEW: a plain else here is E0644\n    result\n}   // NEW: add Triangle later: the chain stops until a branch names it"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One form for a decision, and a short, named rest that still stops the build when a case is added.",
+          "why": "One form for two or more tests of one value, and a short, named rest. Adding a case still stops the build.",
           "gains": [
-            "A new case stops every unplaced decision",
-            "A single check stays free"
+            "A new case stops every table that misses it",
+            "A single test stays free"
           ],
           "losses": [
             {
@@ -197939,7 +197939,7 @@
               "mitigation": "The set sits beside the cases, so the case and its sets change in one reviewed edit."
             },
             {
-              "loss": "A short chain or early-return run on one value must become a table.",
+              "loss": "A short chain or early-return ifs on one value must become a table.",
               "mitigation": "The error's fix writes the table, and one test with an else stays a plain if."
             }
           ],
@@ -197950,10 +197950,10 @@
             },
             {
               "key": "C",
-              "reason": "Two spellings of one decision, and long rests stay lists."
+              "reason": "Two spellings for the same tests, and long rests stay lists."
             }
           ],
-          "tradeoff": "Every decision names its cases; a set's members decide for the tables that name it."
+          "tradeoff": "Every multi-case test names its cases; a set's members decide for the tables that name it."
         }
       },
       "draft": false,
@@ -205278,6 +205278,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T15:04:02.955Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
     {
       "at": "2026-11-14T14:56:49.958Z",
       "by": "Main",
