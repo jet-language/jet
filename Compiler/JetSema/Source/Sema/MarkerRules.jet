@@ -1080,7 +1080,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                     .Bool -> observation.ty == (Val(Type.Bool))
                     .Int -> observation.ty == (Val(Type.Int))
                     .DurationOrString -> unit_argument || observation.ty == (Val(Type.String)) || observation.ty == (Val(Type.Named{name: "Duration"}))
-                    .DurationOrInstant -> observation.ty == (Val(Type.Named{name: "Duration"})) || observation.ty == (Val(Type.Named{name: "Instant"}))
+                    .DurationOrInstant -> observation.ty == (Val(Type.Named{name: "Duration"})) || sema_stmt_deadline_instant(observation.ty ?? Type.Int)
                     .StringOrMenu -> sema_marker_rules_names_menu_word(argument) || observation.ty == (Val(Type.String))
                     .EffectRoots -> argument == .ListLit(_, _, _)
                 }

@@ -14,6 +14,7 @@ use jet_foundation.[
     ImportKind,
     Item,
     MARKER_ALLOW,
+    MARKER_DEADLINE,
     MARKER_DEV_PANEL,
     MARKER_KERNEL,
     MARKER_MAX_DEPTH,
@@ -403,8 +404,10 @@ sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -
         // `#Allow(jet.LintName, "why")` is a lint allowance over the body
         // (LintAllowances.jet), validated by MarkerRules. A `#DevPanel` panel is
         // an ordinary Jet body; the devtools publication gate
-        // (Calls/Devtools.jet) reads the marker to find the panel's state.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || marker.name == MARKER_STATE || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || sema_marker_is_guest_export(marker) -> next
+        // (Calls/Devtools.jet) reads the marker to find the panel's state. A
+        // `#Deadline(limit)` function's body is checked inside the deadline
+        // block CheckProgram.jet wraps it in (deadline_guards).
+        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || marker.name == MARKER_STATE || marker.name == MARKER_DEADLINE || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next

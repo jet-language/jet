@@ -1,9 +1,11 @@
 use time: core.time
 
+// The instant passes during the sleep. An instant already passed at entry
+// would be taken by the stop check before the wait instead.
 run: fn() {
-    past: time.instant()
-    #Deadline(past) {
-        time.sleep(5ms)
+    soon: time.instant() + 20ms
+    #Deadline(soon) {
+        time.sleep(2000ms)
     }
     print("unreachable")
 }

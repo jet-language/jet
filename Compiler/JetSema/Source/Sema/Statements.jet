@@ -33,6 +33,7 @@ use jet_foundation.[
     body_each_node_kind_child,
     body_each_pattern_child,
     body_each_stmt_child,
+    core_source_owns_type,
     NamedSpan,
     NamedType,
     OrFallback,
@@ -9826,10 +9827,18 @@ sema_stmt_context_scratch: fn(value: Expr, environment: SemaScopeEnvironment, pr
 // at its monotonic nanosecond (`deadline_at_ns`). Lowering keeps the earlier
 // of it and the deadline already in force.
 sema_stmt_deadline_guard: fn(limit: &&TExpr, span: Span) -> TContextGuard Never! {
-    at: limit.ty == (Type.Named{name: "Instant"})
+    at: sema_stmt_deadline_instant(limit.ty)
     member: if at -> "start_ns" else -> "ns"
     reference: TFieldRef{owner: None, name: member, ty: Type.Int, boxed: false}
     TContextGuard{field: if at -> "deadline_at_ns" else -> "deadline_after_ns", value: sema_tree_node(Type.Int, TExprKind.Field{receiver: limit, field: reference}, span)}
+}
+
+// Whether a `#Deadline` bound is an `Instant`: the built-in time point or
+// Core/Time's source struct (`<corelib>/...::Instant`), which `time.instant()`
+// returns.
+sema_stmt_deadline_instant: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return name == "Instant" || (name.ends_with("::Instant") && core_source_owns_type(name))
+    false
 }
 
 sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
