@@ -2355,8 +2355,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
             distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if distinct_literal.handled -> return distinct_literal.value
-            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
-            checked: checked_optional ?? return None
+            checked: sema_check_expression(value, sema_expression_typed_literal_body_expected(value, result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
                 exact_line: sema_source_line_at(environment.source_segments, expr_span(value)) ?? 0
                 exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
@@ -2402,8 +2401,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
             distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if distinct_literal.handled -> return distinct_literal.value
-            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
-            checked: checked_optional ?? return None
+            checked: sema_check_expression(value, sema_expression_typed_literal_body_expected(value, result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
                 exact_line: sema_source_line_at(environment.source_segments, expr_span(value)) ?? 0
                 exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
@@ -2581,6 +2579,18 @@ sema_expression_typed_literal_fixed_conversion: fn(source: Type, head: Type) -> 
         if head == .IntN(_, _) -> return source != head
     }
     source == Type.Float32 && head == Type.Float
+}
+
+// The type a typed literal's one-expression body checks against: the head
+// when it is the body's carrier, and `Float` for a written decimal under an
+// `Int` or fixed-width head. That decimal would otherwise be a `Decimal`, so
+// `Int{3.7}` (E0112) and `I8{300.0}` (E1003) take the exact Float conversion
+// and are refused where they are written
+// (sema_expression_typed_literal_float_exact).
+sema_expression_typed_literal_body_expected: fn(value: Expr, head: Type) -> Type? Never! {
+    if sema_expression_typed_literal_value_needs_head(value, head) -> return Val(head)
+    if (head == Type.Int || head == .IntN(_, _)) && sema_expression_typed_literal_written_float(value) != None -> return Val(Type.Float)
+    None
 }
 
 // `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
