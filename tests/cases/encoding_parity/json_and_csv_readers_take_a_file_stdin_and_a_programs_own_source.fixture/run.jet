@@ -1,0 +1,98 @@
+// json.reader and csv.reader take a file, standard input and a program's own
+// byte source, each through the Prelude `Reader`, and the program's helpers
+// name that bound. The first argument says which reader standard input
+// feeds: `json` or `csv`.
+use {
+    csv: core.encoding.csv
+    encoding: core.encoding
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    term: core.term
+}
+
+DOC: "{{\"a\": [1, true], \"b\": \"xy\"}}"
+ROWS: "name,note\nada,\"two\nlines\"\nbo,x\n"
+
+// The program's own byte source: two bytes per read, so tokens, quoted
+// fields and records cross read boundaries.
+MySource: struct {
+    data: [U8]
+    at: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            out := [U8]{}
+            _: self.read_into(out, limit) ?? return Err(err)
+            Ok(out)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            count := 0
+            loop count < limit && count < 2 && self.at < self.data.len() {
+                buffer.push(self.data[self.at])
+                self.at += 1
+                count += 1
+            }
+            Ok(count)
+        }
+    }
+}
+
+event_name: fn(event: encoding.DataEvent) -> String {
+    if event == {
+        .Null -> "null"
+        .Bool(value) -> "bool:{value}"
+        .Int(value) -> "int:{value}"
+        .Float(value) -> "float:{value}"
+        .Number(text) -> "number:{text}"
+        .Text(text) -> "text:{text}"
+        .Bytes(bytes) -> "bytes:{bytes.len()}"
+        .ArrayStart -> "["
+        .ArrayEnd -> "]"
+        .ObjectStart -> "{{"
+        .Key(key) -> "key:{key}"
+        .ObjectEnd -> "}}"
+    }
+}
+
+// Every event json.reader reads from `source`, on one line.
+json_line: fn<R: Reader>(label: String, source: &&R) -> String EncodingError! {
+    reader: json.reader(source) ?? return Err(err)
+    names := [String]{}
+    loop event in reader -> names.push(event_name(event))
+    Ok("json {label}: {names.join(" ")}")
+}
+
+// Every record csv.reader reads from `source`, on one line: each record's
+// line number and its fields, a line break inside a field shown as `/`.
+csv_line: fn<R: Reader>(label: String, source: &&R) -> String EncodingError! {
+    records: csv.reader(source) ?? return Err(err)
+    rows := [String]{}
+    loop row in records {
+        text := "{row.line} "
+        loop (index, field) in row.fields {
+            if index > 0 -> text = "{text}|"
+            text = "{text}{field.replace("\n", "/")}"
+        }
+        rows.push(text)
+    }
+    Ok("csv {label}: {rows.join(" / ")}")
+}
+
+run: fn() (EncodingError | IOError)! {
+    args: process.args()
+    stdin_format: if args.len() > 0 -> args[0].copy() else -> "json"
+    files.write("doc.json", DOC)
+    files.write("rows.csv", ROWS)
+
+    doc: files.open("doc.json")
+    print(json_line("file", doc))
+    if stdin_format == "json" -> print(json_line("stdin", term.stdin()))
+    print(json_line("MySource", MySource{data: DOC.bytes(), at: 0}))
+
+    rows: files.open("rows.csv")
+    print(csv_line("file", rows))
+    if stdin_format == "csv" -> print(csv_line("stdin", term.stdin()))
+    print(csv_line("MySource", MySource{data: ROWS.bytes(), at: 0}))
+}

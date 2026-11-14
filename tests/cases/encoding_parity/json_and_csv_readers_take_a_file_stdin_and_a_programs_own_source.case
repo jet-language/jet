@@ -1,0 +1,33 @@
+# #6759 c11 proof (D-CORE-FILE-ADAPTERS1=A): json.reader and csv.reader take a
+# file (FileReader), standard input (term.stdin()) and a program's own
+# `MySource` through the Prelude `Reader`, and the program's helpers name the
+# `Reader` bound. Standard input feeds the JSON reader in the json steps and
+# the CSV reader in the csv steps. Each tier prints the same lines.
+fixture: json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step json_o0: jet run --optimize=none run.jet json
+stdin: doc.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.json.out
+step json_o1: jet run --optimize=basic run.jet json
+stdin: doc.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.json.out
+step json_o2: jet run --optimize=full run.jet json
+stdin: doc.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.json.out
+step csv_o0: jet run --optimize=none run.jet csv
+stdin: rows.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.csv.out
+step csv_o1: jet run --optimize=basic run.jet csv
+stdin: rows.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.csv.out
+step csv_o2: jet run --optimize=full run.jet csv
+stdin: rows.stdin
+exit: 0
+stdout: = json_and_csv_readers_take_a_file_stdin_and_a_programs_own_source.csv.out
