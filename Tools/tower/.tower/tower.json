@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102200,
+    "rev": 102202,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49022,20 +49022,20 @@
         {
           "n": 2,
           "text": "D-TASK-SLICE1 is ratified and its outcome is implemented: for A, task.race/any/all return within one slice of their decision when a loser is busy, a #Context deadline and SIGTERM drain stop a busy handler with Drop cleanup, and busy tasks cannot starve a runnable task beyond a bounded number of slices.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:58.443Z"
+          "evidence": "D-TASK-SLICE1 is ratified (A) and built: edcd16c03d (the loop-turn and recursive-entry polls), 08130d813a (a carrier whose fiber gave its turn starts a queued task first) and f3ef655a4c (light38, the rows for the remaining clauses). On the gate-p48 jet, each 1/0: any_all_and_a_deadline_block_stop_a_busy_task_on_every_tier (task.any and task.all with a spinning branch, and a busy #Deadline(20ms) block stops after its defer close, at O0, O1, O2 and aot); a_cancel_or_deadline_stops_a_busy_loop_at_its_next_iteration_on_every_tier (task.race with a busy loser, a cancel with defer cleanup, task.timeout); process_signal_drain/sigterm_stops_a_busy_handler_through_its_cleanup (a SIGTERM drain stops a spinning on_signal(.Term) handler within 1 s, with its close and a cancelled join); run_returning_stops_a_busy_detached_task_through_its_cleanup; busy_tasks_on_every_carrier_give_a_quick_task_its_turn. On gate-p47: more_busy_tasks_than_carriers_still_start_a_queued_task 1/0 and golden BusyTurns 3/0. On gate-p48: golden CancelCleanup 3/0.",
+          "at": "2026-11-14T05:07:47.739Z"
         },
         {
           "n": 4,
           "text": "Spec (D-FOUND-LIFECYCLE1 tradeoff, D-CANCELMODEL1), core-library and examples state the ratified rule once; no second cancellation or scheduling mechanism is added.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:58.443Z"
+          "evidence": "f3ef655a4c (light38): spec.md:3802 and architecture.md:1301 no longer say a task with no wait point is abandoned at exit (busy tasks stop at their check); spec.md:4125`s second statement of D-GROUP-CANCEL1 now points at the cancellation rules; the CancelCleanup example header and the README say \"wait points and loop checks\". Fair turns are stated once (spec.md:4199) and cancel and deadline once (spec.md:3782-3797), and Core`s on_signal row and the core-library pause and cancel row agree. No second mechanism is added: one poll kind per loop turn or recursive entry (edcd16c03d) and one group-cancel record (3627b6c11b).",
+          "at": "2026-11-14T05:07:49.036Z"
         },
         {
           "n": 5,
@@ -49075,7 +49075,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:58.443Z",
-      "updated": "2026-11-14T04:57:07.779Z",
+      "updated": "2026-11-14T05:07:49.036Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -204735,6 +204735,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:07:49.036Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08u6j84",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-14T05:07:47.739Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08u6j84",
+      "note": "#2"
+    },
     {
       "at": "2026-11-14T05:05:16.920Z",
       "by": "Main",
