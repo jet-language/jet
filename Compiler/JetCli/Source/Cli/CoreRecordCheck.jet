@@ -38,7 +38,7 @@ use {
     record_time: core.time
     jet_backend.[x64_executable_add_parts]
     jet_driver.[JetDriverCompileMode, JetDriverCoreRecord, JetDriverCoreRecordCounts, JetDriverCoreRecordSectionSize, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_check_outcome, jet_driver_core_record_open_embedded, jet_driver_core_record_round_trip, jet_driver_core_record_sizes, jet_driver_core_record_write, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, RECORD_CHECKSUM_BYTES, sha256_bytes, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
 }
 
@@ -82,7 +82,10 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
                 counts: jet_driver_core_record_round_trip(bytes, jet_cli_core_record_threads()) ?? return jet_cli_ice("the Core record doesn't read back: {err}")
                 if trace_sink == .Val(sink) -> sink.end("core_record.read_back", counts.bodies)
                 if trace_sink == .Val(sink) -> sink.begin("core_record.embed", "", -1, -1)
-                digest: jet_cli_core_record_digest(bytes)
+                // The record's trailing checksum, the sha256 its writer took
+                // as it wrote it, names it: the only hash here is the
+                // identity's, over every byte of `out`.
+                checksum: sha256_hex_bytes(bytes.slice(bytes.len() - RECORD_CHECKSUM_BYTES, bytes.len()))
                 names := [String]{JET_CLI_CORE_RECORD_PART}
                 payloads := [[U8]]{bytes}
                 loop name in JET_CLI_RUNTIME_PART_FILES {
@@ -114,7 +117,7 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
                 record_files.set_mode(out, JET_CLI_CORE_RECORD_IMAGE_MODE) ?? return jet_cli_maintenance_error("E2105", "couldn't make `{out}` executable: {jet_cli_io_error_text(err)}", None, color, json)
                 record_files.write(identity_file, "{identity}\n") ?? return jet_cli_maintenance_error("E2105", "couldn't write the identity `{identity_file}`: {jet_cli_io_error_text(err)}", None, color, json)
                 if trace_sink == .Val(sink) -> sink.end("core_record.embed", shipped.len())
-                return JetDriverVerbOutput{stdout: "core-record embed: {out}: {jet_cli_core_record_counts(counts)} as part `{JET_CLI_CORE_RECORD_PART}`, sha256 {digest}, {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+                return JetDriverVerbOutput{stdout: "core-record embed: {out}: {jet_cli_core_record_counts(counts)} as part `{JET_CLI_CORE_RECORD_PART}`, checksum {checksum}, {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
             }
             file: args[1]
             record_files.write_bytes(file, bytes) ?? return jet_cli_maintenance_error("E2105", "couldn't write the Core record `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
