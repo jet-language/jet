@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102390,
+    "rev": 102393,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91569,15 +91569,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A plain write that replaces a Close value in a List element, a Map entry or module storage closes it before it drops, on O0, O1 and O2. Proof: jet test Compiler --profile cases --filter resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop -> PASS 1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T13:19:14.018Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T22:39:35.331Z",
-      "updated": "2026-11-08T22:39:35.331Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T13:19:14.018Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     },
     {
       "id": "c0e4cn5v",
@@ -91645,15 +91656,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#FFI` refuses any argument other than its one `language` with E0930 jet.MarkerArgumentMismatch. Proof: jet test Compiler --profile ui --filter ffi_unknown_argument -> PASS 1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T13:19:13.158Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T05:57:03.965Z",
-      "updated": "2026-11-09T05:57:03.965Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T13:19:13.158Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     },
     {
       "id": "c01xp5ri",
@@ -97826,7 +97848,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-14T03:25:28.972Z",
+      "updated": "2026-11-14T13:19:41.619Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -202001,6 +202023,182 @@
       "created": "2026-11-14T06:29:35.173Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-14"
+    },
+    {
+      "id": "D-CODABLE-DISTINCT1",
+      "cardId": "c0ue0hua",
+      "group": "syntax",
+      "title": "Whether a distinct type codes as its base without a marker",
+      "situation": "A distinct type such as TaskID: distinct String is its own type over a base, String here. Today it has a wire form only if it carries #CodableAsBase, the marker D-CAPBUNDLE1 gave it in 2026-07. A #Codable struct with an unmarked TaskID field fails jet check with E2411 on that field. Its fix line says to add #[Codable] to TaskID, which is accepted but still fails. The ratified web app shape (D-WEBAPP-SHAPE1 A) writes model.jet with unmarked TaskID and ProjectID fields inside #Codable records, and card #6819 c1 asks for that to work. This vote decides how a distinct type gets its base's wire form. Under A it does by default, the way a qualifying plain struct already gets a codec (D-AUTODERIVE1 E). Under B it keeps needing the marker. Under C it forwards every trait its base derives, printing and ordering included. We recommend A.",
+      "gist": "Does a distinct type such as TaskID: distinct String get its base type's wire form by default, or only with #CodableAsBase?",
+      "lesson": "A default that a plain struct already follows should also cover a distinct type over a codable base. Otherwise typed IDs, the common case on the wire, need a marker that adds no meaning.",
+      "explainer": "A distinct type is a new type with the same values as its base. TaskID: distinct String holds text, but a TaskID cannot be passed where a ProjectID is wanted.\n\nA wire form, or codec, is how a value becomes JSON and back. #Codable asks for both directions; #Encode and #Decode ask for one.\n\nSince D-AUTODERIVE1 E, a plain struct or enum whose fields all have a wire form gets one without a marker. #!Codable opts a type out, and the auto_derive lint can deny the default in a package.\n\n#CodableAsBase is the marker that gives a distinct type its base's wire form today: a TaskID is written as the String it holds.",
+      "story": "The web app model from the ratified shape: two distinct ID types and a #Codable Task that holds them, sent to and from the browser as JSON. The same file is written under each option.",
+      "inWild": "Rust's serde needs #[derive(Serialize, Deserialize)] on each newtype. serde_json then writes a newtype struct such as struct TaskId(String) as its inner value. #[serde(transparent)] matters mainly for other formats and for wrappers with named fields. Kotlin's kotlinx.serialization needs @Serializable on a value class, which then encodes as its one property. Go encodes a defined type such as type TaskID string as its underlying type with no annotation. Swift's Codable needs a conformance on each wrapper type. These outside facts were not re-checked for this ballot.",
+      "detail": "Today, on dev 26afb1a0e6 with the gate-p62 jet, a #Codable struct with an unmarked distinct Int or distinct String field is E2411 twice on the field. One error is for serializing and one for decoding. With #CodableAsBase on the distinct type, json.to_string and json.decode<Task> round-trip {\"id\":7,\"name\":\"a\"}.\n\nWith #Codable on the distinct type instead, jet check accepts the marker and still gives E2411 on the field. The parser keeps only bundle markers on a distinct type (parser_distinct_marker_derives in JetParser Declarations/Types.jet). It drops an auto-derive marker silently, so the fix line's advice does not work. A staged fix (GoalsB-1-e2411-distinct-fix) makes that fix line name #CodableAsBase for now.\n\nA hand-written codec on an unmarked distinct type already works. With impl TaskID.Encode and impl TaskID.Decode written by hand, a #Codable record prints {\"id\":\"0193a5e0\"}. Decoding \"t1\" is refused with [at `id`: not a UUIDv7: t1]. A range-bounded distinct Int(1..10) marked #CodableAsBase refuses 11 as a field error, not a panic.\n\nSpec: spec.md says a distinct type forwards only the traits it names (D-CAPBUNDLE1), and syntax-decisions.md says #CodableAsBase exposes base coding. Equality already comes with every distinct type whose base has it. The web app shape proposal (A.6 finding 1, TR4) records that the checked crewboard files had to drop #Codable from Logic, because no distinct ID derives a codec.\n\nEdge cases are written under each option.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A distinct type codes as its base by default",
+          "gist": "A distinct type whose base has a wire form gets the base's wire form with no marker. #!Codable opts out; #CodableAsBase retires.",
+          "detail": "A distinct type follows D-AUTODERIVE1 E for coding. When its base has a wire form, the distinct type has the same one, written as the base value. It needs no marker as a field, a list element or a top-level value (json.to_string(id)).\n\nThe default holds for an imported distinct type too. A #Codable record in the UI package that holds logic.ProjectID codes it with no marker, so the cross-package codec facts include distinct types. #!Codable on the distinct type opts it out. A package that denies auto_derive must mark it #Codable, which on a distinct type now means base coding.\n\nPrinting, ordering and Debug keep D-CAPBUNDLE1: a distinct type forwards them only when it names them (#Printable, #Comparable), as the ratified model.jet does. Only the wire form gets the default, because an ID needs it to cross a boundary. Printing and ordering change what a program shows and allows; option C defaults them too.\n\nA hand-written codec wins over the default, the same rule as for structs (SerdeItems.jet: an unmarked hand codec stays the only one). An ID type that must refuse some base values writes impl TaskID.Decode with its own check. It needs no marker or opt-out. This is how #3709 c23 is met: an ID decoder accepts only UUIDv7 text, so \"t1\" in a crafted request is refused with 422.\n\nNested: Inner: distinct Int and Outer: distinct Inner both code as an Int. A base with no wire form (a #!Codable struct, a function) gives none. A #Codable record holding it is E2411 at the field, and the fix line names the base.\n\nDecode errors are the base's errors at the same path: \"id\": \"x\" for a distinct Int is the Int decode error at $.id. A range-bounded distinct such as distinct Int(1..10) decodes through its checked conversion, so 11 is a decode error at the field, not a panic.\n\nE2411 changes with the rule. Its Why line no longer says that only types that opt in have a wire form, which is already untrue for structs since D-AUTODERIVE1 E. It names the type in the path that has none instead. Its union-member fix text stops naming #CodableAsBase.\n\n#CodableAsBase becomes redundant and retires in one cutover. After it, the marker is the plain E0927 (jet.UnknownAppliedRule: \"#CodableAsBase isn't a known applied rule\"). That is the generic error for any marker the registry does not hold, with no teaching text (D-LANG-MIGRATE1). The rewrite registered in jet fix deletes the marker and is the migration route. The Core and repository sweep comes first, per the tightened-rule rule.\n\nThe cutover changes 33 tracked files on dev 26afb1a0e6. Compiler has 14: JetCli SyntaxDictionaryData, JetDriver CoreReach, and JetFoundation PreludeMarkers, DiagnosticRows (the E2411 union fix text), OwnedTraitRows, OwnedTraits and its test. The rest of Compiler is JetSema Derives, Items, SerdeItems and DistinctForwardSourceFixtures, and Prelude Markers, Traits and Diagnostics.\n\nOutside Compiler: Examples/Types (2), tests (9: 4 cases rows, 3 ui files, 1 fuzz file) and Docs/spec (2). Then the generated Docs/site E2411 page, Tools/editors (4 grammars) and one Tools/agent-eval facts file. The other 10 files that name it are dated audits and the Tower store, which stay as history.",
+          "code": "use { json: core.encoding.json }\n\n#Printable\nTaskID: distinct String\n#Printable\nProjectID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,\n    project: ProjectID,\n    title: String,\n}\n\nrun: fn() {\n    task: Task{id: TaskID.from_string(\"t1\"), project: ProjectID.from_string(\"p1\"), title: \"Write\"}\n    text: json.to_string(task) ?? panic(\"encode\")\n    print(text) // {\"id\":\"t1\",\"project\":\"p1\",\"title\":\"Write\"}\n    back: json.decode<Task>(text) ?? panic(\"decode: {err}\")\n    print(back.id) // t1\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the marker: #CodableAsBase on each distinct type",
+          "gist": "A distinct type codes as its base only with #CodableAsBase, as today. The card and the proposal's model.jet add the marker to each ID type.",
+          "detail": "D-CAPBUNDLE1 stays as ratified: a distinct type forwards only the traits it names. Every ID type that crosses the wire carries #CodableAsBase. #6819 c1 is amended to say so, and the web app shape's model.jet adds the marker to TaskID and ProjectID.\n\nA hand-written impl TaskID.Encode or impl TaskID.Decode wins and needs no marker, as today. So an ID type that must refuse \"t1\" (#3709 c23) writes its own decoder under B too.\n\nThe E2411 fix line names #CodableAsBase for a distinct type (the staged fix). Its Why line says a distinct type has a wire form only with that marker or a hand codec. That replaces the stale \"only types that opt in have a wire form\". #Codable written on a distinct type becomes an error that names #CodableAsBase, so the marker that looks right but does nothing stops being accepted.\n\nNested: Outer: distinct Inner needs its own #CodableAsBase, and Inner must have a wire form. A base with no wire form is E0905 at the marker, naming the trait and the base. Decode errors are the base's errors at the same path, and a range-bounded distinct decodes through its checked conversion, as under A.",
+          "code": "use { json: core.encoding.json }\n\n#[Printable, CodableAsBase]\nTaskID: distinct String\n#[Printable, CodableAsBase]\nProjectID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,\n    project: ProjectID,\n    title: String,\n}\n\nrun: fn() {\n    task: Task{id: TaskID.from_string(\"t1\"), project: ProjectID.from_string(\"p1\"), title: \"Write\"}\n    text: json.to_string(task) ?? panic(\"encode\")\n    print(text) // {\"id\":\"t1\",\"project\":\"p1\",\"title\":\"Write\"}\n    back: json.decode<Task>(text) ?? panic(\"decode: {err}\")\n    print(back.id) // t1\n}"
+        },
+        {
+          "key": "C",
+          "name": "A distinct type forwards every trait its base derives",
+          "gist": "A distinct type gets its base's Printable, Debug, Comparable, Encode and Decode by default; #!Trait opts one out. #CodableAsBase retires, and #Printable and #Comparable on a distinct type become redundant.",
+          "detail": "A distinct type follows D-AUTODERIVE1 E for every auto-derivable trait. Printable, Debug, Comparable, Encode and Decode come from the base when the base has them, as Equatable already does today. #!Printable, #!Comparable or #!Codable on the distinct type opts one out. A package that denies auto_derive names the traits it wants.\n\n#Numeric stays a marker: operators are what a distinct type exists to withhold, and structs do not derive them either. A hand-written implementation wins, as under A, so a validating ID decoder is impl TaskID.Decode (#3709 c23). The default reaches imported distinct types as under A. Decode errors, nesting and range-bounded bases behave as under A.\n\nC supersedes more of D-CAPBUNDLE1 than A. #CodableAsBase retires with the same plain E0927, the same jet fix route and the same 33-file cutover. #Printable and #Comparable on a distinct type become redundant too. The jet fix rewrite deletes them, which adds every file that writes them on a distinct type to the sweep, the ratified model.jet included.\n\nEdge cases: every ID prints and sorts by its base value with no marker. That suits logs and stable listings. But a sort or a < over IDs then compiles where the author meant no order. A distinct type over a sensitive String prints it unless it opts out with #!Printable.",
+          "code": "use { json: core.encoding.json }\n\nTaskID: distinct String\nProjectID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,\n    project: ProjectID,\n    title: String,\n}\n\nrun: fn() {\n    task: Task{id: TaskID.from_string(\"t1\"), project: ProjectID.from_string(\"p1\"), title: \"Write\"}\n    text: json.to_string(task) ?? panic(\"encode\")\n    print(text) // {\"id\":\"t1\",\"project\":\"p1\",\"title\":\"Write\"}\n    back: json.decode<Task>(text) ?? panic(\"decode: {err}\")\n    print(back.id) // t1\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Typed IDs on the wire are the common case in every app the web shape describes, and a struct of codable fields already codes with no marker. A makes a distinct type follow the same codec default, so the ratified model.jet checks as written and a typed ID never needs a marker to cross the wire. Printing and ordering stay opt-in, because they change what a program shows and allows.",
+        "gains": [
+          "The ratified model.jet checks as written, with no codec marker on its ID types",
+          "The codec follows the struct default (D-AUTODERIVE1 E); Printable and Comparable forwarding stay per D-CAPBUNDLE1",
+          "A marker retires instead of a new one being taught"
+        ],
+        "losses": [
+          {
+            "loss": "A distinct type made to keep a value apart, such as a token over String, now has a wire form unless its author opts out.",
+            "mitigation": "#!Codable opts it out, and the auto_derive lint can deny the default per package. The ratified model keeps secrets as #Secret String, not as distinct types (proposal line 574: webhook_secret: #Secret String?). A #Secret field is refused on the wire today: a #Codable struct with a #Secret String field is E2411 on that field (probed with the gate-p62 jet)."
+          },
+          {
+            "loss": "It amends ratified D-CAPBUNDLE1, which said a distinct type forwards only the traits it names.",
+            "mitigation": "Only coding changes; ordering, printing and arithmetic still need their markers, so the forwarding rule stays for every trait that changes behaviour."
+          },
+          {
+            "loss": "It costs a compiler change and a sweep. The codec check, the derived codec for a distinct type in its own and importing packages, and the E2411 text change. jet fix removes #CodableAsBase from 33 tracked files.",
+            "mitigation": "The derived codec already exists for #CodableAsBase (SerdeItems.jet sema_serde_items_distinct_codec); A makes it the default and deletes the marker path. The source sweep is one jet fix run; the Compiler rows are listed under A."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a marker on every ID type that only says the type may be written as its base. A plain struct never needs one, yet the ratified model.jet and every app built from it would carry it."
+          },
+          {
+            "key": "C",
+            "reason": "C also makes every ID print and order by its base with no marker. A wire form is what an ID needs to cross a boundary. Printing and ordering change what a program shows and allows, so a sort over IDs or a printed sensitive value would compile unasked. The ratified model.jet already writes #Printable on its IDs."
+          }
+        ],
+        "tradeoff": "Typed IDs code with no marker, at the cost of amending D-CAPBUNDLE1 for coding and asking authors of value-hiding distinct types to opt out."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: GoalsA-1. The non-author review (ballots/D-CODABLE-DISTINCT1.review.md) found G1-G7, and GoalsB-2 applied every one. GoalsA-1's confirmation of the fixes is pending."
+      },
+      "checkInstructions": "Read the D-CAPBUNDLE1 row in Docs/spec/syntax-decisions.md and the distinct-type paragraph in Docs/spec/spec.md (\"A distinct type forwards the traits it names\"). Read sema_serde_items_codable, sema_serde_items_nominal_codable and sema_serde_items_distinct_codec in Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet. Read parser_distinct_marker_derives in Compiler/JetParser/Source/Parser/Declarations/Types.jet and sema_derive_auto_selected in Compiler/JetSema/Source/Sema/Registration/Derives.jet.\n\nRead the web app shape proposal Docs/proposals/2026-11-13-web-app-framework-shape.md, model.jet near line 470 and finding 1 in A.6, and #3709 c23.\n\nProbes ran with the gate-p62 jet and JET_TOOLCHAIN_ROOT at a dev 26afb1a0e6 worktree.\nunmarked: TaskID: distinct Int and Name: distinct String fields in a #Codable Task; jet run gives E2411 four times (two per field).\nmarked: the same with #CodableAsBase on both; jet run prints {\"id\":7,\"name\":\"a\"} twice (encode, then decode and encode again).\ncodable-on-distinct: #Codable on both distinct types instead; E2411 four times, as unmarked.\n\nhand-codec: an unmarked TaskID: distinct String with hand-written impl TaskID.Encode and impl TaskID.Decode. The record prints {\"id\":\"0193a5e0\"}, and decoding \"t1\" is refused with [at `id`: not a UUIDv7: t1].\nsecret: a #Codable struct with a #Secret String field; jet run gives E2411 on that field (serialized and decoded).\n\nThe cutover count is git grep -c CodableAsBase on dev 26afb1a0e6: 43 files, of which 10 are dated audits and the Tower store.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Does a distinct ID type get its base's wire form by default, or only with #CodableAsBase?",
+        "lesson": "A plain struct of codable fields gets a wire form with no marker. A distinct type over a codable base should too, so typed IDs need no marker.",
+        "trio": {
+          "current": {
+            "note": "An unmarked distinct field in a #Codable struct is E2411, and the fix line's advice (#[Codable] on the distinct type) still fails.",
+            "code": "TaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,   // E2411: `TaskID` can't be serialized\n    title: String,\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "A defined type encodes as its underlying type with no annotation.",
+            "code": "type TaskID string\n\ntype Task struct {\n    ID    TaskID `json:\"id\"`\n    Title string `json:\"title\"`\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "By default",
+            "gist": "A distinct type over a codable base codes as that base; #!Codable opts out.",
+            "gains": [
+              "The web model checks as written",
+              "Same codec default as plain structs"
+            ],
+            "losses": [
+              "A value-hiding distinct type must opt out",
+              "Amends D-CAPBUNDLE1 for coding; #Printable stays per type"
+            ],
+            "proposed": {
+              "code": "TaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,   // written as its String\n    title: String,\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "With the marker",
+            "gist": "Each distinct type that crosses the wire carries #CodableAsBase, as today.",
+            "gains": [
+              "D-CAPBUNDLE1 stays as ratified"
+            ],
+            "losses": [
+              "Every ID type carries a marker",
+              "The ratified web model must change"
+            ],
+            "proposed": {
+              "code": "#CodableAsBase\nTaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,\n    title: String,\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Every base trait by default",
+            "gist": "A distinct type gets its base's printing, ordering and codec; #!Trait opts one out.",
+            "gains": [
+              "No marker on ID types at all",
+              "Same default as plain structs for every derivable trait"
+            ],
+            "losses": [
+              "IDs print and sort unasked",
+              "Supersedes more of D-CAPBUNDLE1"
+            ],
+            "proposed": {
+              "code": "TaskID: distinct String\n\n#Codable\nTask: struct {\n    id: TaskID,   // written and printed as its String\n    title: String,\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Typed IDs are the common case on the wire, and a plain struct already codes by default.",
+          "gains": [
+            "No codec marker on ID types",
+            "Same codec default as plain structs"
+          ],
+          "losses": [
+            {
+              "loss": "A value-hiding distinct type now has a wire form by default.",
+              "mitigation": "#!Codable opts it out, and #Secret fields stay refused on the wire."
+            },
+            {
+              "loss": "A compiler change and a jet fix sweep that removes #CodableAsBase.",
+              "mitigation": "The base codec already exists for the marker; A makes it the default."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A marker on every ID type that a plain struct never needs."
+            },
+            {
+              "key": "C",
+              "reason": "Printing and ordering by default change what a program shows and allows; only the wire form needs the default."
+            }
+          ],
+          "tradeoff": "Typed IDs code with no marker; value-hiding distinct types opt out."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-14T13:19:41.619Z"
     }
   ],
   "questions": [
@@ -205447,6 +205645,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:19:41.619Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CODABLE-DISTINCT1",
+      "note": "Whether a distinct type codes as its base without a marker"
+    },
+    {
+      "at": "2026-11-14T13:19:14.018Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ku1nvb",
+      "note": "#1 A plain write that replaces a Close value in a List element,"
+    },
+    {
+      "at": "2026-11-14T13:19:13.158Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c018v880",
+      "note": "#1 `#FFI` refuses any argument other than its one `language` wi"
+    },
     {
       "at": "2026-11-14T13:12:22.631Z",
       "by": "Main",
