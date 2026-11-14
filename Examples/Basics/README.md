@@ -23,6 +23,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [InterpDebugLabel](InterpDebugLabel.jet) — Trailing `=` reprints the expression text, then " = ", then the value.
 - [LabeledLoops](LabeledLoops.jet) — a loop can carry a compile-time name, `break(name)` and `next(name)` target it from inside a nested loop.
 - [LoopForms](LoopForms.jet) — the shapes of the single `loop` keyword.
+- [LoopPatternTest](LoopPatternTest.jet) — A pattern test in a `loop` condition binds its names for each pass, as in an `if` condition: `loop cur == .Val(c) { … }` runs once per `Val` and stops at the first `None`.
 - [MethodChain](MethodChain.jet) — A broken dot-chain keeps one step per line, each freely commented.
 - [MultilineString](MultilineString.jet) — `"""…"""` spans many lines.
 - [Numbers](Numbers.jet)

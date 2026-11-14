@@ -824,6 +824,10 @@ left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
 clauses. Semicolons remain statement boundaries only.
+A pattern test in a conditional loop binds its names for the body of each
+pass, as in an `if` condition: `loop cur == .Val(c) { …; cur = next(c) }`
+runs once per `Val` and stops at the first `None`, and `c` is not visible
+after the loop.
 
 For a typed-literal source, bind the literal first:
 `channels: [Int]{0, 2, 4}`, then `loop channel in channels -> channel`.

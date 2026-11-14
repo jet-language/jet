@@ -1,0 +1,15 @@
+// A pattern test in a `loop` condition binds its names for each pass, as in
+// an `if` condition: `loop cur == .Val(c) { … }` runs once per `Val` and
+// stops at the first `None`. The name `c` lives only inside the body.
+countdown: fn(n: Int) -> Int? {
+    if n > 1 -> Val(n - 1) else -> None
+}
+
+run: fn() {
+    cur := Int?{Val(3)}
+    loop cur == .Val(c) {
+        print("pass {c}")
+        cur = countdown(c)
+    }
+    print("stopped at None")
+}
