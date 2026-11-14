@@ -266,7 +266,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0915 | MissingDisplay | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1451 | the type implements `Display`, or a field with one is printed |
 | E0917 | RecursiveInlineAlways | Compiler/JetSema/Source/Sema/MarkerRules.jet:2236 | a recursive function is not `#Inline(Always)` |
 | E0918 | InlineAlwaysAddressTaken | Compiler/JetSema/Source/Sema/MarkerRules.jet:2266 | a function whose address is taken is not `#Inline(Always)` |
-| E0921 | MemoryDenialViolated | Compiler/JetSema/Source/Sema/Effects/Checks.jet:4941 | the denial is lifted where the rights tree sets it |
+| E0921 | MemoryDenialViolated | Compiler/JetSema/Source/Sema/Effects/Checks.jet:4961 | the denial is lifted where the rights tree sets it |
 | E0923 | ImplOfUnknownTrait | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3446 | the impl names a declared or imported trait |
 | E0926 | InvalidSchedule | Compiler/JetSema/Source/Sema/Jobs.jet:120 | the schedule is a positive in-range duration or a valid `HH:MM` |
 | E0927 | UnknownAppliedRule | Compiler/JetSema/Source/Sema/MarkerRules.jet:1647 | the marker names a rule in scope |
@@ -278,10 +278,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0935 | TraitConstantNotCompileTime | Compiler/JetSema/Source/Sema/Registration/TraitConstants.jet:146 | the value is a literal, an enum case or a list of them |
 | E0936 | UnknownTraitConstant | Compiler/JetSema/Source/Sema/Registration/TraitConstants.jet:90 | an impl gives only the constants its trait declares |
 | E0937 | AmbiguousTraitConstant | Compiler/JetSema/Source/Sema/Registration/TraitConstants.jet:56 | the qualified name picks one constant |
-| E0938 | MemoNotPure | Compiler/JetSema/Source/Sema/Effects/Checks.jet:5018 | `#Memo` takes pure functions |
+| E0938 | MemoNotPure | Compiler/JetSema/Source/Sema/Effects/Checks.jet:5038 | `#Memo` takes pure functions |
 | E0939 | MemoArgumentNotHashable | Compiler/JetSema/Source/Sema/MarkerRules.jet:2337 | memoized arguments are hashable |
 | E0940 | MemoLazyIter | Compiler/JetSema/Source/Sema/MarkerRules.jet:2332 | the function collects the values before returning them |
-| E0944 | ComptimeImportAtRuntime | Compiler/JetSema/Source/Sema/ComptimeUse.jet:263 | shipped code imports the module with a plain `use` |
+| E0944 | ComptimeImportAtRuntime | Compiler/JetSema/Source/Sema/ComptimeUse.jet:358 | shipped code imports the module with a plain `use` |
 | E0945 | ToolchainInputOutsideTree | Compiler/JetDriver/Source/Driver/ComptimeInputs.jet:175 | `toolchain:` inputs belong to the toolchain tree's packages |
 | E0952 | ComptimeFuelExhausted | Compiler/JetEval/Source/EvalValues.jet:148 | the comptime work is reduced or split to fit the budget |
 | E0953 | ComptimePanic | Compiler/JetEval/Source/EvalValues.jet:150 | the condition that raises the authored error is changed |
