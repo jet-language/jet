@@ -565,3 +565,67 @@ record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, d
         }
     }
 }
+
+// Where trees `left` and `right` first differ, as a path from their roots
+// (`.key`, `[index]`) and what differs there, else None. A float is the same
+// as one with the same bits, as the codec keeps them: a NaN (core.math's
+// `NAN` constant) is the same as itself, though `==` on it is false.
+record_tree_difference: fn(left: Dyn, right: Dyn) -> String? Never! {
+    if left == {
+        .Array(items) -> {
+            if right == {
+                .Array(others) -> {
+                    if items.len() != others.len() -> return Val(": {items.len()} items, then {others.len()}")
+                    loop index in 0..<items.len() {
+                        inner: record_tree_difference(items[index], others[index]) ?? next
+                        return Val("[{index}]{inner}")
+                    }
+                    None
+                }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Val(": an array, then {record_tree_kind(right)}")
+            }
+        }
+        .Object(entries) -> {
+            if right == {
+                .Object(others) -> {
+                    if entries.len() != others.len() -> return Val(": {entries.len()} keys, then {others.len()}")
+                    loop index in 0..<entries.len() {
+                        if entries[index].key != others[index].key -> return Val(": key `{entries[index].key}`, then `{others[index].key}`")
+                        inner: record_tree_difference(entries[index].value, others[index].value) ?? next
+                        return Val(".{entries[index].key}{inner}")
+                    }
+                    None
+                }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Val(": an object, then {record_tree_kind(right)}")
+            }
+        }
+        .Float(number) -> {
+            if right == {
+                .Float(other) -> if tree_math.to_bits(number) == tree_math.to_bits(other) -> None else -> Val(": float bits {tree_math.to_bits(number)}, then {tree_math.to_bits(other)}")
+                .Null | .Bool(_) | .Int(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(": a float, then {record_tree_kind(right)}")
+            }
+        }
+        .Bytes(bytes) -> {
+            if right == {
+                .Bytes(others) -> if bytes == others -> None else -> Val(": {bytes.len()} bytes, then {others.len()} other bytes")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(": bytes, then {record_tree_kind(right)}")
+            }
+        }
+        .Null | .Bool(_) | .Int(_) | .Number(_) | .Text(_) | .DateTime(_) -> if left == right -> None else -> Val(": {left:Debug}, then {right:Debug}")
+    }
+}
+
+record_tree_kind: fn(value: Dyn) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "a bool"
+        .Int(_) -> "an int"
+        .Float(_) -> "a float"
+        .Number(_) -> "a number lexeme"
+        .Text(_) -> "a text"
+        .Bytes(_) -> "bytes"
+        .DateTime(_) -> "a date-time"
+        .Array(_) -> "an array"
+        .Object(_) -> "an object"
+    }
+}

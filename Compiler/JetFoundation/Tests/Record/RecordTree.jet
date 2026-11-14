@@ -1,7 +1,7 @@
 // Record trees: Dyn rows written once by id and read back on demand.
 use jet_foundation.[
     RecordReader, RecordSection, RecordTreeTables, RecordValue, record_encode, record_open_schema,
-    record_tree_add, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer,
+    record_tree_add, record_tree_difference, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer,
 ]
 
 RECORD_TREE_TEST_SCHEMA: "jet.tree-test/v1"
@@ -23,6 +23,8 @@ record_tree_test_rows: fn() -> [Dyn] Never! {
             (key: "symbol", value: shared),
             (key: "count", value: Dyn.Int(0 - 9223372036854775807 - 1)),
             (key: "ratio", value: Dyn.Float(-2.5)),
+            // core.math's `NAN`: `==` on it is false, its bits read back.
+            (key: "nan", value: Dyn.Float(Float{0.0} / Float{0.0})),
             (key: "raw", value: Dyn.Bytes([U8]{0, 255, 7})),
             (key: "none", value: Dyn.Null),
             (key: "flags", value: Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Bool(false)})),
@@ -74,7 +76,7 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     loop (index, row) in rows {
         read: record_tree_row(reader, view, 1, index)
         assert_eq(read.problem, None)
-        assert((read.value ?? panic("row {index} reads")) == row)
+        assert_eq(record_tree_difference(read.value ?? panic("row {index} reads"), row), None)
     }
 }
 
@@ -85,6 +87,15 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 8) else -> panic("the node end column is bytes")
     again: record_tree_test_tables(record_tree_test_rows())
     assert(again.nodes == tables.nodes && again.rows == tables.rows && again.strings == tables.strings && again.shapes == tables.shapes)
+}
+
+#Test("a record tree difference names the first path where two trees differ") {
+    rows: record_tree_test_rows()
+    loop row in rows -> assert_eq(record_tree_difference(row, row), None)
+    changed: Dyn.Array([Dyn]{record_tree_test_symbol(false), record_tree_test_symbol(false), record_tree_test_symbol(false)})
+    assert_eq(record_tree_difference(rows[0], changed), Val("[2].name: Text(\"pop\"), then Text(\"push\")"))
+    assert(record_tree_difference(Dyn.Float(Float{0.0} / Float{0.0}), Dyn.Float(1.0)) != None)
+    assert_eq(record_tree_difference(Dyn.Array([Dyn]{}), Dyn.Null), Val(": an array, then null"))
 }
 
 #Test("a record tree writes an int past i64 as a wide int and refuses a malformed row") {

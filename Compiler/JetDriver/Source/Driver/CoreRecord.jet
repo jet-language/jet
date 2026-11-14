@@ -56,7 +56,7 @@
 // (CoreRecordRebase.jet), and sema rebases a taken body's DeclIDs (JetSema
 // CoreRecordBodies.jet).
 use {
-    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordReaderResult, RecordSection, RecordTreeView, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_open_schema_trusted, record_section_elements, record_section_index, record_tree_add, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer, record_value_as_bool, record_value_as_int, record_value_as_list, record_value_as_str, record_value_field, symbol_keys, symbol_keys_intern]
+    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordReaderResult, RecordSection, RecordTreeView, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_open_schema_trusted, record_section_elements, record_section_index, record_tree_add, record_tree_difference, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer, record_value_as_bool, record_value_as_int, record_value_as_list, record_value_as_str, record_value_field, symbol_keys, symbol_keys_intern]
     jet_sema.[SemaComptimeFunctionResult, SemaComptimeItemValue, SemaGraphModuleResult, SemaRegistrationModule, sema_core_body_packet_stored, sema_core_body_packets, sema_core_record_field_errors, sema_incremental_optional_item_header, sema_registration_reserved_symbols]
 }
 
@@ -505,33 +505,35 @@ jet_driver_core_record_values: fn(record: JetDriverCoreRecord, index: Int) -> [S
 }
 
 // Reads every row of `bytes` back and encodes it again: each must give the
-// tree it was read from, and each key must name its own row.
+// tree it was read from (record_tree_difference, which holds a float the
+// same by its bits, so a NaN constant reads back as itself), and each key
+// must name its own row.
 jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts Err! {
     record: jet_driver_core_record_open(bytes) ?? return Err(err)
     loop index in 0..<record.module_names.len() {
         row: jet_driver_core_record_module(record, index) ?? return Err(err)
         if row.module_name != record.module_names[index] || row.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its row is `{row.module_name}`")
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_MODULE_ROWS, index) ?? return Err(err)
-        if row.encode() != stored -> return Err("Core module `{row.module_name}` encodes to another tree after a read")
+        if record_tree_difference(row.encode(), stored) == .Val(difference) -> return Err("Core module `{row.module_name}` encodes to another tree after a read, at row{difference}")
     }
     loop index in 0..<record.body_keys.len() {
         packet: jet_driver_core_record_body(record, index) ?? return Err(err)
         if packet.function_key != record.body_keys[index] || packet.module_identity != record.body_modules[index] -> return Err("Core body key {index} names `{record.body_keys[index]}` but its packet is `{packet.function_key}`")
         if packet.function == None -> return Err("Core body packet `{packet.function_key}` holds no body")
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_BODY_ROWS, index) ?? return Err(err)
-        if packet.encode() != stored -> return Err("Core function `{packet.function_key}` encodes to another tree after a read")
+        if record_tree_difference(packet.encode(), stored) == .Val(difference) -> return Err("Core function `{packet.function_key}` encodes to another tree after a read, at packet{difference}")
     }
     loop index in 0..<record.module_names.len() {
         registration: jet_driver_core_record_registration(record, index) ?? return Err(err)
         if registration.module_name != record.module_names[index] || registration.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its registration row is `{registration.module_name}`")
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
-        if registration.encode() != stored -> return Err("Core module `{registration.module_name}`'s registration row encodes to another tree after a read")
+        if record_tree_difference(registration.encode(), stored) == .Val(difference) -> return Err("Core module `{registration.module_name}`'s registration row encodes to another tree after a read, at row{difference}")
     }
     decls: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_DECL_ROWS)
     loop index in 0..<decls {
         row: jet_driver_core_record_decl(record, index) ?? return Err(err)
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_DECL_ROWS, index) ?? return Err(err)
-        if row.encode() != stored -> return Err("the declaration `{row.key}` encodes to another tree after a read")
+        if record_tree_difference(row.encode(), stored) == .Val(difference) -> return Err("the declaration `{row.key}` encodes to another tree after a read, at row{difference}")
     }
     table: jet_driver_core_record_decls(record) ?? return Err(err)
     if table.rows.len() != decls -> return Err("the Core record's declaration table keeps {table.rows.len()} of its {decls} rows")
@@ -543,7 +545,7 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
         }
         values += module_values.len()
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_VALUE_ROWS, index) ?? return Err(err)
-        if module_values.encode() != stored -> return Err("Core module `{record.module_names[index]}`'s value rows encode to another tree after a read")
+        if record_tree_difference(module_values.encode(), stored) == .Val(difference) -> return Err("Core module `{record.module_names[index]}`'s value rows encode to another tree after a read, at rows{difference}")
     }
     Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), registrations: record.module_names.len(), decls: decls, values: values, bytes: bytes.len(), sections: jet_driver_core_record_section_sizes(record.reader)})
 }
