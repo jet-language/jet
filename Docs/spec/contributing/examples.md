@@ -210,6 +210,10 @@ entry's own claim and never above that room; a case's `limit: resident=`
 tightens it. Each entry's verdict diffs and rows
 print as soon as it finishes; the results file stays in corpus order and
 records every entry's `wall_ms` and `peak_kib`.
+The `packages` and `core` suites of `Compiler/test.jet` run their child
+`jet test` runs through the same schedule: each run claims half again its last
+peak, kept in `history/compiler-packages.tsv` and `history/compiler-core.tsv`,
+and a run never measured claims 11 GiB.
 `--timeout SEC` (60 s by default) bounds each step by the CPU time of its
 whole process tree (`core.sys.tree_cpu_time`): SEC seconds on each core,
 all the work SEC seconds of wall time hold on an idle host. Other load on

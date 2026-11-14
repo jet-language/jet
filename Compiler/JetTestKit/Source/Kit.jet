@@ -841,6 +841,15 @@ kit_disk_root: fn() -> String? {
     Val(files.join(home, ".cache/jet/testkit"))
 }
 
+// The state directory under JET_TEST_STATE_DIR, else <kit_disk_root>/state,
+// created and canonical (kit_execute_disk_dir): the corpus pool and the
+// workspace's package pools (Compiler/test.jet) keep their measurements in
+// its `history`.
+kit_state_dir: fn(root: String) -> String Err! {
+    base: sys.get(ENV_JET_TEST_STATE_DIR) ?? files.join(kit_disk_root() ?? return Err("set {ENV_JET_TEST_STATE_DIR}, {ENV_JET_SCRATCH_ROOT} or HOME"), "state")
+    kit_execute_disk_dir(base, root)
+}
+
 kit_case_blocks: fn(status: String) -> Bool {
     kit_expect_named(["FAIL", "UNEXPECTED-PASS", "REFUSED", "ERROR", "TIMEOUT"], status)
 }
@@ -881,8 +890,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements, and the FFI cache when
     // the rows stage on disk.
-    state_base: sys.get(ENV_JET_TEST_STATE_DIR) ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set {ENV_JET_TEST_STATE_DIR}, {ENV_JET_SCRATCH_ROOT} or HOME"), "state")
-    state: kit_execute_disk_dir(state_base, root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
+    state: kit_state_dir(root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
@@ -957,9 +965,12 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
             // Each lambda captures its own copy: a capture moves the name it reads.
             in_suite: suite.copy()
             ran_suite: suite.copy()
-            failed_suite: suite.copy()
             suite_code: kit_report_finish(jet, results.filter(fn(result) { result.suite == in_suite }), path, ran_suites.filter(fn(name) { name == ran_suite }))
-            if suite_code != 0 && !failures.any(fn(failure) { failure.suite == failed_suite }) -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            reported := false
+            loop failure in failures {
+                if failure.suite == suite -> reported = true
+            }
+            if suite_code != 0 && !reported -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
             if suite_code > code -> code = suite_code
         }
         return KitExecution{code: code, failures: failures, results: results}
@@ -1022,7 +1033,7 @@ kit_execute_budget: fn(requested: Int, available: Int) -> Int {
 }
 
 // How many runs a pool of child processes starts at once (Compiler/test.jet's
-// package runs): a quarter of the `cpus`, held between `least` and `most`, then
+// package, Core and fuzz runs): a quarter of the `cpus`, held between `least` and `most`, then
 // lowered to the claims of `claim` bytes each that fit in `budget`
 // (kit_execute_budget; 0 is unknown: no memory gate) and to the `runs` there
 // are. Never fewer than one: a budget below one claim runs them one at a time.
@@ -1054,30 +1065,39 @@ KitHistory: struct {
     peak_kib: Int
 }
 
-// Longest-first (LPT) by last measured wall time; an entry never measured goes first, in
-// corpus order, since it may be the longest. Each entry needs half again its last peak,
-// at least 64 MiB, or kit_job_memory() unmeasured. It claims that need, never more than
-// the whole budget, so the heaviest still runs (alone). Its resident guard is the
-// run-wide kit_resident_guard(), raised to the entry's need but never above the whole
-// room. The guard only stops a runaway child: the claims, not the guard, keep the pool
-// inside the room, so a lower guard would turn a heavy entry into a kill.
+// The corpus pool's schedule (kit_schedule_claims): each entry's history row is its
+// suite and path, and an entry never measured claims kit_job_memory().
 kit_execute_schedule: fn(entries: [KitSelected], history: [String: KitHistory], jobs: Int, budget: Int, available: Int) -> KitSchedule {
+    keys := [String]{}
+    loop item in entries -> keys.push(kit_history_key(item.suite, item.entry.path))
+    kit_schedule_claims(keys, history, kit_job_memory(), jobs, budget, available)
+}
+
+// The schedule of a pool whose entry i has the history row keys[i]. Longest-first (LPT)
+// by last measured wall time; an entry never measured goes first, in pool order, since
+// it may be the longest. Each entry needs half again its last peak, at least 64 MiB, or
+// `unmeasured` bytes. It claims that need, never more than the whole budget, so the
+// heaviest still runs (alone). Its resident guard is the run-wide kit_resident_guard(),
+// raised to the entry's need but never above the whole room. The guard only stops a
+// runaway child: the claims, not the guard, keep the pool inside the room, so a lower
+// guard would turn a heavy entry into a kill.
+kit_schedule_claims: fn(keys: [String], history: [String: KitHistory], unmeasured: Int, jobs: Int, budget: Int, available: Int) -> KitSchedule {
     schedule := KitSchedule{order: [Int]{}, weights: [Int]{}, guards: [Int]{}, budget: budget, jobs: jobs}
-    keys := [Int]{}
-    loop (index, item) in entries {
-        last: history.get(kit_history_key(item.suite, item.entry.path)) ?? KitHistory{wall_ms: -1, peak_kib: -1}
-        need := if last.peak_kib < 0 -> kit_job_memory() else -> last.peak_kib * 1536
+    ranks := [Int]{}
+    loop (index, key) in keys {
+        last: history.get(key) ?? KitHistory{wall_ms: -1, peak_kib: -1}
+        need := if last.peak_kib < 0 -> unmeasured else -> last.peak_kib * 1536
         if need < 67108864 -> need = 67108864
         schedule.weights.push(if budget > 0 && need > budget -> budget else -> need)
         guard := if need > kit_resident_guard() -> need else -> kit_resident_guard()
         if available > 0 && guard > available -> guard = available
         schedule.guards.push(guard)
         schedule.order.push(index)
-        // Unmeasured entries come first, in corpus order; then measured entries by
-        // descending wall time, ties in corpus order.
-        keys.push(if last.wall_ms < 0 -> index - entries.len() else -> (Int{1} << 40) - last.wall_ms * entries.len() + index)
+        // Unmeasured entries come first, in pool order; then measured entries by
+        // descending wall time, ties in pool order.
+        ranks.push(if last.wall_ms < 0 -> index - keys.len() else -> (Int{1} << 40) - last.wall_ms * keys.len() + index)
     }
-    schedule.order.sort_by(fn(index) { keys[index] })
+    schedule.order.sort_by(fn(index) { ranks[index] })
     schedule
 }
 
@@ -1195,6 +1215,86 @@ kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: 
 // One entry's report to the collector; a refused send means it is gone.
 kit_execute_send: fn(done: Sender<KitEntryRun>, run: &&KitEntryRun) Err! {
     done.send(run)
+}
+
+// One child of a process pool (kit_pool_run): entry `index`, its receipt or why it
+// couldn't run, and its wall time.
+KitPoolRun: struct {
+    index: Int
+    receipt: ProcessReceipt?
+    error: String
+    wall_ms: Int
+}
+
+// Runs `specs` as kit_execute_entries runs the corpus: in schedule order, each child
+// once fewer than `jobs` run and its claim fits beside the running ones' (the first
+// always starts). Returns one run per spec, in spec order. Compiler/test.jet runs the
+// workspace's package and Core runs through it.
+kit_pool_run: fn(specs: [ProcessSpec], schedule: KitSchedule) -> [KitPoolRun] {
+    runs := [KitPoolRun]{}
+    loop index in 0..<specs.len() -> runs.push(KitPoolRun{index: index, receipt: None, error: "the pool stopped before this run", wall_ms: 0})
+    { sender: done, receiver: finished }: channel<KitPoolRun>()
+    task.group pool(limit: schedule.jobs) {
+        started := 0
+        running := 0
+        claimed := 0
+        loop started < schedule.order.len() || running > 0 {
+            if started < schedule.order.len() {
+                index: schedule.order[started]
+                if kit_execute_admits(schedule, running, claimed, schedule.weights[index]) {
+                    task kit_pool_child(index, specs[index], done.copy())
+                    started += 1
+                    running += 1
+                    claimed += schedule.weights[index]
+                    next
+                }
+            }
+            run := finished.receive() ?? break
+            running -= 1
+            claimed -= schedule.weights[run.index]
+            runs[run.index] = run
+        }
+    }
+    runs
+}
+
+// One pool child, run to its end and reported to the pool. process.run_all marks
+// it to die with this process.
+kit_pool_child: fn(index: Int, spec: ProcessSpec, done: Sender<KitPoolRun>) {
+    started: time.instant()
+    run := KitPoolRun{index: index, receipt: None, error: "", wall_ms: 0}
+    if process.run_all([ProcessSpec]{spec}, 1) == {
+        .Ok(outcomes) -> {
+            loop outcome in outcomes {
+                if outcome == {
+                    .Ok(receipt) -> { run.receipt = Val(receipt) }
+                    .Err(error) -> { run.error = "{error}" }
+                }
+            }
+        }
+        .Err(error) -> { run.error = "{error}" }
+    }
+    elapsed: started.elapsed().ns /% 1000000
+    run.wall_ms = if elapsed > 0 -> elapsed else -> 1
+    kit_pool_send(done, run).drop("nobody collects a stopped pool")
+}
+
+// One child's report to the pool; a refused send means it is gone.
+kit_pool_send: fn(done: Sender<KitPoolRun>, run: &&KitPoolRun) Err! {
+    done.send(run)
+}
+
+// Folds a pool's runs into `history` and rewrites `suite`'s file (kit_history_save):
+// run i is the entry paths[i], measured by its wall time and its receipt's peak. A
+// run with no receipt or no peak keeps its last measurement.
+kit_pool_save: fn(dir: String, suite: String, paths: [String], history: [String: KitHistory], runs: [KitPoolRun]) {
+    measured := [KitCaseResult]{}
+    loop run in runs {
+        receipt: run.receipt ?? next
+        peak: receipt.peak_memory_bytes ?? next
+        measured.push(KitCaseResult{suite: suite, case: paths[run.index], tier: "-", status: if receipt.success -> "PASS" else -> "FAIL", detail: "", exit: receipt.code, wall_ms: run.wall_ms, peak_kib: peak /% 1024})
+    }
+    kit_history_save(dir, [suite], history, measured)
 }
 
 // One entry in its private scratch `<run>/<index>`, removed afterwards unless tracing.

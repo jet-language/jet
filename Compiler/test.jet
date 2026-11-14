@@ -15,22 +15,23 @@ use {
     time: core.time
     jet_testkit.[
         ENV_JETPACK_BIN, ENV_JETPACK_TEST_REPO_ROOT, ENV_JET_BIN, ENV_JET_COMPILER_IDENTITY, ENV_JET_TEST_SUITE_MEMORY,
-        ENV_JET_TEST_SUITE_ROOT, ENV_JET_TOOLCHAIN_ROOT, ENV_PREFIX_JETPACK_BOOTSTRAP, kit_claim_jobs, kit_exec_available_memory,
-        kit_execute_budget,
+        ENV_JET_TEST_SUITE_ROOT, ENV_JET_TOOLCHAIN_ROOT, ENV_PREFIX_JETPACK_BOOTSTRAP, KitHistory, KitPoolRun, kit_claim_jobs,
+        kit_exec_available_memory, kit_execute_budget, kit_history_key, kit_history_load, kit_pool_run, kit_pool_save,
+        kit_schedule_claims, kit_state_dir,
     ]
     jet_testkit.[KIT_EXIT_ICE]
 }
 
-// The runs a `packages` or `core` run makes at once (package_jobs): a quarter
-// of the CPUs, at least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX, then only as
-// many PACKAGE_MEMORY claims as the corpus pool's memory budget holds, and
-// never more than the runs there are. A claim is 8 GiB: most package runs'
-// `jet` peaks at 6.5 to 7.7 GiB resident and Compiler/JetCli/Tests at 12.6, so
-// a 24 GiB scope starts two and they fit at their peaks together; a smaller
-// claim starts more runs than the budget holds and the scope is OOM-killed.
+// The runs a `packages` or `core` run makes at once (pool_runs): a quarter of
+// the CPUs, at least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX, and only while
+// their memory claims fit the corpus pool's budget. A run claims half again
+// its last measured peak; a run never measured claims PACKAGE_MEMORY, 11 GiB:
+// most package runs' `jet` peaks at 6.5 to 7.7 GiB resident and
+// Compiler/JetCli/Tests at 12.6, so a 24 GiB scope starts two unmeasured runs
+// and any two fit it at their peaks together.
 PACKAGE_JOBS: 4
 PACKAGE_JOBS_MAX: 8
-PACKAGE_MEMORY: 8589934592
+PACKAGE_MEMORY: 11811160064
 
 // The trees whose packages a `packages` run tests, from the checkout:
 // tests/guards holds the repository guard packages (the top package,
@@ -213,9 +214,11 @@ package_suite_rows: fn(rows: TestRows) {
     engine: engine_selected(rows, sources)
     prep: if engine -> jetpack_prepare(rows, setup) else -> JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: "", build: None, error: ""}
     specs := [ProcessSpec]{}
+    paths := [String]{}
     first := 0
     if prep.build == .Val(build) {
         specs.push(build.copy())
+        paths.push(ENGINE_BUILD_RUN)
         first = 1
     }
     loop run in runs {
@@ -225,23 +228,21 @@ package_suite_rows: fn(rows: TestRows) {
             args.push(filter)
         }
         specs.push(jet_command(setup, setup.jet, args).env(ENV_JET_BIN, setup.jet))
+        paths.push(run)
     }
-    results: process.run_all(specs, package_jobs(specs.len())) ?? {
-        rows.fail("packages", "couldn't start the package runs: {err}")
-        return
-    }
+    results: pool_runs(setup, "compiler-packages", paths, specs)
     ran := [String: [String]]{}
     broke := [String]{}
     loop (index, run) in runs {
-        if results[index + first] == {
-            .Ok(receipt) -> {
+        if results[index + first].receipt == {
+            .Val(receipt) -> {
                 if package_rows(rows, run, receipt) == {
                     .Val(names) -> { ran[run] = names }
                     .None -> broke.push(run.copy())
                 }
             }
-            .Err(error) -> {
-                rows.fail(run, "couldn't run `jet test {run}`: {error}")
+            .None -> {
+                rows.fail(run, "couldn't run `jet test {run}`: {results[index + first].error}")
                 broke.push(run.copy())
             }
         }
@@ -250,14 +251,14 @@ package_suite_rows: fn(rows: TestRows) {
     // engine, else "".
     build_failure := ""
     if first == 1 {
-        if results[0] == {
-            .Ok(receipt) -> {
+        if results[0].receipt == {
+            .Val(receipt) -> {
                 if !receipt.success || !files.is_file(prep.engine) {
                     detail: failure_line(receipt.errors)
                     build_failure = "the hosted engine didn't build (exit {receipt.code}): {if detail == "" -> failure_line(receipt.output) else -> detail}"
                 }
             }
-            .Err(error) -> { build_failure = "couldn't build the hosted engine: {error}" }
+            .None -> { build_failure = "couldn't build the hosted engine: {results[0].error}" }
         }
     }
     if !engine -> return
@@ -321,14 +322,32 @@ engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
     false
 }
 
-// The runs at once, of `runs` (kit_claim_jobs). The budget is the corpus
-// pool's (kit_execute_budget): the profile's `memory` setting, which the
-// profile run passes in JET_TEST_SUITE_MEMORY, else the room this process may
-// still claim under its cgroup's memory.high and memory.max and the host's
-// (kit_exec_available_memory).
-package_jobs: fn(runs: Int) -[Env, FS]> Int {
+// The pool's history row of the hosted engine's build in a `packages` batch.
+ENGINE_BUILD_RUN: "Jetpack hosted engine build"
+
+// Runs `specs` in one pool, specs[i] the run paths[i] of `suite`, and returns
+// one run each in spec order. At most package jobs run at once (PACKAGE_JOBS),
+// and only while their claims fit the budget (kit_execute_budget): the
+// profile's `memory` setting, which the profile run passes in
+// JET_TEST_SUITE_MEMORY, else the room this process may still claim under its
+// cgroup's memory.high and memory.max and the host's
+// (kit_exec_available_memory). Each run claims by its last measured peak, which
+// the kit's state history keeps (kit_schedule_claims, kit_pool_save); a run
+// never measured claims PACKAGE_MEMORY. Without a state directory every run is
+// unmeasured.
+pool_runs: fn(setup: SuiteSetup, suite: String, paths: [String], specs: [ProcessSpec]) -> [KitPoolRun] {
+    state: kit_state_dir(setup.checkout) ?? ""
+    dir: if state == "" -> "" else -> files.join(state, "history")
+    history: if dir == "" -> [String: KitHistory]{} else -> kit_history_load(dir, [suite])
+    keys := [String]{}
+    loop path in paths -> keys.push(kit_history_key(suite, path))
+    available: kit_exec_available_memory()
     requested: Int.parse(sys.get(ENV_JET_TEST_SUITE_MEMORY) ?? "") ?? 0
-    kit_claim_jobs(kit_execute_budget(requested, kit_exec_available_memory()), PACKAGE_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, runs)
+    jobs: kit_claim_jobs(0, PACKAGE_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, specs.len())
+    schedule: kit_schedule_claims(keys, history, PACKAGE_MEMORY, jobs, kit_execute_budget(requested, available), available)
+    runs: kit_pool_run(specs, schedule)
+    if dir != "" -> kit_pool_save(dir, suite, paths, history, runs)
+    runs
 }
 
 // The engine unit made ready before the package runs: its assembled `aot`
@@ -759,6 +778,7 @@ core_rows: fn(rows: TestRows) {
     }
     runs: kit_exec_select_runs(ids, held, rows.filter)
     specs := [ProcessSpec]{}
+    run_ids := [String]{}
     loop run in runs {
         args := [String]{"test", tested[at[run].file], "-{CORE_LEVELS[at[run].level]}"}
         if run_filter(rows, ids[run], held[run]) == .Val(filter) {
@@ -766,16 +786,14 @@ core_rows: fn(rows: TestRows) {
             args.push(filter)
         }
         specs.push(jet_command(setup, setup.jet, args))
+        run_ids.push(ids[run])
     }
     if specs.len() == 0 -> return
-    results: process.run_all(specs, package_jobs(specs.len())) ?? {
-        rows.fail("core", "couldn't start the Core runs: {err}")
-        return
-    }
+    results: pool_runs(setup, "compiler-core", run_ids, specs)
     loop (index, run) in runs {
-        if results[index] == {
-            .Ok(receipt) -> { _ := package_rows(rows, ids[run], receipt) }
-            .Err(error) -> rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} -{CORE_LEVELS[at[run].level]}`: {error}")
+        if results[index].receipt == {
+            .Val(receipt) -> { _ := package_rows(rows, ids[run], receipt) }
+            .None -> rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} -{CORE_LEVELS[at[run].level]}`: {results[index].error}")
         }
     }
 }

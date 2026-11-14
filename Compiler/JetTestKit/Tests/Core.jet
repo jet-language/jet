@@ -455,17 +455,55 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     assert_eq(kit_claim_jobs(0, claim, 64, 4, 8, 0), 1)
 }
 
-#Test("a cgroup cap below the host's room sizes the pool by the cap") {
+#Test("a package pool under a cgroup cap claims each run's last peak, and a run never measured the pool's default") {
     gib: 1073741824
+    // A 24 GiB scope with 1 GiB in use, on a host with room to spare.
+    budget: kit_exec_room(100 * gib, 24 * gib, gib)
+    assert_eq(budget, 23 * gib)
+    history := [String: KitHistory]{}
+    history[kit_history_key("pool", "heavy")] = KitHistory{wall_ms: 600000, peak_kib: 12 * 1048576}
+    history[kit_history_key("pool", "light")] = KitHistory{wall_ms: 60000, peak_kib: 7 * 1048576}
+    keys: [kit_history_key("pool", "light"), kit_history_key("pool", "heavy"), kit_history_key("pool", "new")]
     // Compiler/test.jet's PACKAGE_MEMORY.
-    claim: 8 * gib
-    host: 100 * gib
-    // A 12 GiB scope with 1 GiB in use holds one package run, not the eight the host's room allows.
-    assert_eq(kit_claim_jobs(kit_exec_room(host, 12 * gib, gib), claim, 64, 4, 8, 100), 1)
-    // A 24 GiB scope holds two.
-    assert_eq(kit_claim_jobs(kit_exec_room(host, 24 * gib, gib), claim, 64, 4, 8, 100), 2)
-    // The cap never widens the pool past the host's room.
-    assert_eq(kit_claim_jobs(kit_exec_room(10 * gib, 24 * gib, gib), claim, 64, 4, 8, 100), 1)
+    unmeasured: 11 * gib
+    schedule: kit_schedule_claims(keys, history, unmeasured, 4, budget, 100 * gib)
+    // The unmeasured run first, then the longest.
+    assert_eq(schedule.order, [2, 1, 0])
+    // Half again each peak: 10.5 GiB and 18 GiB.
+    assert_eq(schedule.weights, [11274289152, 18 * gib, unmeasured])
+    // Two unmeasured runs fit the scope together, and the light run fits beside one.
+    assert(kit_execute_admits(schedule, 1, unmeasured, unmeasured))
+    assert(kit_execute_admits(schedule, 1, unmeasured, schedule.weights[0]))
+    // The heavy run starts beside neither, though their flat claims would have fit.
+    assert(!kit_execute_admits(schedule, 1, unmeasured, schedule.weights[1]))
+    assert(!kit_execute_admits(schedule, 1, schedule.weights[0], schedule.weights[1]))
+    // A 12 GiB scope runs them one at a time, the heaviest still alone.
+    narrow: kit_schedule_claims(keys, history, unmeasured, 4, kit_exec_room(100 * gib, 12 * gib, gib), 100 * gib)
+    assert(!kit_execute_admits(narrow, 1, unmeasured, narrow.weights[0]))
+    assert_eq(narrow.weights[1], 11 * gib)
+    assert(kit_execute_admits(narrow, 0, 0, narrow.weights[1]))
+}
+
+#Test("a process pool runs each spec once and keeps each measured run's peak") {
+    specs: [
+        process.cmd(["/bin/sh", "-c", "exit 0"]),
+        process.cmd(["/bin/sh", "-c", "exit 3"]),
+        process.cmd(["/nonexistent/kit-pool-missing"]),
+    ]
+    paths: ["ok", "three", "missing"]
+    keys: paths.map(fn(path) { kit_history_key("pool", path) })
+    runs: kit_pool_run(specs, kit_schedule_claims(keys, [String: KitHistory]{}, 1073741824, 2, 0, 0))
+    assert_eq(runs.map(fn(run) { run.index }), [0, 1, 2])
+    assert_eq((runs[0].receipt ?? panic("the first run has no receipt: {runs[0].error}")).code, 0)
+    assert_eq((runs[1].receipt ?? panic("the second run has no receipt: {runs[1].error}")).code, 3)
+    assert(runs[2].receipt == None && runs[2].error != "", "a spec that can't start keeps why")
+    root: cases_test_root("pool-history")
+    kit_pool_save(root, "pool", paths, [String: KitHistory]{}, runs)
+    loaded: kit_history_load(root, ["pool"])
+    first: loaded.get(kit_history_key("pool", "ok")) ?? panic("the first run's measurement wasn't kept")
+    assert(first.wall_ms > 0 && first.peak_kib > 0, "a run keeps its wall time and peak")
+    assert(loaded.get(kit_history_key("pool", "missing")) == None, "a run that never started measures nothing")
+    files.remove_all(root) ?? panic("remove {root}: {err}")
 }
 
 #Test("the pool runs measured entries longest first and weighs each by its last peak") {
