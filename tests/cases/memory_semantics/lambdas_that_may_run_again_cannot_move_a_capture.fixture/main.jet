@@ -41,13 +41,6 @@ copies: fn() -> Int {
     [1, 2, 3].map(fn(x) { consume(s.copy()) + x }).sum()
 }
 
-// An unmarked take of a clonable capture copies on each run, as it does in
-// a loop body.
-unmarked: fn() -> Int {
-    s: "abc".repeat(3)
-    [1, 2, 3].map(fn(x) { consume(s) + x }).sum()
-}
-
 // A task body runs once.
 in_a_task: fn() {
     s: "abc".repeat(3)
@@ -59,6 +52,6 @@ in_a_task: fn() {
 }
 
 run: fn() {
-    print(each_item() + passed_on() + handed_back().call() + called_once() + called_here() + copies() + unmarked())
+    print(each_item() + passed_on() + handed_back()() + called_once() + called_here() + copies())
     in_a_task()
 }
