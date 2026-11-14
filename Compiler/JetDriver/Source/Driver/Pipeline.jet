@@ -10,6 +10,7 @@ use {
         SemaComptimeAvailableConstants,
         SemaComptimeDeclarationStage,
         SemaComptimeGraphFacts,
+        SemaComptimeFunctionJob,
         SemaComptimeFunctionResult,
         SemaComptimeItemCheck,
         SemaComptimeItemKind,
@@ -76,6 +77,8 @@ use {
         sema_comptime_graph_with_values,
         sema_comptime_modules_with_values,
         sema_comptime_precheck_items,
+        sema_comptime_function_prechecks,
+        sema_comptime_replay_demand,
         sema_comptime_probe_init,
         sema_comptime_value_sites,
         sema_comptime_value_sites_empty,
@@ -131,6 +134,7 @@ use {
         PolicyKey,
         policy_gate_allows,
         CompilerThreads,
+        compiler_threads_admit,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -893,6 +897,12 @@ JetDriverComptimeRunIndex: struct {
     // one per function any closure of the run queued.
     node_ids: [String:Int]{[String:Int]{}}
     nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}}
+    // `module\nkey` -> the check jet_driver_comptime_prefetch made of that
+    // function ahead of the pass, which the first closure that would check
+    // it takes instead (jet_driver_comptime_prefetched), and the body refs
+    // the closure row it keeps would compute (JetDriverComptimeClosureRow).
+    prefetched: [String:SemaComptimeFunctionResult]{[String:SemaComptimeFunctionResult]{}}
+    prefetched_refs: [String:[JetDriverComptimeFunctionRef]]{[String:[JetDriverComptimeFunctionRef]]{}}
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1325,7 +1335,7 @@ jet_driver_comptime_function_closure: fn(
             settled_foreign -> index.nodes[node].foreign ?? panic("a settled foreign closure node lost its check")
             reused_row >= 0 -> checked_functions[reused_row]
             waiting_row >= 0 -> index.waiting_functions[waiting_row]
-            else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
+            else -> jet_driver_comptime_prefetched(index, checked_key, program) ?? sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
         }
         if fresh && checked.waiting_dependencies.len() > 0 {
             if index.waiting_rows.get(checked_key) == .Val(row) {
@@ -1369,6 +1379,10 @@ jet_driver_comptime_function_closure: fn(
                 // read it (JetDriverComptimeClosureRow); a new row is kept
                 // at the position it is pushed to below.
                 kept_row := if reused_row >= 0 -> reused_row else if index.checked_rows.get(checked_key) == None -> checked_functions.len() else -> -1
+                if kept_row >= 0 && index.closure_rows.get(kept_row) == None {
+                    prefetched_refs: index.prefetched_refs.remove(checked_key)
+                    if prefetched_refs == .Val(refs) -> index.closure_rows[kept_row] = JetDriverComptimeClosureRow{refs: refs}
+                }
                 closure_row: jet_driver_comptime_closure_row(graph, index, kept_row, checked, function, module_value && impurity == None, local_value)
                 if module_value && impurity == None -> impurity = if local_value -> closure_row.local_impurity else -> closure_row.module_impurity
                 loop found in closure_row.refs {
@@ -1411,6 +1425,117 @@ jet_driver_comptime_function_closure: fn(
     // are not all checked yet, so its obligations settle then.
     if waiting.len() == 0 && !sema_comptime_failure_closure_settle(graph, failure_closure, diagnostics) -> complete = false
     JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, impurity: impurity, foreign: foreign}
+}
+
+// The check jet_driver_comptime_prefetch made of function `checked_key`
+// (`module\nkey`) ahead of the pass, taken by the first closure that would
+// check it, with the demand the check captured recorded into the run's graph
+// where the closure's own check would have recorded it
+// (sema_comptime_replay_demand).
+jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, checked_key: String, program: SemaProgramTables) -> SemaComptimeFunctionResult? {
+    checked: index.prefetched.remove(checked_key) ?? return None
+    sema_comptime_replay_demand(checked, program)
+    Val(checked)
+}
+
+// The pass's on-demand function checks, made ahead of its closures on the
+// compiler threads (sema_comptime_function_prechecks) and kept in
+// `index.prefetched` for the first closure that would check each
+// (jet_driver_comptime_prefetched). The functions are the ones the pass's
+// prechecked items reach, breadth first, queued as their closures queue them:
+// an item's calls, reachable keys and body refs, then each kept check's. A
+// function the run already checked, holds a waiting check of, or settled is
+// not checked here: the closure takes those rows as they are. A check that
+// waits on a constant is dropped and not followed, and so is one that splices
+// local values, since a value landing during the pass changes it; the closure
+// checks those at its turn. One compiler thread makes no checks here. The
+// result is the number of checks kept.
+jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], threads: CompilerThreads) -> Int {
+    index.prefetched = [String:SemaComptimeFunctionResult]{}
+    index.prefetched_refs = [String:[JetDriverComptimeFunctionRef]]{}
+    if compiler_threads_admit(threads, 2, 2, 1, 0, 0) <= 1 -> return 0
+    seen := [String:Bool]{}
+    frontier := jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
+    kept := 0
+    loop frontier.len() > 0 {
+        if memory_plan.len() == 0 {
+            if programs[0].registration_graph == .Val(graph) -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
+            if memory_plan.len() == 0 -> break
+        }
+        checks: sema_comptime_function_prechecks(environments, programs, available, values, memory_plan[0], frontier, threads)
+        frontier = jet_driver_comptime_prefetch_keep(programs[0], index, frontier, checks, seen, kept)
+    }
+    kept
+}
+
+// The functions the complete prechecks of the pass's items reach first, as
+// each item's closure queues them (jet_driver_comptime_function_closure).
+jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: &JetDriverComptimeRunIndex, prechecks: [SemaComptimeItemCheck?], seen: &[String:Bool]) -> [SemaComptimeFunctionJob] {
+    jobs := [SemaComptimeFunctionJob]{}
+    graph_option: program.registration_graph
+    graph: graph_option ?? return jobs
+    loop at in 0..<prechecks.len() {
+        if prechecks[at] == .Val(check) {
+            if !check.complete || check.waiting_dependencies.len() > 0 -> next
+            if check.request == .Val(request) {
+                loop call in request.calls -> jet_driver_comptime_prefetch_add(index, seen, jobs, call.module_identity, call.callee_key)
+                jet_driver_comptime_prefetch_keys(graph, index, seen, jobs, request.reachable_function_keys)
+                loop found in jet_driver_comptime_body_refs(graph, index, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}) -> jet_driver_comptime_prefetch_add(index, seen, jobs, found.module_identity, found.function_key)
+            }
+        }
+    }
+    jobs
+}
+
+// Keeps each check of `jobs` the threads made (`checks`, by position) that
+// waits on no constant and splices no local value, with its body refs when a
+// closure reads them (the closure's complete arm), counting it in `kept`.
+// The result is the next wave: the functions the kept checks reach.
+jet_driver_comptime_prefetch_keep: fn(program: SemaProgramTables, index: &JetDriverComptimeRunIndex, jobs: [SemaComptimeFunctionJob], checks: [SemaComptimeFunctionResult?], seen: &[String:Bool], kept: &Int) -> [SemaComptimeFunctionJob] {
+    next_jobs := [SemaComptimeFunctionJob]{}
+    graph_option: program.registration_graph
+    graph: graph_option ?? return next_jobs
+    loop position in 0..<checks.len() {
+        if checks[position] == .Val(check) {
+            if check.waiting_dependencies.len() > 0 || check.comptime_body_sources.len() > 0 -> next
+            key: "{jobs[position].module_identity.id}\n{jobs[position].function_key}"
+            if check.foreign == None && (check.obligations_pending || (check.complete && !jet_driver_has_errors(check.diagnostics))) {
+                if check.function == .Val(function) {
+                    refs: jet_driver_comptime_function_refs(graph, index, check.module_identity, function)
+                    loop found in refs -> jet_driver_comptime_prefetch_add(index, seen, next_jobs, found.module_identity, found.function_key)
+                    index.prefetched_refs[key] = refs
+                }
+            }
+            loop call in check.calls -> jet_driver_comptime_prefetch_add(index, seen, next_jobs, call.module_identity, call.callee_key)
+            jet_driver_comptime_prefetch_keys(graph, index, seen, next_jobs, check.reachable_function_keys)
+            index.prefetched[key] = check
+            kept += 1
+        }
+    }
+    next_jobs
+}
+
+// Queues each of `keys` with its one owner, as a closure does; a key with no
+// unique owner is the closure's to report.
+jet_driver_comptime_prefetch_keys: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, seen: &[String:Bool], jobs: &[SemaComptimeFunctionJob], keys: [String]) {
+    loop function_key in keys {
+        if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
+        owner: jet_driver_comptime_function_owner(index, function_key) ?? next
+        jet_driver_comptime_prefetch_add(index, seen, jobs, owner, function_key)
+    }
+}
+
+// Queues function `function_key` of `module_identity` once, unless the run
+// already checked it, holds a waiting check of it or settled it.
+jet_driver_comptime_prefetch_add: fn(index: JetDriverComptimeRunIndex, seen: &[String:Bool], jobs: &[SemaComptimeFunctionJob], module_identity: ModuleID, function_key: String) {
+    key: "{module_identity.id}\n{function_key}"
+    if seen.get(key) != None -> return
+    seen[key] = true
+    if index.checked_rows.get(key) != None || index.waiting_rows.get(key) != None -> return
+    if index.node_ids.get(key) == .Val(node) {
+        if index.nodes[node].settled -> return
+    }
+    jobs.push(SemaComptimeFunctionJob{module_identity: module_identity, function_key: function_key})
 }
 
 // The run's comptime staging: `program` holds (its one row, once `staged`:
@@ -2462,6 +2587,9 @@ jet_driver_comptime_run: fn(
         jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
         prechecks := sema_comptime_precheck_items(environments, programs, available, pending, request.compiler_threads, memory_plan)
         jet_driver_trace_step_end(request.trace_sink, "comptime.precheck", pending.len())
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.prefetch")
+        prefetched: jet_driver_comptime_prefetch(environments, programs, available, run_index, memory_plan, values, prechecks, request.compiler_threads)
+        jet_driver_trace_step_end(request.trace_sink, "comptime.prefetch", prefetched)
         prechecks.reverse()
         prechecked_values: values.len()
         loop source in pending {

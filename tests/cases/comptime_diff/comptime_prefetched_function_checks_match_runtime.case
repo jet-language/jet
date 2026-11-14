@@ -1,0 +1,18 @@
+# Card #6793 c6: a comptime run checks the functions a pass's closures reach
+# ahead of the closures, on the compiler threads (JetDriver
+# Driver/Pipeline.jet, jet_driver_comptime_prefetch; JetSema
+# Sema/CheckProgram.jet, sema_comptime_function_prechecks). The closure that
+# first reaches a function takes that check and replays its demand. Here a
+# module constant and six local values reach a shared call graph (mix,
+# digit_sum, fold_list, label) through distinct helpers. Every value equals
+# its runtime run, and one compiler thread and eight print the same values.
+fixture: comptime_prefetched_function_checks_match_runtime.fixture
+env: NO_COLOR=1
+step serial: jet run --threads 1 comptime_diff.jet
+env: JET_STORE_DIR={work}/cache-serial
+exit: 0
+stdout: = "table [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] true\nareas 266 true\nwalk 598560 true\nprimes 642730 true\nfib fib!!!610 true\ncollatz 881146 true\nlabels m!!!326,m925804,m!!!347904,m!770007,m!!943796 true\n"
+step: jet run --threads 8 comptime_diff.jet
+env: JET_STORE_DIR={work}/cache-threads
+exit: 0
+stdout: == serial

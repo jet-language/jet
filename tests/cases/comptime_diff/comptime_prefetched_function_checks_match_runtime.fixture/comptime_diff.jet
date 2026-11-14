@@ -1,0 +1,156 @@
+
+// Many compile-time values whose closures reach a shared call graph: each
+// value's helper is checked ahead of the closures on the compiler threads
+// (jet_driver_comptime_prefetch), and every value must equal its runtime run.
+
+Shape: enum {
+    Dot
+    Line(Int)
+    Box(Point)
+}
+
+Point: struct {
+    x: Int
+    y: Int
+}
+
+mix: fn(seed: Int, salt: Int) -> Int {
+    value := seed * 31 + salt
+    loop step in 0..<4 {
+        value = (value * 17 + step) % 1000003
+    }
+    value
+}
+
+digit_sum: fn(value: Int) -> Int {
+    rest := if value < 0 -> 0 - value else -> value
+    total := 0
+    loop rest > 0 {
+        total += rest % 10
+        rest = rest /% 10
+    }
+    total
+}
+
+fold_list: fn(values: [Int]) -> Int {
+    total := 0
+    loop (position, value) in values {
+        total = mix(total, value + position)
+    }
+    total
+}
+
+area: fn(shape: Shape) -> Int {
+    if shape == {
+        .Dot -> 1
+        .Line(length) -> length
+        .Box(size) -> size.x * size.y
+    }
+}
+
+walk: fn(steps: Int) -> Point {
+    point := Point{x: 0, y: 0}
+    loop step in 0..<steps {
+        if step % 3 == 0 -> point.x += step
+        else if step % 3 == 1 -> point.y += step
+        else -> point.x -= 1
+    }
+    point
+}
+
+fib: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    fib(n - 1) + fib(n - 2)
+}
+
+collatz_steps: fn(start: Int) -> Int {
+    value := start
+    steps := 0
+    loop value > 1 {
+        value = if value % 2 == 0 -> value /% 2 else -> value * 3 + 1
+        steps += 1
+    }
+    steps
+}
+
+label: fn(prefix: String, value: Int) -> String {
+    text := prefix
+    loop _ in 0..<digit_sum(value) % 4 {
+        text = "{text}!"
+    }
+    "{text}{value}"
+}
+
+primes_below: fn(limit: Int) -> [Int] {
+    found := [Int]{}
+    loop candidate in 2..<limit {
+        prime := true
+        loop divisor in found {
+            if divisor * divisor > candidate -> break
+            if candidate % divisor == 0 {
+                prime = false
+                break
+            }
+        }
+        if prime -> found.push(candidate)
+    }
+    found
+}
+
+shapes_area: fn(count: Int) -> Int {
+    total := 0
+    loop index in 0..<count {
+        shape: if index % 3 == 0 -> Shape.Dot else if index % 3 == 1 -> Shape.Line(index) else -> Shape.Box(Point{x: index, y: index + 1})
+        total += area(shape)
+    }
+    total
+}
+
+walked: fn(steps: Int) -> Int {
+    point: walk(steps)
+    mix(point.x, point.y)
+}
+
+prime_fold: fn(limit: Int) -> Int {
+    fold_list(primes_below(limit))
+}
+
+fib_label: fn(n: Int) -> String {
+    label("fib", fib(n))
+}
+
+collatz_fold: fn(count: Int) -> Int {
+    steps := [Int]{}
+    loop start in 1..count {
+        steps.push(collatz_steps(start))
+    }
+    fold_list(steps)
+}
+
+mixed: fn(count: Int) -> String {
+    parts := ""
+    loop index in 0..<count {
+        piece: label("m", mix(index, digit_sum(index * 97)))
+        parts = "{parts}{piece}"
+        if index + 1 < count -> parts = "{parts},"
+    }
+    parts
+}
+
+TABLE: #run primes_below(40)
+
+run: fn() {
+    areas: #run shapes_area(12)
+    walk_mix: #run walked(25)
+    primes: #run prime_fold(60)
+    fib_text: #run fib_label(15)
+    collatz: #run collatz_fold(30)
+    labels: #run mixed(5)
+    print("table {TABLE} {TABLE == primes_below(40)}")
+    print("areas {areas} {areas == shapes_area(12)}")
+    print("walk {walk_mix} {walk_mix == walked(25)}")
+    print("primes {primes} {primes == prime_fold(60)}")
+    print("fib {fib_text} {fib_text == fib_label(15)}")
+    print("collatz {collatz} {collatz == collatz_fold(30)}")
+    print("labels {labels} {labels == mixed(5)}")
+}
