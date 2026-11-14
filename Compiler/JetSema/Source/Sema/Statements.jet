@@ -6272,8 +6272,10 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
     if value == None {
         body_value: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), init_span, binding.name_span) ?? {
             sema_comptime_body_capture_binding(context, environment, scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
-            _ := sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, state, context, diagnostics)
-            return None
+            if !sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, state, context, diagnostics) -> return None
+            // The binding emits no run-time code before its value lands, as
+            // after, so the body checks complete and its pass may land in it.
+            return Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
         }
         value = Val(body_value.value)
         ty = body_value.ty
