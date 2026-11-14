@@ -318,7 +318,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:410 | `members:` evaluates to `[String]` |
 | E0997 | MembersDirectoryNotFound | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:557 | the directory exists relative to `workspace.jet` |
 | E0998 | InvalidOverlayPolicy | Jetpack/CLI/Source/Commands/ExplainCommand.jet:79 | the overlay policy is written in its declared form |
-| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:4595 | Core's runtime units are imported only by Core sources |
+| E1001 | UnknownCoreModule | Compiler/JetDriver/Source/Driver/Loader.jet:4599 | Core's runtime units are imported only by Core sources |
 | E1002 | ReservedRootShadowed | Compiler/JetDriver/Source/Driver/Loader.jet:3136 | a local module takes a name outside the reserved roots |
 | E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:2540 | the value fits the width, or stays an exact `Int` |
 | E1004 | UnknownCoreItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:510 | no opt-in imports an item the module does not define |
@@ -578,7 +578,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3003 | DeadlineExceeded | Compiler/JetRuntime/Source/SchedulerMessages.jet:84 | a longer deadline, or less work |
 | E3005 | ContractFailed | Compiler/JetCli/Source/Cli/ProveReport.jet:913 | the caller or the function is fixed |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:160 | the operands or index are checked first |
-| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:772 | the `#Todo` is written |
+| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:775 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCli/Source/Cli/Crash.jet:119 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:807 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2258 | the fatal trap is fixed |
@@ -627,8 +627,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3414 | FetchFailed | Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet:160 | the URL and arguments are fixed |
 | E3415 | GateDeniedByPolicy | Compiler/JetSema/Source/Sema/GateLedger.jet:515 | the policy owner changes the policy |
 | E3502 | BuildPlanFailed | Compiler/JetSema/Source/Sema/Calls/Build.jet:130 | the plan is fixed |
-| E3503 | BuildAuthorityDenied | Compiler/JetCli/Source/Cli/BuildExecute.jet:722 | declaration, gate and policy all grant it |
-| E3504 | BuildActionAuthorityDenied | Compiler/JetCli/Source/Cli/BuildExecute.jet:721 | invocation, package and workspace policy grant it |
+| E3503 | BuildAuthorityDenied | Compiler/JetCli/Source/Cli/BuildExecute.jet:767 | declaration, gate and policy all grant it |
+| E3504 | BuildActionAuthorityDenied | Compiler/JetCli/Source/Cli/BuildExecute.jet:766 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCli/Source/Cli/BuildExecute.jet:191 | the action's cause is fixed |
 | E3510 | GeneratedModuleShadows | Compiler/JetCli/Source/Cli/InspectBuild.jet:417 | generate under another name |
 | E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:349 | one producer per module |
