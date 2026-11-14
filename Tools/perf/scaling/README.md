@@ -142,9 +142,9 @@ registration graph counts module-row lookups by identity (`module_lookups`),
 namespace name lookups (`name_lookups`), and, in the scope tables built from its
 module rows, name resolutions (`scope_lookups`) and the binding rows they examine
 (`scope_compares`). The graph counts only while a trace is open, and not
-during a parallel check wave or `sema.finalize` (each count would take the
-shared counters' permit and serialize the threads), so a multi-threaded build
-counts only the work done on the calling thread.
+during a parallel check wave, `sema.finalize` or any pass after it (each count
+would take the shared counters' permit and serialize the threads), so a
+multi-threaded build counts only the work done on the calling thread.
 Ordinary checks count prepared parallel bodies and actual serial fallback checks,
 not reuse of a prepared result. Summary checks are counted where the summaries run,
 whether the module prepares parallel bodies or checks serially.
