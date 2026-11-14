@@ -1,0 +1,46 @@
+# `jet fix` moves a Map key type whose written equality reads anything but
+# one field path to KeyBy over all its fields, keeps the rule as
+# `equal_by_rule`, and rewrites each `==` and `!=` that called it to call
+# `equal_by_rule`, in every file of the program: one fix whose edits apply
+# together. The definition and the uses are in other files than the Map
+# key. The rule's answers print the same before and after, a second
+# `jet fix` changes nothing, and a fix whose edits overlap each other is
+# refused whole.
+fixture: d_key_traits1_fix_files.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step before: jet run files/plain.jet
+exit: 0
+stdout: = d_key_traits1_fix_files.stdout.expected
+step refused: jet check files/main.jet
+exit: 1
+stderr: ~ "`Reading` writes its own `Equatable`" # refused as a Map key before the fix
+step fix: jet fix files/main.jet
+exit: 0
+stderr: ~ "files/main.jet: applied " # the fix, across three files
+file: files/readings.jet ~ "key: fn(self) -> Int { self.celsius }" # keyed by every stored field
+file: files/readings.jet ~ "equal_by_rule: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }" # the rule stays under its new name
+file: files/readings.jet !~ "impl Equatable" # the written equality is gone
+file: files/compare.jet ~ "same band: {a.equal_by_rule(b)}" # `==` calls the rule
+file: files/compare.jet ~ "other band: {!a.equal_by_rule(c)}" # `!=` calls it negated
+file: files/compare.jet ~ "by hand: {a.celsius == b.celsius}" # an Int `==` stays
+file: files/main.jet ~ "same here: {warm.equal_by_rule(readings.Reading{celsius: 29})}" # the Map key file's `==` too
+step again: jet fix files/main.jet
+exit: 0
+stderr: ~ "files/main.jet: no changes made" # a second fix changes nothing
+file: files/compare.jet ~ "same band: {a.equal_by_rule(b)}" # no rewrite of the rewrite
+step after: jet run files/plain.jet
+exit: 0
+stdout: = d_key_traits1_fix_files.stdout.expected
+step main: jet run files/main.jet
+exit: 0
+stdout: ~ "same here: true" # the rule still decides `==`
+stdout: ~ "keys: 2" # the Map keys by every field
+step tangled: jet fix tangled/main.jet
+exit: 0
+stderr: ~ "its edits overlap each other" # the nested `==` rewrites overlap
+stderr: ~ "tangled/main.jet: no changes made" # refused whole: no edit applies
+file: tangled/main.jet ~ "print(pick(a == b, a, b) == b)" # left as written
+file: tangled/main.jet ~ "impl Equatable" # the written equality stays too

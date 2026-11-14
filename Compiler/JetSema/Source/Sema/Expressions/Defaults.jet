@@ -12,6 +12,7 @@ use jet_foundation.[
     StrPart,
     ModuleID,
     module_is_none,
+    diagnostic_without_fix,
 ]
 
 // The declaring module's scope for one default: its environment facts and a
@@ -81,14 +82,11 @@ sema_default_names_nothing: fn(value: Expr) -> Bool Never! {
 // that takes the default: its declaration-site edit and labels belong to the
 // other module's text.
 sema_default_use_site_diagnostic: fn(diagnostic: &&Diagnostic, use_span: Span) -> Diagnostic Never! {
-    updated := diagnostic
+    updated := diagnostic_without_fix(diagnostic)
     updated.span = Val(use_span)
     updated.source_path = None
     updated.source_offset = None
     updated.source_start = None
     updated.labels = [DiagnosticLabel]{}
-    updated.edit = None
-    updated.applicability = None
-    updated.safety = None
     updated
 }

@@ -674,10 +674,16 @@ not a Map key (E0502), a Set element (E0506) or a `#Memo` argument: its `==`
 can call two values the same that a field walk would file apart. Name the
 value it compares with `KeyBy` instead. When the written rule compares one
 field path of both sides (`self.start == rhs.start`, or
-`self.start.compare(rhs.start)`) and is written in the file that uses the
-type, `jet fix` replaces it with `impl KeyBy` keyed by that path. It then
-deletes the E0908 written `Equatable` or `Comparable` that compares the same
-path, so `==` and ordering give the same answers.
+`self.start.compare(rhs.start)`), `jet fix` replaces it with `impl KeyBy`
+keyed by that path. It then deletes the E0908 written `Equatable` or
+`Comparable` that compares the same path, so `==` and ordering give the same
+answers. A struct whose one written `equal` compares anything else, with no
+written `Comparable`, gets `impl KeyBy` keyed by all its stored fields; the
+rule stays as the method `equal_by_rule`, and each `==` and `!=` in the
+program that called it is rewritten to call `equal_by_rule`, so those answers
+don't change. That fix edits every file it names together or not at all. A
+direct call of `equal`, or rewrites that overlap each other, leave the type
+for a hand edit.
 
 A finite `loop ... -> value` evaluates immediately to a list. An expected type
 does not change collection choice or evaluation time. The naming law in

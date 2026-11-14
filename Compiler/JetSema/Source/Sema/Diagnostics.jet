@@ -14,6 +14,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     diagnostic_with_label,
+    diagnostic_without_fix,
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
@@ -93,6 +94,16 @@ sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSo
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
+// `edit`, an edit of the aggregate source `segments` cover, as an edit of
+// the one authored file it falls in: that file's path and span. None when
+// it falls in no one file, or in compiler-generated source.
+sema_source_edit_at: fn(segments: [SemaSourceSegment], edit: TextEdit) -> TextEdit? {
+    location: sema_source_location_at(segments, edit.span) ?? return None
+    if location.origin == SemaSourceOrigin.CompilerGenerated -> return None
+    shift: location.source_start - location.aggregate_start
+    Val(TextEdit{span: Span{start: edit.span.start + shift, end: edit.span.end + shift}, new_text: edit.new_text, path: Val(location.source_path)})
+}
+
 sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
     updated := diagnostic
     span: updated.span ?? return updated
@@ -102,7 +113,8 @@ sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [Se
         updated.source_start = None
         return updated
     }
-    if updated.edit == .Val(edit) {
+    // An edit that names its file is already that file's (sema_source_edit_at).
+    if updated.edit == .Val(edit) && edit.path == None {
         edit_location: sema_source_location_at(segments, edit.span) ?? {
             updated.source_path = None
             updated.source_offset = None
@@ -118,11 +130,7 @@ sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [Se
     }
     // Compiler-generated source has no author to edit it: its diagnostic keeps
     // the report but proposes no source edit (the codec rejects one).
-    if location.origin == SemaSourceOrigin.CompilerGenerated {
-        updated.edit = None
-        updated.applicability = None
-        updated.safety = None
-    }
+    if location.origin == SemaSourceOrigin.CompilerGenerated -> updated = diagnostic_without_fix(updated)
     if updated.source_path != None {
         if updated.source_path != Val(location.source_path) || updated.source_offset != Val(location.aggregate_start) || updated.source_start != Val(location.source_start) {
             updated.source_path = None

@@ -3,7 +3,7 @@
 # written Equatable with `impl KeyBy` keyed by that path. The E0908 beside
 # the new KeyBy carries an edit that deletes a written Comparable reading
 # the same path. The fixed file runs with the same `==` and order. A rule
-# that reads anything else is left for a hand edit.
+# over anything else beside a written order is left for a hand edit.
 fixture: d_key_traits1_fix.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -23,7 +23,7 @@ stdout: ~ "slots: 1 bob" # equal starts are one key
 stdout: ~ "earlier: true" # the order follows the key
 step: jet fix keep/main.jet
 exit: in [0, 1] # the refusal stays, with no edit to apply
-file: keep/main.jet ~ "impl Equatable" # a rule over a computed value stays
+file: keep/main.jet ~ "impl Equatable" # a rule over a computed value with a written order stays
 file: keep/main.jet !~ "impl KeyBy" # no key is guessed
 step: jet check keep/main.jet
 exit: 1

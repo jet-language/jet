@@ -703,6 +703,7 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
         receiver_value = rhs
         argument_expr = left
     }
+    site: SemaOperatorSite{negated: op == BinOp.Ne, receiver: expr_span(receiver_expr), argument: expr_span(argument_expr), bare: sema_expr_operand_bare(receiver_expr)}
     argument := CallArg{convention: AccessConvention.Read, expr: argument_expr, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(state, receiver_expr, receiver_value, resolved.candidate, [CallArg]{argument}, [SemaCallDefaultValue]{}, span, None, environment, program, scopes, tail_store, context, diagnostics)
@@ -710,6 +711,7 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
     value_checked: checked ?? return None
     context.call_return_views.push(SemaCallReturnView{span: span, facts: value_checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, scopes, context, span, value_checked, diagnostics) -> return None
+    if op == BinOp.Eq || op == BinOp.Ne -> context.call_facts[context.call_facts.len() - 1].operator = Val(site)
     value := value_checked.value
     // A hook declared `-> T Never!` yields its success value: the uninhabited
     // failure is erased exactly as the automatic propagation of any other
@@ -732,6 +734,13 @@ sema_expr_check_operator: fn(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs
         return sema_expr_expected_owned(sema_expr_operator_ordering_test(op, value, span, line), expected, environment, program, diagnostics)
     }
     sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// Whether `.method(...)` can follow `expr`'s text with no parentheses
+// around it: a name, literal, call, field, index or bracketed form.
+sema_expr_operand_bare: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(_, _, _) || expr == .Call(_, _) || expr == .MethodCall(_, _, _, _, _, _, _) || expr == .Field(_, _, _, _) || expr == .Index(_, _, _, _, _) || expr == .Paren(_, _, _) -> return true
+    expr == .TupleLit(_, _, _, _) || expr == .ListLit(_, _, _) || expr == .MapLit(_, _, _) || expr == .Str(_, _, _) || expr == .Int(_, _, _, _, _) || expr == .Bool(_, _, _) || expr == .CallValue(_, _, _, _)
 }
 
 // Whether `implementation` targets `nominal`, registered in `nominal_module`.

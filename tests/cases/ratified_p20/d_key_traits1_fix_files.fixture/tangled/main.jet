@@ -1,0 +1,22 @@
+// One `==` inside the receiver of another: their rewrites overlap, so the
+// fix is refused whole and the file stays as written.
+Reading: struct {
+    celsius: Int
+
+    impl Equatable {
+        equal: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }
+    }
+}
+
+pick: fn(first: Bool, a: Reading, b: Reading) -> Reading {
+    if first -> a.copy() else -> b.copy()
+}
+
+run: fn() {
+    a: Reading{celsius: 21}
+    b: Reading{celsius: 25}
+    print(pick(a == b, a, b) == b)
+    seen := [Reading: Bool]{}
+    seen[a] = true
+    print(seen.len())
+}

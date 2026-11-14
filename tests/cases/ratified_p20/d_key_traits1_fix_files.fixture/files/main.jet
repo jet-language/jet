@@ -1,0 +1,15 @@
+use {
+    "compare"
+    "readings"
+}
+
+// `Reading` as a Map key: refused until `jet fix` gives it a key.
+run: fn() {
+    warm: readings.Reading{celsius: 21}
+    print(compare.report(warm, readings.Reading{celsius: 25}, readings.Reading{celsius: 31}))
+    print("same here: {warm == readings.Reading{celsius: 29}}")
+    seen := [readings.Reading: String]{}
+    seen[warm] = "first"
+    seen[readings.Reading{celsius: 25}] = "second"
+    print("keys: {seen.len()}")
+}

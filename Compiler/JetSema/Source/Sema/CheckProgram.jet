@@ -12503,6 +12503,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         loop facts in module_result.compute_facts -> compute_facts.push(facts.copy())
     }
     if trace_sink == .Val(sink) -> sink.end("sema.facts", call_facts.len())
+    // A fix that rewrites `==` sites reads every module's checked calls.
+    sema_complete_call_rewrites(final_graph, modules, diagnostics)
     // Only an error makes the graph incomplete: warning-only bodies (L0103
     // unused imports and the like) still lower and emit.
     if stage.diagnostics.len() == 0 {

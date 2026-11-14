@@ -22,7 +22,7 @@ use jet_foundation.[
     TraitImplBlock,
     IR_RUNTIME_HANDLES,
     ir_runtime_handle_row,
-    diagnostic_with_edit_grade,
+    diagnostic_registry_with_edit_grade,
     owned_trait_implies,
 ]
 
@@ -814,18 +814,20 @@ sema_comparability_order_trait: fn(written: String) -> String Never! {
 
 // E0502 for a Map key type `key` that isn't key-eligible. A type that writes
 // its own `equal` or `compare` is told to name its key with KeyBy, and
-// `jet fix` moves a rule that reads one field path to KeyBy.
+// `jet fix` moves the rule to KeyBy (sema_key_by_migration).
 sema_type_map_key_refusal: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, key: Type, what: String, span: Span) -> Diagnostic {
     written: sema_comparability_written_order_of(environment, program, key) ?? return sema_map_key_error(what, span)
-    sema_key_by_migrated(sema_error("E0502", span, what, "`{type_name(key)}` writes its own `{written.trait_name}`, so values its `==` calls the same could still be separate keys", "implement `KeyBy` with the value `{type_name(key)}` compares, and remove the written `{written.trait_name}`"), environment, program, written)
+    sema_key_by_migrated(sema_error("E0502", span, what, "`{type_name(key)}` writes its own `{written.trait_name}`, so values its `==` calls the same could still be separate keys", "implement `KeyBy` with the value `{type_name(key)}` compares, and remove the written `{written.trait_name}`"), program, written)
 }
 
-// `error` with the `jet fix` edit that moves `written`, a type's written
-// rule, to KeyBy (sema_key_by_migration_edit), when there is one.
-sema_key_by_migrated: fn(error: &&Diagnostic, environment: SemaScopeEnvironment, program: SemaProgramTables, written: SemaWrittenOrder) -> Diagnostic {
+// `error` with the `jet fix` that moves `written`, a type's written rule, to
+// KeyBy (sema_key_by_migration), when there is one.
+sema_key_by_migrated: fn(error: &&Diagnostic, program: SemaProgramTables, written: SemaWrittenOrder) -> Diagnostic {
     if program.registration_graph == .Val(graph) {
-        edit: sema_key_by_migration_edit(graph, written, environment.module_identity) ?? return error
-        return diagnostic_with_edit_grade(error, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+        migration := sema_key_by_migration(graph, written) ?? return error
+        migrated := diagnostic_registry_with_edit_grade(error, migration.edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+        migrated.fix_calls = migration.calls.move()
+        return migrated
     }
     error
 }

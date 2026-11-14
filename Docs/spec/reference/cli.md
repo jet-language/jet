@@ -313,8 +313,15 @@ duplicate edits apply once; overlapping edits are deferred and rechecked for
 at most sixteen rounds. Each round's edited file is checked again: when it
 has more errors than the file had before `jet fix`, each edit is retried on
 top of the ones kept, and an edit that adds an error is rolled back and
-reported with that error. The receipt's `skipped` rows record every edit left
-out (one needing review, or one rolled back) with its reason. A `#Deprecated`
+reported with that error. One fix may carry several edits, some in other
+files of the program: they apply together or not at all. A fix whose edits
+overlap each other, or that names a file `jet fix` can't read, is refused
+whole and reported; a fix with one edit overlapping an edit already kept
+waits whole for the next round. The other files' errors count in the recheck,
+the dry-run diff shows every changed file, and one transaction publishes them
+all. Editor code actions offer a fix only when all its edits are in the open
+file. The receipt's `skipped` rows record every edit left
+out (one needing review, one rolled back, or one refused) with its reason. A `#Deprecated`
 `use:` replacement is offered as an edit only when it is a plain rename, a
 declared function that takes the same call; otherwise L2001's Fix says to edit
 the use by hand. `--dry-run` renders the diff without publishing. A retired

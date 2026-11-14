@@ -2,10 +2,12 @@
 // ordering, Map lookup and Set membership, so reading it is pure and can't
 // fail, a written Equatable or Comparable beside it would be a second
 // answer, and a field that can change in place could move a stored key.
-// `jet fix` moves a written rule that reads one field path to KeyBy.
+// `jet fix` moves a written rule to KeyBy: one that reads one field path
+// keys by it, and any other `equal` becomes `equal_by_rule`.
 use jet_foundation.[
     BinOp,
     Diagnostic,
+    DiagnosticCallRewrite,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     DiagnosticLabel,
@@ -15,11 +17,14 @@ use jet_foundation.[
     Marker,
     ModuleID,
     Span,
+    SymbolID,
     TextEdit,
     Type,
     diagnostic_with_edit_grade,
+    diagnostic_without_fix,
     expr_span,
     ir_runtime_handle_row,
+    module_is_core,
     owned_trait_implies,
     type_name,
 ]
@@ -189,44 +194,206 @@ sema_key_by_agreeing: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRo
     Val(Span{start: sema_key_by_code_end(source, block.start), end: block.end})
 }
 
-// The `jet fix` edit that moves `written` to KeyBy when its rule reads one
-// field path of each side the same way (`self.at == rhs.at`,
-// `self.at.compare(rhs.at)`): the key is that path, so `==` and ordering
-// keep their answers. None when the rule reads anything else, or when the
-// rule or the type lives in another module than `module_identity`, the one
-// whose source the fix edits.
-sema_key_by_migration_edit: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, module_identity: ModuleID) -> TextEdit? {
-    if graph.modules[written.module_index].module_identity != module_identity || written.row.module_index != written.module_index {
-        return None
-    }
+// The `jet fix` of `written`, a type's written rule, moving it to KeyBy so
+// `==` and ordering keep their answers: its edit of the rule, and the `==`
+// and `!=` sites sema rewrites once every module is checked
+// (sema_complete_call_rewrites), whose edits apply with it.
+SemaKeyByMigration: struct {
+    edit: TextEdit
+    calls: DiagnosticCallRewrite?
+}
+
+// A rule that reads one field path of each side the same way
+// (`self.at == rhs.at`, `self.at.compare(rhs.at)`) becomes the key: that
+// path. Any other written `equal` stays as `equal_by_rule`
+// (sema_key_by_rule_migration). None when the rule and the type are in
+// different modules, or in Core.
+sema_key_by_migration: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder) -> SemaKeyByMigration? {
+    if written.row.module_index != written.module_index -> return None
     home: graph.modules[written.module_index]
+    if module_is_core(home.module_identity) -> return None
+    span: written.span ?? return None
+    indent: sema_key_by_line_indent(home.source, span.start)
     if written.impl_index == .Val(index) {
         declaration: home.impls[index].declaration
-        return sema_key_by_migration_text(graph, written, declaration.methods, "impl {declaration.type_name}.KeyBy")
+        return sema_key_by_migration_of(graph, written, declaration.methods, "impl {declaration.type_name}.KeyBy", indent)
     }
     nominal: home.nominals[written.row.row]
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             if block.span == written.span {
-                return sema_key_by_migration_text(graph, written, block.methods, "impl KeyBy")
+                return sema_key_by_migration_of(graph, written, block.methods, "impl KeyBy", indent)
             }
         }
     }
     None
 }
 
-// The KeyBy block `head` opens for `written`, whose rule is `methods`.
-sema_key_by_migration_text: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, methods: [Func], head: String) -> TextEdit? {
+// The migration of `written`, whose rule is `methods`, to the KeyBy block
+// `head` opens.
+sema_key_by_migration_of: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, methods: [Func], head: String, indent: String) -> SemaKeyByMigration? {
     span: written.span ?? return None
+    home: graph.modules[written.module_index]
     fields := [Int]{}
-    path: sema_key_by_written_path(graph, written.row, methods, fields) ?? return None
+    path: sema_key_by_written_path(graph, written.row, methods, fields) ?? return sema_key_by_rule_migration(graph, written, methods, head, indent)
     type_span: sema_key_by_field_type_span(graph, path.last) ?? return None
-    source: graph.modules[written.module_index].source
-    key_text: sema_call_histories_span_text(source, path.span)
-    type_text: sema_call_histories_span_text(source, type_span)
+    key_text: sema_call_histories_span_text(home.source, path.span)
+    type_text: sema_call_histories_span_text(home.source, type_span)
     if key_text == "" || type_text == "" -> return None
-    indent: sema_key_by_line_indent(source, span.start)
-    Val(TextEdit{span: span, new_text: "{head} {{\n{indent}    Key: {type_text}\n\n{indent}    key: fn(self) -> {type_text} {{ {key_text} }}\n{indent}}}"})
+    edit: sema_source_edit_at(home.source_segments, TextEdit{span: span, new_text: sema_key_by_block(head, indent, type_text, key_text)}) ?? return None
+    Val(SemaKeyByMigration{edit: edit, calls: None})
+}
+
+sema_key_by_block: fn(head: String, indent: String, key_type: String, key_value: String) -> String Never! {
+    "{head} {{\n{indent}    Key: {key_type}\n\n{indent}    key: fn(self) -> {key_type} {{ {key_value} }}\n{indent}}}"
+}
+
+// A struct's written `equal` that reads anything else: the key is every
+// stored field, the field walk Map used, and the rule stays as the method
+// `equal_by_rule`, which each `==` and `!=` that called `equal` now calls.
+// None for an enum, a struct that also writes its own `compare`, or one
+// that already has a member named `equal_by_rule`.
+sema_key_by_rule_migration: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, methods: [Func], head: String, indent: String) -> SemaKeyByMigration? {
+    if written.trait_name != "Equatable" || methods.len() != 1 || methods[0].name != "equal" {
+        return None
+    }
+    span: written.span ?? return None
+    home: graph.modules[written.module_index]
+    nominal: home.nominals[written.row.row]
+    if sema_key_by_writes_compare(graph, nominal) -> return None
+    loop method in nominal.methods {
+        if method.declaration.name == "equal_by_rule" -> return None
+    }
+    types := [String]{}
+    reads := [String]{}
+    if !sema_key_by_all_fields(home.source, nominal, types, reads) -> return None
+    joined_types: types.join(", ")
+    joined_reads: reads.join(", ")
+    key_type: if types.len() == 1 -> joined_types else -> "({joined_types})"
+    key_value: if reads.len() == 1 -> joined_reads else -> "({joined_reads})"
+    symbol: sema_key_by_method_symbol(home, nominal, methods[0]) ?? return None
+    method: methods[0]
+    renamed: "{home.source.slice(method.span.start, method.name_span.start)}equal_by_rule{home.source.slice(method.name_span.end, method.span.end)}"
+    block: sema_key_by_block(head, indent, key_type, key_value)
+    // A top-level impl keeps the method in an `impl` of its own; a block in
+    // the type's body leaves it one level out, beside the block.
+    text: if written.impl_index == .Val(index) -> "{block}\n\n{indent}impl {home.impls[index].declaration.type_name} {{\n{indent}    {renamed}\n{indent}}}" else -> "{block}\n\n{indent}{sema_key_by_dedent(renamed)}"
+    edit: sema_source_edit_at(home.source_segments, TextEdit{span: span, new_text: text}) ?? return None
+    Val(SemaKeyByMigration{edit: edit, calls: Val(DiagnosticCallRewrite{symbol: symbol, method: "equal_by_rule"})})
+}
+
+// Pushes the declared type and the `self` read of each stored field of the
+// struct `nominal` onto `types` and `reads`; false for an enum, a struct
+// with no stored field, or one with a field named `equal_by_rule`.
+sema_key_by_all_fields: fn(source: String, nominal: SemaRegistrationNominal, types: &[String], reads: &[String]) -> Bool {
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            loop field in definition.fields {
+                if field.computed != None -> next
+                if field.name == "equal_by_rule" -> return false
+                text: sema_call_histories_span_text(source, field.ty_span)
+                if text == "" -> return false
+                types.push(text)
+                reads.push("self.{field.name}")
+            }
+            return types.len() > 0
+        }
+    }
+    false
+}
+
+// Whether `nominal` writes its own Comparable, as a top-level impl or a
+// block in its body.
+sema_key_by_writes_compare: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> Bool {
+    loop module_row in graph.modules {
+        loop implementation in module_row.impls {
+            if implementation.compiler_generated || implementation.declaration.trait_name != (Val("Comparable")) {
+                next
+            }
+            if sema_type_graph_impl_matches_nominal(graph, implementation, nominal) == (Val(true)) {
+                return true
+            }
+        }
+    }
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if !block.compiler_generated && block.trait_name == "Comparable" -> return true
+        }
+    }
+    false
+}
+
+// The symbol of the registered method `method` declares, written in `home`
+// as a top-level impl or a block of `nominal`.
+sema_key_by_method_symbol: fn(home: SemaRegistrationModule, nominal: SemaRegistrationNominal, method: Func) -> SymbolID? {
+    loop implementation in home.impls {
+        loop function in implementation.methods {
+            if function.declaration.name == method.name && function.declaration.name_span == method.name_span {
+                return Val(function.symbol.id)
+            }
+        }
+    }
+    loop function in nominal.methods {
+        if function.declaration.name == method.name && function.declaration.name_span == method.name_span {
+            return Val(function.symbol.id)
+        }
+    }
+    None
+}
+
+// `text` with each line after the first moved four spaces left, when it
+// starts with them: a method moved out of the block that held it.
+sema_key_by_dedent: fn(text: String) -> String Never! { text.replace("\n    ", "\n") }
+
+// Completes each fix that rewrites `==` and `!=` sites
+// (Diagnostic.fix_calls) once every module in `modules` is checked: each
+// site that resolved to the rewritten method becomes a call of the new one,
+// in the file it is written in. A call sema can't rewrite, such as a direct
+// call of the method or one in generated source, drops the whole fix, so no
+// call keeps an answer the fix would change.
+sema_complete_call_rewrites: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) {
+    loop index in 0..<diagnostics.len() {
+        rewrite: diagnostics[index].fix_calls ?? next
+        edits := [TextEdit]{}
+        if sema_call_rewrite_edits(graph, modules, rewrite, edits) {
+            diagnostics[index].fix_edits.extend(edits.move())
+            diagnostics[index].fix_calls = None
+        } else { diagnostics[index] = diagnostic_without_fix(diagnostics[index]) }
+    }
+}
+
+// Pushes onto `edits` each `==` and `!=` site of `modules` that `rewrite`
+// changes; false when one of them can't be rewritten.
+sema_call_rewrite_edits: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rewrite: DiagnosticCallRewrite, edits: &[TextEdit]) -> Bool {
+    loop module_result in modules {
+        loop fact in module_result.call_facts {
+            callee: fact.callee ?? next
+            if callee != rewrite.symbol -> next
+            edit: sema_call_rewrite_edit(graph, module_result.module_identity, fact, rewrite.method) ?? return false
+            seen := false
+            loop kept in edits {
+                if kept.span == edit.span && kept.path == edit.path -> seen = true
+            }
+            if !seen -> edits.push(edit)
+        }
+    }
+    true
+}
+
+// The `==` or `!=` call `fact` as a call of `method` on its receiver:
+// `left.method(right)`, `!left.method(right)` for `!=`.
+sema_call_rewrite_edit: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, fact: SemaCallSiteFact, method: String) -> TextEdit? {
+    site: fact.operator ?? return None
+    row: sema_registration_module_index(graph, module_identity) ?? return None
+    home: graph.modules[row]
+    receiver: sema_call_histories_span_text(home.source, site.receiver)
+    argument: sema_call_histories_span_text(home.source, site.argument)
+    if receiver == "" || argument == "" -> return None
+    called: if site.bare -> receiver else -> "({receiver})"
+    negation: if site.negated -> "!" else -> ""
+    start: if site.receiver.start < site.argument.start -> site.receiver.start else -> site.argument.start
+    end: if site.receiver.end > site.argument.end -> site.receiver.end else -> site.argument.end
+    sema_source_edit_at(home.source_segments, TextEdit{span: Span{start: start, end: end}, new_text: "{negation}{called}.{method}({argument})"})
 }
 
 // A stored field `field` of the struct at `row`.
