@@ -1998,10 +1998,10 @@ E0001. The braces of `\u{…}` never open an interpolation. Raw backtick strings
 and typed text heads are unchanged (D-RAWSTR1, D-BOUND-RAW1). Debug prints only
 `\n` `\t` `\r` `\"` `\'` `\\` and `\u{…}`, NUL as `\u{0}`, so every escape it
 prints reads back as the same text; braces still print as themselves. `jet fmt`
-rewrites `\u{a}`, `\u{9}` and `\u{d}` to `\n`, `\t` and `\r` and writes other
-hex in lowercase without leading zeros, so each character keeps one spelling
-in formatted code. The lexer escapes are built; the `jet fmt` rewrite is not
-yet built, and card #4631 tracks it.
+rewrites `\u{a}`, `\u{9}` and `\u{d}` to `\n`, `\t` and `\r`, writes every
+other control character (C0, DEL, C1) as `\u{…}` in lowercase hex without
+leading zeros, and every other character as itself, so each character keeps
+one spelling in formatted code and a second pass changes nothing.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).

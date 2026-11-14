@@ -1,12 +1,13 @@
-// Rust 1.97.1 char Debug: library/core/src/fmt/mod.rs:2972-2979 and library/core/src/char/methods.rs:474-487.
+// Char Debug: Rust 1.97.1's (library/core/src/fmt/mod.rs:2972-2979 and
+// library/core/src/char/methods.rs:474-487) except NUL, which prints as
+// `\u{0}` so the text reads back as the same Char, as Jet's String Debug does.
 // Layer on TextDebug.jet (301f6b608) and the one TRAP_DEBUG_RANGES table.
 // Frozen char Debug goldens (Tests/CharDebugPlain.ranges, run by the key
 // witness of Tests/UiWitness.jet): all 1,112,064 Unicode scalars, zero differences.
 // Caller supplies a valid Unicode scalar; append directly, without temporary text.
-rt_text_push_rust_debug_char: fn(target: I64, cp: I64) {
+rt_text_push_debug_char: fn(target: I64, cp: I64) {
     rt_text_push_word(target, I64{39}, I64{1})
     short: if {
-        (cp == I64{0}) -> I64{48}
         (cp == I64{9}) -> I64{116}
         (cp == I64{10}) -> I64{110}
         (cp == I64{13}) -> I64{114}
@@ -27,6 +28,6 @@ rt_text_push_rust_debug_char: fn(target: I64, cp: I64) {
 #Export(c) jet_rt_char_debug: fn(value: I64) -> I64 {
     scalar: if (value < I64{0} || value > I64{1114111} || (value >= I64{55296} && value <= I64{57343})) -> I64{65533} else -> value
     target: jet_rt_string_builder_new()
-    rt_text_push_rust_debug_char(target, scalar)
+    rt_text_push_debug_char(target, scalar)
     jet_rt_string_builder_finish(target)
 }

@@ -1,0 +1,13 @@
+# Debug prints NUL as `\u{0}`, for a Char as for a String, so the printed
+# spelling is a literal that reads back as the same Char; the other short
+# escapes and `\u{…}` forms are unchanged. The default and the release tiers
+# agree.
+fixture: char_debug_nul_reads_back_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "'\\u{0}'\n\"a\\u{0}b\"\n'\\u{7f}' '\\t' '\\''\ntrue\n"
+step: jet run --release main.jet
+exit: 0
+stdout: = "'\\u{0}'\n\"a\\u{0}b\"\n'\\u{7f}' '\\t' '\\''\ntrue\n"

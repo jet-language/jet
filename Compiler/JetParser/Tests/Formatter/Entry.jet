@@ -376,3 +376,26 @@ SUM: #run { count() + 1 }
     assert_eq(formatted.split("fn(value) {{}}").to_list().len(), 3)
     assert(!formatted.contains("open := fn() {{}}"), "a body written open stays open")
 }
+
+// A scalar escape formats to the character's one spelling: `\n`, `\t` and
+// `\r` for those three, lowercase `\u{…}` hex without leading zeros for any
+// other control character (C0, DEL, C1), the character itself for the rest;
+// a second pass changes nothing.
+#Test("scalar_escapes_format_to_one_spelling") {
+    source: `run: fn() {
+    a: "\u{A}\u{9}\u{D}\u{7F}\u{0}\u{85}\u{E9}\u{0041}"
+    b: '\u{0}'
+    c: '\u{9F}'
+    d: '\u{a}'
+    e: """
+        x\u{1}\u{D}y
+        """
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains(`a: "\n\t\r\u{7f}\u{0}\u{85}éA"`), formatted)
+    assert(formatted.contains(`b: '\u{0}'`), formatted)
+    assert(formatted.contains(`c: '\u{9f}'`), formatted)
+    assert(formatted.contains(`d: '\n'`), formatted)
+    assert(formatted.contains(`x\u{1}\ry`), formatted)
+}

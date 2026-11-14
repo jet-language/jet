@@ -21,7 +21,7 @@ GOLDENS: "Compiler/JetRuntime/Tests"
 SHARED_STOP: "DataPlotStops-getter-variant.stderr"
 USAGE: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY"
 PLAIN_RANGES: "CharDebugPlain.ranges"
-ORACLE_SHA256: "72a498085e0dc43fc6f9b0bc6f29482738c01ab7a35c11d72a1cfaf2504807a5"
+ORACLE_SHA256: "4df07a213d8bc130872d2b1358ef8cd04f9bba01a02db5edac23995e99427b72"
 WITNESSES: "choices, cursor, events, form-action-error, key, view-snapshots"
 OUTPUT_MISMATCH: "byte-exact output mismatch"
 
@@ -206,12 +206,11 @@ utf8: fn(scalar: Int) -> [U8] Never! {
     [U8]{byte(240 + scalar /% 262144), byte(128 + (scalar /% 4096) % 64), byte(128 + (scalar /% 64) % 64), byte(128 + scalar % 64)}
 }
 
-// The Debug text of one char: \0 \t \n \r \' \\ use their short escapes, a
-// scalar CharDebugPlain.ranges lists renders as itself, and every other scalar
-// renders as \u{hex}; all of them in single quotes.
+// The Debug text of one char: \t \n \r \' \\ use their short escapes, a
+// scalar CharDebugPlain.ranges lists renders as itself, and every other scalar,
+// NUL among them, renders as \u{hex}; all of them in single quotes.
 char_debug: fn(scalar: Int, listed: Bool) -> [U8] Never! {
     short: if scalar == {
-        0 -> "0"
         9 -> "t"
         10 -> "n"
         13 -> "r"
@@ -320,6 +319,7 @@ run: fn() {
     assert_eq(String.from_bytes_lossy(char_debug(65, true)), "'A'")
     assert_eq(String.from_bytes_lossy(char_debug(39, true)), "'\\''")
     assert_eq(String.from_bytes_lossy(char_debug(127, false)), "'\\u{{7f}}'")
+    assert_eq(String.from_bytes_lossy(char_debug(0, false)), "'\\u{{0}}'")
     assert_eq(utf8(8364).len(), 3)
     assert_eq(hex_value("10FFFF"), 1114111)
     assert_eq(resolve("/a", "/x/../y"), "/y")

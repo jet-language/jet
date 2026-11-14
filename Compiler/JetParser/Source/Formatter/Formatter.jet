@@ -730,15 +730,40 @@ jfmt_fmt_char: fn(value: String) -> String Never! {
         "\\" -> "'\\\\'"
         "\n" -> "'\\n'"
         "\t" -> "'\\t'"
-        else -> "'{value}'"
+        else -> {
+            control: if value.bytes().len() > 0 -> jfmt_control_at(value.bytes(), 0) else -> -1
+            if control >= 0 -> "'\\u{{{control.to_radix(16)}}}'" else -> "'{value}'"
+        }
     }
 }
 
-// Escape one content line of a triple-quoted string (S70): only `\` and the
-// interpolation braces need escaping.
+// The control character a formatted literal spells as `\u{…}` that starts at
+// byte `at` of `bytes`: C0, DEL or C1 (U+0080-U+009F, the UTF-8 bytes C2 80
+// to C2 9F), whose raw bytes would be invisible or unreadable in source. -1
+// for anything else; callers spell `\n`, `\t` and `\r` first.
+jfmt_control_at: fn(bytes: [U8], at: Int) -> Int Never! {
+    byte: Int{bytes[at]}
+    if byte < 32 || byte == 127 -> return byte
+    following: if at + 1 < bytes.len() -> Int{bytes[at + 1]} else -> 0
+    if byte == 194 && following >= 128 && following < 160 -> following else -> -1
+}
+
+// Appends `\u{H}` for `code`: lowercase hexadecimal without leading zeros,
+// the one spelling formatted code gives a scalar escape.
+jfmt_push_scalar_escape: fn(out: &[U8], code: Int) Never! {
+    loop byte in "\\u{{{code.to_radix(16)}}}".bytes() -> out.push(byte)
+}
+
+// Escape one content line of a triple-quoted string (S70): `\`, the
+// interpolation braces, a carriage return and the other control characters
+// but tab need escaping.
 jfmt_escape_str_multiline: fn(text: String) -> String Never! {
+    bytes: text.bytes()
     out := [U8]{}
-    loop byte in text.bytes() {
+    at := 0
+    loop at < bytes.len() {
+        byte: bytes[at]
+        control: if byte == 9 || byte == 13 -> -1 else -> jfmt_control_at(bytes, at)
         if {
             byte == 92 -> {
                 out.push(byte)
@@ -748,15 +773,28 @@ jfmt_escape_str_multiline: fn(text: String) -> String Never! {
                 out.push(byte)
                 out.push(byte)
             }
+            byte == 13 -> {
+                out.push(U8{92})
+                out.push(U8{114})
+            }
+            control >= 0 -> {
+                jfmt_push_scalar_escape(out, control)
+                if control >= 128 -> at += 1
+            }
             else -> out.push(byte)
         }
+        at += 1
     }
     String.from_bytes(out) ?? text
 }
 
 jfmt_escape_str_lit: fn(text: String) -> String Never! {
+    bytes: text.bytes()
     out := [U8]{}
-    loop byte in text.bytes() {
+    at := 0
+    loop at < bytes.len() {
+        byte: bytes[at]
+        control: jfmt_control_at(bytes, at)
         if {
             byte == 92 -> {
                 out.push(U8{92})
@@ -782,8 +820,13 @@ jfmt_escape_str_lit: fn(text: String) -> String Never! {
                 out.push(byte)
                 out.push(byte)
             }
+            control >= 0 -> {
+                jfmt_push_scalar_escape(out, control)
+                if control >= 128 -> at += 1
+            }
             else -> out.push(byte)
         }
+        at += 1
     }
     String.from_bytes(out) ?? text
 }
