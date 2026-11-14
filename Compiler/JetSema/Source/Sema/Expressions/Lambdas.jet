@@ -2218,6 +2218,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // would move the capture again (E0121).
     if !inline_loop {
         loop moved in lambda_state.moved {
+            // A `defer close(name)` of the enclosing body is pending at or
+            // above the lambda's own depth: the body's state carried it in,
+            // and the lambda never moved it.
+            if moved.origin.deferred_depth == .Val(deferred) && deferred <= lambda_parent_state.scope_depth -> next
             if sema_ownership_place_moved(lambda_parent_state, moved.place) != None -> next
             if sema_expression_lambda_outer_binding_key(moved.place.root_key, frame, lambda_scopes) == None -> next
             explicit_capture := false
