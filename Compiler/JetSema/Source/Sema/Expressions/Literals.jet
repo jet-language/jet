@@ -1579,7 +1579,9 @@ sema_expression_one_pass_fix: fn(ty: Type) -> String Never! {
 sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     ty: value.ty
     if sema_expression_displayable(ty, environment, program) {
-        if sema_expression_interpolation_auto_printable(ty, environment, program) {
+        // The lint's one edit is `:Debug`, so a type that opted out of Debug
+        // (where that hole is E0112) isn't flagged.
+        if sema_expression_interpolation_auto_printable(ty, environment, program) && sema_call_debug_traceable(ty, environment, program) {
             shown: sema_type_show(ty)
             written: sema_expression_interpolation_text(value.span, environment, program)
             diagnostics.push(sema_lint("L0520", value.span, "{shown} has no `Display` impl; use the explicit debug selector for this interpolation.", "Bare interpolation is moving to the explicit `Display` hook; the canonical migration edit keeps the value user-owned.", "Replace `{written}` with `{{{written}:Debug}}`."))
@@ -1608,8 +1610,29 @@ sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEn
         return false
     }
     // sema_type_show quotes a nominal name itself; the impl head is bare code.
-    diagnostics.push(sema_error("E0915", value.span, "{sema_type_show(ty)} has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
+    // The Fix offers only spellings that compile for this value: an `impl`
+    // where the orphan rule (E0902) admits one, and `:Debug` where the value
+    // has a Debug form (else that hole is E0112).
+    written: sema_expression_interpolation_text(value.span, environment, program)
+    fixes := [String]{}
+    if sema_expression_impl_allowed(ty, environment, program, scopes) {
+        fixes.push("add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`")
+    }
+    if sema_call_debug_traceable(ty, environment, program) {
+        fixes.push("use `{{{written}:Debug}}` for debug output")
+    }
+    fix: if fixes.len() > 0 -> fixes.join(", or ") else -> "show a part of `{written}` that has `Display`, or write the text yourself instead of interpolating it"
+    diagnostics.push(sema_error("E0915", value.span, "{sema_type_show(ty)} has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", fix))
     false
+}
+
+// Whether this program may write an `impl` for `ty`'s own trait set: the
+// orphan rule (E0902) admits one for a type declared outside Core.
+sema_expression_impl_allowed: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    if ty == .Tagged(_, _) -> return false
+    name: sema_type_graph_base_name(ty) ?? return false
+    owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return false
+    !sema_module_is_core_source(sema_scope_module_text(environment, program, owner.module_identity))
 }
 
 // The source text of the interpolated expression at `span`, or `value` when

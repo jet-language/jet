@@ -5038,7 +5038,18 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                     if sema_call_reflection_secret_bearing(checked.ty) {
                         diagnostics.push(sema_error("E0112", checked.span, "secret-bearing `{type_name(checked.ty)}` cannot use `:{selector}`", "Debug output could copy cryptographic secret material into logs or diagnostics", "remove the interpolation; log a public operation label or key identifier instead"))
                     } else {
-                        diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", "implement `Debug` or use a debuggable part"))
+                        // The Fix offers only spellings that compile for this value
+                        // (sema_expression_interpolation_display's rule for E0915).
+                        written: sema_expression_interpolation_text(checked.span, environment, program)
+                        fixes := [String]{}
+                        if sema_expression_displayable(checked.ty, environment, program) {
+                            fixes.push("show its `Display` text with `{{{written}}}`")
+                        }
+                        if sema_expression_impl_allowed(checked.ty, environment, program, scopes) {
+                            fixes.push("implement `Debug` for {sema_type_show(checked.ty)}")
+                        }
+                        fix: if fixes.len() > 0 -> fixes.join(", or ") else -> "show a debuggable part of `{written}` instead"
+                        diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", fix))
                     }
                     return None
                 }
