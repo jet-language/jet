@@ -1,16 +1,19 @@
 # PORT tests/tir_language_features.rs:1154-1185.
 # Two rows of one method and address on the App's one route table stop with
 # E2804, which names both lines: literal patterns while checking, run-time
-# patterns when the second one registers.
+# patterns when the second one registers. Each program is its own package,
+# since the files of one package share their top-level names.
 fixture: http_router_duplicate_route_is_jet_runtime_error.fixture
 step: jet check http_duplicate_literal.jet
+cwd: literal
 exit: nonzero
 stderr: ~ "Error [jet.AmbiguousRoute]: Two routes both match `GET /users/:name`." # E2804 while checking
 stderr: ~ "--> http_duplicate_literal.jet:11:15" # the second `routes.get` line
 stderr: ~ "--> http_duplicate_literal.jet:10:15" # the first `routes.get` line
 stderr: ~ "first registered here" # the first line is labelled as the other row
-stderr: ~ "More: jet-lang.dev/e/E2804"
+stderr: ~ "More: jet-lang.dev/e/E2804" # the footer links the E2804 page
 step: jet build --profile=debug http_duplicate_route.jet
+cwd: route
 exit: 0
 step: built
 exit: nonzero
