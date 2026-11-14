@@ -122,7 +122,12 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
         if sema_call_registered_method_names(graph, nominal, false, environment, program).contains(method) {
             diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
         } else {
-            statics: sema_call_registered_method_names(graph, nominal, true, environment, program)
+            // A reserved `__` member (a codec's `__read`) is compiler-generated
+            // and user code cannot spell it, so it is never offered.
+            statics := [String]{}
+            loop name in sema_call_registered_method_names(graph, nominal, true, environment, program) {
+                if !name.starts_with("__") -> statics.push(name.copy())
+            }
             shown: loop name in statics -> "`{name}`"
             fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
             diagnostics.push(sema_error("E0311", method_span, "`{owner}` has no static method `{method}`", "static lookup finds an associated method of `{owner}` with no `self` receiver, and `{owner}` declares none named `{method}`", fix))
