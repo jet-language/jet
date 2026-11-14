@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102264,
+    "rev": 102269,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32819,7 +32819,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Remove the synthetic `.call`: returned, local, grouped, method-returned and nested callable expressions are invoked with an ordinary postfix call; callee and arguments are evaluated exactly once.\n2. Migrate the syntax registry, callers, diagnostics and goldens (functions/returned_function_call, tests/ui/call_non_function) in one cutover. The retired `.call` gets no teaching diagnostic.\n3. Enforce one call spelling per function in Examples/ through fmt or a registered diagnostic.\n\nProof: the goldens above on o0, o1 and o2; the UI fixture matches its snapshot.",
       "checkSteps": "Planned proof only. Rebuild before smoke tests; use scripts/agent/jet-env and the shared bounded target.\n\nRun the existing narrow integration cases after migrating them:\nscripts/agent/jet-env cargo test --test tir_io_and_ownership plain_parameter_modes_match_tir_and_aot -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods mut_self_method_body -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods trait_impl_method_call_no_mangle -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods static_constructor_and_self_getter -- --exact\n\nAdd focused receiver-capability witnesses only for uncertain boundaries: missing/extra marks, indexed place evaluated once, two-phase alias conflict, take invalidation, trait dispatch, and a temporary/chained receiver. Run the same Buffer append/seal source through AOT, default run, forced interpreter, and applicable web. Update affected registered UI snapshots and parser/formatter fixtures. No zero-test filter, skipped runtime, or generated-text assertion counts as behavior proof.\n\nAlso prove the selected form with a held write window, access after its last use, a mixed read/write/take chain, and receiver-marked calls nested inside ordinary read arguments. Under B, prove that ungrouped leading marks remain outer argument conventions and cannot silently mark the nested receiver. Prove both the named and fresh receiver cases exactly as D-CAP-RECEIVER1 specifies.",
@@ -32828,6 +32828,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Closed by Main: c13 met on dev 5e71dce38f; every criterion met."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -32926,11 +32931,11 @@
         {
           "n": 13,
           "text": "[#4170] One call spelling per function, except a #Root free function, which accepts both f(value) and value.f() by ratified D-CALLDUAL1=E, and fmt leaves either spelling alone. Every other function has exactly one spelling: a free function without #Root is called f(x), and a method is called x.f(). The other spelling is refused by a registered diagnostic with a UI snapshot, and every call in Examples/ uses the one spelling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:10:58.797Z"
+          "evidence": "dev 5e71dce38f (G5DevX2-fmt-root-call-spellings: the fmt case proves fmt keeps both #Root call spellings). Lander5 ran on the gate-p60 jet: its fmt case 1/0; ui call_spelling 2/0 (E0311 both ways); ui root_ 11/0; cases root_receiver_calls_share_the_direct_call_path 1/0 and an_imported_root_function_takes_the_receiver_first_spelling 1/0; golden Examples/ at o0 862 PASS, 19 FAIL (the usual Examples base reds), 18 KF, with 0 E0311 lines.",
+          "at": "2026-11-14T07:46:12.877Z"
         }
       ],
       "refs": [
@@ -32959,11 +32964,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-16T01:42:57.695Z",
-      "updated": "2026-11-13T11:10:58.797Z",
+      "updated": "2026-11-14T07:46:25.741Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
-      ]
+      ],
+      "completedAt": "2026-11-14T07:46:25.741Z"
     },
     {
       "id": "c01dyqov",
@@ -65773,11 +65779,11 @@
         {
           "n": 3,
           "text": "(was #6333) A join whose branches leave a typestate value in different states is rejected with a registered diagnostic and a UI snapshot (t03).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:10.345Z"
+          "evidence": "dev 95d9ccf34b (G6Meta-6076c3-r2: registered E0150 and its ui row). Lander5 ran on the gate-p60 jet: ui paths_meeting_in_different_states 1/0; ui typestate/ 21/0; protocol_out_of_order 1/0 (the snapshots that carry E0150).",
+          "at": "2026-11-14T07:46:17.078Z"
         },
         {
           "n": 4,
@@ -65800,11 +65806,11 @@
         {
           "n": 6,
           "text": "(was #6079) fact_declaration_tiers (all three tiers) and structure_fact_plane pass; no E2104 for `fact` remains.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:22:35.652Z"
+          "evidence": "Holds on dev 5e71dce38f (JetSema raises no E2104 for fact). Lander5 ran on the gate-p60 jet: cases fact_declaration_tiers 10/0; cases structure_fact_plane 9/0.",
+          "at": "2026-11-14T07:46:18.509Z"
         }
       ],
       "refs": [
@@ -65816,7 +65822,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:22:13.976Z",
-      "updated": "2026-11-13T13:55:02.485Z",
+      "updated": "2026-11-14T07:46:18.509Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -73160,11 +73166,11 @@
         {
           "n": 4,
           "text": "Ratified but unbuilt inference surfaces are implemented or their stale text is cut: the D-INFER-LEVEL1 next-line type in E0501, D-LAMBDA-STORED1 (probe i13 runs today), and the S78 []: [T] text.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T16:26:48.994Z"
+          "evidence": "On dev: the E0501 next-use type in cf1a596597, D-LAMBDA-STORED1 in 6031087804, and the S78 `[]: [T]` text gone. Lander5 ran on the gate-p60 jet: ui empty_start_names_next_use 1/0; ui function_type_take_param 1/0; golden ClosureCaptureModes 3/0, ClosureCaptureWrites 3/0 and Closures 153/0 at o0, o1 and o2; `git grep -F \"[]: [T]\" -- Docs/spec` on dev gives 0 lines.",
+          "at": "2026-11-14T07:46:15.521Z"
         }
       ],
       "refs": [],
@@ -73175,7 +73181,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:02.713Z",
-      "updated": "2026-11-13T08:46:38.755Z",
+      "updated": "2026-11-14T07:46:15.521Z",
       "updatedBy": "Main"
     },
     {
@@ -205101,6 +205107,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T07:46:25.741Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0meo2tr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T07:46:18.509Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02rvq7n",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-14T07:46:17.078Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02rvq7n",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-14T07:46:15.521Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0r2eell",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-14T07:46:12.877Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0meo2tr",
+      "note": "#13"
+    },
     {
       "at": "2026-11-14T07:38:28.372Z",
       "by": "Main",
