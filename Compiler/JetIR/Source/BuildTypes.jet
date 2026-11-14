@@ -808,7 +808,9 @@ ir_host_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int
 // (JetTestSuite) its exact-Int iteration and result, and the game scene and
 // frame (JetRuntime Game.jet) their leading field words. A List field's word
 // points at its header, so it reads like a boxed member. None for any other
-// handle or field.
+// handle or field. A process carrier's `input_digest` and `policy_digest`
+// words hold the digests' material texts, so those reads go through the
+// handle's field export (ir_handle_field), which hashes on first read.
 ir_process_member: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMember? Never! {
     nominal: ir_nominal_name(ir_untag(ty)) ?? return None
     handle: ir_handle_runtime(p, nominal) ?? return None
@@ -822,6 +824,7 @@ ir_process_member: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRM
             return None
         }
     }
+    if name == "input_digest" || name == "policy_digest" -> return None
     declared: ir_declared_field_type(m, p, ty, name) ?? return None
     row: ir_value_type(m, p, declared) ?? return None
     kind: m.types[row].kind
