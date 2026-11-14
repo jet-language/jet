@@ -1,0 +1,94 @@
+// csv.reader and xml.reader take any Prelude `Reader`, not only a
+// FileReader. `Chunks` hands out a few bytes per read, so quoted fields,
+// records and tags cross read boundaries; `Reset` fails every read, and its
+// IOError reaches the reader's EncodingError as the cause, keeping its kind
+// and OS code.
+use {
+    csv: core.encoding.csv
+    xml: core.encoding.xml
+}
+
+Chunks: struct {
+    data: [U8]
+    at: Int
+    step: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            out := [U8]{}
+            _: self.read_into(out, limit) ?? return Err(err)
+            Ok(out)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            count := 0
+            loop count < limit && count < self.step && self.at < self.data.len() {
+                buffer.push(self.data[self.at])
+                self.at += 1
+                count += 1
+            }
+            Ok(count)
+        }
+    }
+}
+
+Reset: struct {
+    peer: String
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+    }
+}
+
+field_text: fn(event: Dyn, name: String) -> String {
+    (event.field(name) ?? return "").text() ?? ""
+}
+
+event_line: fn(event: Dyn) -> String {
+    kind: field_text(event, "$xml_event")
+    if kind == "element_start" || kind == "element_end" {
+        name: event.field("name") ?? return kind
+        return "{kind} {field_text(name, "local")}"
+    }
+    if kind == "text" -> return "{kind} {field_text(event, "value")}"
+    kind
+}
+
+cause_line: fn(error: EncodingError) -> String {
+    if error.cause() == {
+        .Val(cause) -> "io {error.kind == .IO} {cause.kind} {cause.os_code ?? 0} {cause.message}"
+        None -> "no cause"
+    }
+}
+
+run: fn() EncodingError! {
+    rows: Chunks{data: "name,note\nada,\"two\nlines\"\nbo,x\n".bytes(), at: 0, step: 2}
+    records: csv.reader(rows) ?? return Err(err)
+    loop row in records {
+        text := ""
+        loop (index, field) in row.fields {
+            if index > 0 -> text = "{text}|"
+            text = "{text}{field.replace("\n", "/")}"
+        }
+        print("{row.line} {text}")
+    }
+    events: Chunks{data: "<r a=\"1\">hi<s/></r>".bytes(), at: 0, step: 3}
+    tree: xml.reader(events) ?? return Err(err)
+    loop event in tree -> print(event_line(event))
+    broken_csv := csv.reader(Reset{peer: "socket"}) ?? return Err(err)
+    if broken_csv.next() == {
+        .Ok(_) -> print("csv read past a failed source")
+        .Err(error) -> print("csv {cause_line(error)}")
+    }
+    broken_xml := xml.reader(Reset{peer: "socket"}) ?? return Err(err)
+    if broken_xml.next() == {
+        .Ok(_) -> print("xml read past a failed source")
+        .Err(error) -> print("xml {cause_line(error)}")
+    }
+}

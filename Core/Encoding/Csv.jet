@@ -6,7 +6,7 @@ use {
     stream: __core_encoding_stream
     encoding: core.encoding
     rt: jet.runtime.encoding
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     files: core.files
     mem: core.mem
     core.data.[Query]
@@ -785,8 +785,10 @@ writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, 
 // A record that takes its fields, not a copy of them.
 __csv_row: fn(line: Int, fields: &&[String]) -> CSVRow Never! { CSVRow{line: line, fields: fields.move()} }
 
-CSVReader: struct {
-    input: FileReader
+// A bounded record reader over any byte source (a FileReader, a socket, or
+// any other `Reader`), read `buffer_bytes` at a time.
+CSVReader: struct<R: Reader> {
+    input: R
     limits: EncodingLimits
     delimiter: Int
     // One entry per byte value: 1 for each byte that ends a run of plain
@@ -844,11 +846,16 @@ CSVReader: struct {
             if mem.__list_capacity<U8>(self.buffer) == 0 && !stream.reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) -> return Err(self.capacity_error())
             self.buffer.clear()
             self.buffered = 0
-            count: rt.read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? {
+            // A Reader may grow the buffer past its reserve (FileReader keeps
+            // its error words there); the growth is charged like any other.
+            capacity: mem.__list_capacity<U8>(self.buffer)
+            count: self.input.read_into(self.buffer, self.limits.buffer_bytes) ?? {
                 error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
-                error.cause = Val(err)
+                error.cause = Val(stream.io_cause(err))
                 return Err(error)
             }
+            grown: mem.__list_capacity<U8>(self.buffer) - capacity
+            if grown > 0 && !self.allocation.charge(grown) -> return Err(self.capacity_error())
             if count == 0 -> return Ok(None)
         }
         byte: self.buffer[self.buffered]
@@ -1174,7 +1181,7 @@ CSVReader: struct {
     }
 }
 
-reader: fn(source: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{false}) -[FS]> CSVReader EncodingError! {
+reader: fn<R: Reader>(source: &&R, limits: EncodingLimits{EncodingLimits.safe()}, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{false}) -> CSVReader<R> EncodingError! {
     csv_limits(limits) ?? return Err(err)
     raw: delimiter.bytes()
     reason: "a CSV delimiter is one character other than a quote or a line ending"
@@ -1186,7 +1193,7 @@ reader: fn(source: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, 
     loop i in 1..<width -> code = (code << 6).bit_or((Int{raw[i]}.bit_and(63)))
     stops := [U8]{}
     loop b in 0..<256 -> stops.push(if b >= 128 || b == 34 || b == 13 || b == 10 || b == code -> U8{1} else -> U8{0})
-    Ok(CSVReader{input: source.move(), limits: limits, delimiter: code, stops: stops, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, record_width: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
+    Ok(CSVReader<R>{input: source.move(), limits: limits, delimiter: code, stops: stops, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, record_width: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
 }
 
 #Test("typed CSV whole records preserve blank rows, doubled quotes and Unicode columns") {

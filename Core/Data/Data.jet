@@ -356,7 +356,7 @@ __StreamSource: struct<T> {
 // The CSV record cursor behind `csv_reader<T>`; the first record is the
 // header and is read on the first pull.
 __CSVRowSource: struct {
-    records: CSVReader
+    records: CSVReader<FileReader>
     header: [String]
     started: Bool
     row: Int
@@ -1692,7 +1692,7 @@ json: fn<T: Decode>(text: String) -> [T] DataError! {
 // many. A row failure carries its 1-based data row and stays latched.
 csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
-    records: csv_codec.reader(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
+    records: csv_codec.reader<FileReader>(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
     state: Shared{__CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
     source: Shared{__StreamSource<T>{
         pull: fn() { csv_reader_next<T>(state) },

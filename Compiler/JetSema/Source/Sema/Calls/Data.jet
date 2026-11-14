@@ -1521,12 +1521,10 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     handle_type := if {
         module_name == "core.encoding.json" && !reader -> "JSONWriter"
         module_name == "core.encoding.jsonl" && !reader -> "JSONLWriter"
-        module_name == "core.encoding.csv" && reader -> "CSVReader"
-        module_name == "core.encoding.csv" -> "CSVWriter"
+        module_name == "core.encoding.csv" && !reader -> "CSVWriter"
         module_name == "core.encoding.cbor" && reader -> "CBORReader"
         module_name == "core.encoding.cbor" -> "CBORWriter"
-        module_name == "core.encoding.xml" && reader -> "XMLReader"
-        module_name == "core.encoding.xml" -> "XMLWriter"
+        module_name == "core.encoding.xml" && !reader -> "XMLWriter"
         else -> ""
     }
     if handle_type == "" -> return None
@@ -1534,38 +1532,19 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     labels := [String]{}
     labels.push(if reader -> "source" else -> "target")
     defaults := [Expr?]{None}
+    argument_types.push(Type.Named{name: "EncodingLimits"})
+    labels.push("limits")
+    defaults.push(Val(sema_data_core_default_call("EncodingLimits", "safe", span)))
     if {
-        module_name == "core.encoding.csv" && reader -> {
-            argument_types.push(Type.Named{name: "EncodingLimits"})
-            argument_types.push(Type.String)
-            argument_types.push(Type.Bool)
-            argument_types.push(Type.Bool)
-            labels.push("limits")
-            labels.push("delimiter")
-            labels.push("header")
-            labels.push("skip_blank")
-            defaults.push(Val(sema_data_core_default_call("EncodingLimits", "safe", span)))
-            defaults.push(Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ","}}, span: span, id: AST_NODE_GENERATED}))
-            defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
-            defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
+        module_name == "core.encoding.xml" -> {
+            argument_types.push(Type.Named{name: "XMLRenderOptions"})
+            labels.push("options")
+            defaults.push(Val(sema_data_core_default_call("XMLRenderOptions", "safe", span)))
         }
-        else -> {
-            argument_types.push(Type.Named{name: "EncodingLimits"})
-            labels.push("limits")
-            defaults.push(Val(sema_data_core_default_call("EncodingLimits", "safe", span)))
-            if {
-                module_name == "core.encoding.xml" -> {
-                    option_type := if reader -> "XMLParseOptions" else -> "XMLRenderOptions"
-                    argument_types.push(Type.Named{name: option_type})
-                    labels.push("options")
-                    defaults.push(Val(sema_data_core_default_call(option_type, "safe", span)))
-                }
-                module_name == "core.encoding.json" && !reader -> {
-                    argument_types.push(Type.Bool)
-                    labels.push("canonical")
-                    defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
-                }
-            }
+        module_name == "core.encoding.json" -> {
+            argument_types.push(Type.Bool)
+            labels.push("canonical")
+            defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
         }
     }
     params := [SemaCallParam]{}
@@ -1577,23 +1556,19 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     Val(params)
 }
 
-// The FileReader/FileWriter-bound codec constructors. JSON and JSONL readers
-// are generic over `R: Reader` (D-CORE-FILE-ADAPTERS1=A) and check as
-// ordinary Core source calls.
+// The FileReader/FileWriter-bound codec constructors. The JSON, JSONL, CSV
+// and XML readers are generic over `R: Reader` (D-CORE-FILE-ADAPTERS1=A) and
+// check as ordinary Core source calls.
 sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if module_name != "core.encoding.json" && module_name != "core.encoding.jsonl" && module_name != "core.encoding.csv" && module_name != "core.encoding.cbor" && module_name != "core.encoding.xml" -> return None
     if member != "reader" && member != "writer" -> return None
-    if member == "reader" && (module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") -> return None
+    if member == "reader" && module_name != "core.encoding.cbor" -> return None
     if !sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, diagnostics) {
         sema_data_check_discarded_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         return Val(SemaDirectSpecialCheck{handled: true, value: None})
     }
-    max_arity := if {
-        module_name == "core.encoding.csv" && member == "reader" -> 5
-        (module_name == "core.encoding.json" && member == "writer") || module_name == "core.encoding.xml" -> 3
-        else -> 2
-    }
+    max_arity := if (module_name == "core.encoding.json" && member == "writer") || module_name == "core.encoding.xml" -> 3 else -> 2
     if updated_args.len() < 1 || updated_args.len() > max_arity {
         diagnostics.push(sema_error("E0104", span, "`{module_name}.{member}` expects between 1 and {max_arity} arguments, got {updated_args.len()}", "the file handle is required and the policy slots have safe defaults", "pass the file handle and any desired encoding policies"))
         sema_data_check_discarded_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1617,11 +1592,9 @@ sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: 
     handle_type := if {
         module_name == "core.encoding.json" -> "JSONWriter"
         module_name == "core.encoding.jsonl" -> "JSONLWriter"
-        module_name == "core.encoding.csv" && member == "reader" -> "CSVReader"
         module_name == "core.encoding.csv" -> "CSVWriter"
         module_name == "core.encoding.cbor" && member == "reader" -> "CBORReader"
         module_name == "core.encoding.cbor" -> "CBORWriter"
-        member == "reader" -> "XMLReader"
         else -> "XMLWriter"
     }
     result_type := Type.Result{ok: Type.Named{name: handle_type}, err: Type.Named{name: "EncodingError"}}

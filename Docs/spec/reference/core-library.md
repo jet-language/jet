@@ -4081,18 +4081,20 @@ ending, otherwise an `Unsupported` error), drops the first record when
 blank physical rows (D-ROWS1).
 The filesystem query helper decodes header-named records into a typed query;
 it is distinct from the physical row parser.
-The public file-backed `CSVReader` and `CSVWriter` are ordinary source-owned
-holders, not native resource-table handles. The typed `core.data.csv_reader<T>`
-is Core source over the same `CSVReader`: each `next` reads one record (the
-header on the first pull) and decodes it, so rows stream one at a time.
+The public `CSVReader<R>` and file-backed `CSVWriter` are ordinary
+source-owned holders, not native resource-table handles. The typed
+`core.data.csv_reader<T>` is Core source over a `CSVReader<FileReader>`: each
+`next` reads one record (the header on the first pull) and decodes it, so rows
+stream one at a time.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text, delimiter, header, skip_blank)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays through the same engine and options as `csv.rows`. |
 | `csv.to_string<T: Encode>(rows, formulas)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. With the default `formulas: .Escape`, a text cell that opens with `=`, `+`, `-`, `@`, a tab or a carriage return and is not a number is written after an apostrophe, so a spreadsheet shows it rather than running it; numeric cells are unchanged and `formulas: .Keep` turns the escape off. `csv.write_dict(rows, formulas)` follows the same rule. |
-| `csv.reader(source, limits, delimiter, header, skip_blank)` / `csv.writer(target, limits, formulas)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. The writer escapes formula cells as `csv.to_string` does. No reader strips an apostrophe, so a cell that opens with one round-trips exactly. |
-| `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
+| `csv.reader<R: Reader>(source, limits, delimiter, header, skip_blank)` | `CSVReader<R> !EncodingError` | Construct an incremental CSV reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. Reader defaults retain the header and blank records. No reader strips an apostrophe, so a cell that opens with one round-trips exactly. |
+| `csv.writer(target, limits, formulas)` | `CSVWriter !EncodingError -[FS]>` | Construct an incremental file-backed CSV writer. The writer escapes formula cells as `csv.to_string` does. |
+| `CSVReader<R>.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. A source read failure is an `IO` error whose cause keeps the `IOError` kind and OS code. |
 | `CSVWriter.write(fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
 | `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
@@ -4138,7 +4140,7 @@ codec must not remove its native options or located error payloads.
 | `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `Dyn !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
 | `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
 | `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
-| `xml.reader(input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.reader<R: Reader>(input, limits, options)` | `XMLReader<R> !EncodingError` | Construct a bounded XML event reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
 | `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 

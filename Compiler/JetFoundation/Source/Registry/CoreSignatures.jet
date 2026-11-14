@@ -202,18 +202,8 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool{value: false}),
             core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool{value: false}),
         })
-        module_name == "core.encoding.csv" && member == "reader" -> Val([CoreCallParameterContract]{
-            core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
-            core_param_optional("delimiter", ParamZone.Either, CoreCallDefault.String{value: ","}),
-            core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool{value: false}),
-            core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool{value: false}),
-        })
         module_name == "core.encoding.cbor" && member == "reader" -> Val([CoreCallParameterContract]{
             core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
-        })
-        module_name == "core.encoding.xml" && member == "reader" -> Val([CoreCallParameterContract]{
-            core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
-            core_param_optional("options", ParamZone.Either, CoreCallDefault.StaticCall{type_name: "XMLParseOptions", method: "safe"}),
         })
         module_name == "core.encoding.xml" && member == "writer" -> Val([CoreCallParameterContract]{
             core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),

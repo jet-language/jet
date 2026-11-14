@@ -498,11 +498,11 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "config_from_env" -> Val("Env")
             else -> Val("Net")
         }
-        // The encoding readers and writers. A JSON or JSONL reader is generic
-        // over its `Reader` and needs no effect to construct.
-        "core.encoding.json" | "core.encoding.jsonl" -> if member == "writer" -> Val("FS") else -> None
-        "core.encoding.xml" | "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("FS") else -> None
-        "core.encoding.csv" -> if member == "reader" || member == "writer" || member == "query" -> Val("FS") else -> None
+        // The encoding readers and writers. A JSON, JSONL, CSV or XML reader
+        // is generic over its `Reader` and needs no effect to construct.
+        "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.xml" -> if member == "writer" -> Val("FS") else -> None
+        "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("FS") else -> None
+        "core.encoding.csv" -> if member == "writer" || member == "query" -> Val("FS") else -> None
         // The host's f32 SIMD dispatch is a fixed CPU fact read without a
         // system call; comptime refuses it (BuildRoutes.jet
         // ir_comptime_ambient_refusal).
@@ -663,9 +663,9 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
-        "core.encoding.json" | "core.encoding.jsonl" -> if member == "writer" -> Val("Time.Wait") else -> None
-        "core.encoding.xml" | "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("Time.Wait") else -> None
-        "core.encoding.csv" -> if member == "reader" || member == "writer" || member == "query" -> Val("Time.Wait") else -> None
+        "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.xml" -> if member == "writer" -> Val("Time.Wait") else -> None
+        "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("Time.Wait") else -> None
+        "core.encoding.csv" -> if member == "writer" || member == "query" -> Val("Time.Wait") else -> None
         "core.db" -> if member == {
             "transaction" | "__transaction" | "migrate" | "__migrate" -> Val("Time.Wait")
             else -> None

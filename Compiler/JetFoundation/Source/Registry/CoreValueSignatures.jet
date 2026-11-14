@@ -340,12 +340,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         if member == "content" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.List{element: data}, xml_error))))
         }
-        if member == "reader" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(core_sig_named("FileReader"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
-                core_sig_positional(xml_parse_options, read),
-            }, Val(core_sig_result(core_sig_named("XMLReader"), encoding_error))))
-        }
         if member == "writer" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(core_sig_named("FileWriter"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),

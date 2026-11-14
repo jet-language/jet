@@ -3,7 +3,7 @@
 use {
     core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
     rt: jet.runtime.encoding
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     core.prelude.[min, max]
     mem: core.mem
     stream: __core_encoding_stream
@@ -154,9 +154,10 @@ decode_bytes: fn<T: Decode>(bytes: [U8], options: XMLParseOptions{XMLParseOption
     projected.decode<T>() ?? return Err(err)
 }
 
-/// Bounded XML events retain lexical bytes and latch the first stream error.
-XMLReader: struct {
-    input: FileReader
+/// Bounded XML events over any byte source (a FileReader, a socket, or any
+/// other `Reader`) retain lexical bytes and latch the first stream error.
+XMLReader: struct<R: Reader> {
+    input: R
     limits: EncodingLimits
     scanner: engine.StreamScanner
     terminal: EncodingError?
@@ -203,35 +204,43 @@ XMLReader: struct {
             bytes := [U8]{}
             if !stream.reserve(self.allocation, bytes, read_bytes) -> return self.fail(heap_error(self.total))
             capacity: mem.__list_capacity<U8>(bytes)
-            count: rt.read_into(self.input, bytes, read_bytes) ?? {
+            count: self.input.read_into(bytes, read_bytes) ?? {
                 self.allocation.release(capacity)
-                return self.fail(io_error(self.total, err))
+                return self.fail(io_error(self.total, stream.io_cause(err)))
             }
-            if count == 0 {
+            // A Reader may grow the buffer past its reserve (FileReader keeps
+            // its error words there); the growth is charged like any other.
+            grown: mem.__list_capacity<U8>(bytes) - capacity
+            if grown > 0 && !self.allocation.charge(grown) {
                 self.allocation.release(capacity)
+                return self.fail(heap_error(self.total))
+            }
+            held: capacity + max(grown, 0)
+            if count == 0 {
+                self.allocation.release(held)
                 self.eof = true
                 self.scanner.finish_input() ?? return self.fail(stream_error(err))
             } else {
                 self.total += count
                 if self.limits.max_total_bytes == .Val(maximum) {
                     if self.total > maximum {
-                        self.allocation.release(capacity)
+                        self.allocation.release(held)
                         return self.fail(EncodingError{format: .XML, kind: .Limit, byte_offset: self.total,
                             line: None, column: None, path: "", reason: "max_total_bytes {maximum} exceeded", cause: None})
                     }
                 }
                 window: bytes[0..<bytes.len()]
                 self.scanner.push(window) ?? {
-                    self.allocation.release(capacity)
+                    self.allocation.release(held)
                     return self.fail(stream_error(err))
                 }
-                self.allocation.release(capacity)
+                self.allocation.release(held)
             }
         }
     }
 }
 
-reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
+reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader<R> EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
@@ -245,7 +254,7 @@ reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, x
     options.limits.max_entity_depth = min(options.limits.max_entity_depth, limits.max_expansion_depth, options.limits.max_depth)
     options.limits.max_entity_replacement_bytes = min(options.limits.max_entity_replacement_bytes, limits.max_expansion_bytes, options.limits.max_text_bytes)
     scanner: engine.StreamScanner.new(limits.max_item_bytes, options) ?? return Err(stream_error(err))
-    XMLReader{input: input, limits: limits, scanner: scanner, terminal: None, total: 0, eof: false, allocation: stream.budget(limits)}
+    XMLReader<R>{input: input, limits: limits, scanner: scanner, terminal: None, total: 0, eof: false, allocation: stream.budget(limits)}
 }
 
 /// Bounded XML event output. The source stream renderer validates each event
