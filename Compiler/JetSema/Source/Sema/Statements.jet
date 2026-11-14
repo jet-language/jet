@@ -8331,6 +8331,10 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     // exit carries no view (Rust `check_return` `failure_exit`). A window
     // read at the boundary, or a view binding, is lifted into the success
     // rail, so it proves its owners as the success view it is.
+    // A `&map[key]` name returned where a `ViewMut` is expected is a one-value
+    // window over that map value (sema_expr_check_ident), bare or lifted into
+    // the success rail; it proves its owner as the window it is.
+    one_value_window: sema_stmt_is_one_value_window(checked)
     recorded_value := value
     recorded_ty := checked.ty
     if sema_stmt_return_success_is_view(return_type) && checked.ty == .Result(ok_ty, _) {
@@ -8338,7 +8342,7 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
             recorded_value = ok_value
             recorded_ty = ok_ty
         }
-        if value == .Place(_, _, _, _) -> recorded_ty = ok_ty
+        if value == .Place(_, _, _, _) || one_value_window -> recorded_ty = ok_ty
         if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
             if sema_stmt_view_access(known) != None -> recorded_ty = ok_ty
         }
@@ -8355,12 +8359,18 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     // (Rust wraps it before the audit), so only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, program, scopes, context, diagnostics)
     // Neither a returned window nor its owning copy moves the window's owner;
-    // nor does a one-value window over a map value, which a `&map[key]` name
-    // turns into at this boundary (sema_expr_check_ident).
-    one_value_window: checked.kind == .Borrow(_, _)
-    moved := materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
+    // nor does a one-value window over a map value.
+    moved: materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
+}
+
+// Whether the returned `checked` is a write borrow of a place, bare or as the
+// payload of the success rail: the one-value window a `&map[key]` name turns
+// into where a `ViewMut` is expected (sema_expr_check_ident).
+sema_stmt_is_one_value_window: fn(checked: TExpr) -> Bool Never! {
+    if checked.kind == .Ok(payload) -> return payload.kind == .Borrow(_, _)
+    checked.kind == .Borrow(_, _)
 }
 
 // Rust `check_return` audits a declared `View`/`ViewMut` return before the

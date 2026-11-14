@@ -2086,10 +2086,16 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             if {
                 tail_source != None -> {
                     tail: tail_source ?? Expr.Unit{span: lambda.span, id: AST_NODE_GENERATED}
-                    checked_tail_value := sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, environment, lambda_scopes), environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
+                    tail_start: diagnostics.len()
+                    checked_tail_value: sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, environment, lambda_scopes), environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                     sema_ownership_keep_share_found(state, lambda_state)
                     sema_ownership_keep_mutations(state, lambda_state)
-                    checked_tail: checked_tail_value ?? return None
+                    // A body that is one value (`fn(x) { x }`) reports its
+                    // return mismatch on the lambda, as an expression body does.
+                    checked_tail: checked_tail_value ?? {
+                        if !inline_loop && statements.len() == 1 && expected_ret == .Val(required) && !sema_expression_lambda_type_is_result(required) -> sema_expression_lambda_return_replace_mismatch(required, tail, lambda.span, tail_start, environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
+                        return None
+                    }
                     // An earlier `return` gave an open callback its type; the
                     // last line hands back the same type.
                     if !inline_loop && lambda_context.callback_return_row == .Val(row) && !(row == .Result(_, _)) && !sema_type_assignable(row, checked_tail.ty) {
