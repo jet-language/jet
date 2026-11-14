@@ -4578,7 +4578,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Shared.jet",
-      "line": 432,
+      "line": 461,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -11523,7 +11523,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 246:5 | "cpuid only reports processor identification" |
 | Compiler | Compiler/JetRuntime/Source/Sha256.jet | 269:9 | "the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 58:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
-| Compiler | Compiler/JetRuntime/Source/Shared.jet | 432:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Shared.jet | 461:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 17:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 23:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 12:5 | "borrows an aligned live synchronization word" |
