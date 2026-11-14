@@ -757,6 +757,21 @@ with_head: fn(head: String, parts: [String]) -> String Never! {
     "{head}.{parts[1..<parts.len()].join(".")}"
 }
 
+// The type a binding initialized by a call of `row` holds, for crediting the
+// methods later called on it: the declared result without its type arguments
+// or `?` (a binding that keeps the option calls none of the type's methods),
+// qualified by the declaring module when it declares that type. Otherwise the
+// result as declared.
+bound_type: fn(table: Table, row: Int) -> String Never! {
+    spelled: table.returns[row]
+    head: spelled.partition("<").head
+    base: if head.ends_with("?") -> head.slice(0..<head.len() - 1) else -> head.copy()
+    if table.types.has_key(base) -> return base
+    qualified: "{table.units[row]}.{base}"
+    if table.types.has_key(qualified) -> return qualified
+    spelled.copy()
+}
+
 bind: fn(map: &[String: String], undo: &[Undo], binding: Binding, key: String, value: String) {
     undo.push(Undo{binding: binding, key: key.copy(), previous: map.get(key) ?? ""})
     map[key.copy()] = value.copy()
@@ -846,17 +861,24 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
         }
         // Explicit parameter/local types and constructor/function initializers make
         // receiver calls attributable without guessing by the method's spelling.
+        // After `(` or `,` a name and colon is a parameter, which binds only to
+        // its type, or a named argument (`tls: server.tls(…)`), which binds
+        // nothing.
         follow: token(tokens, i + 1)
+        listed: token(tokens, i - 1) == "(" || token(tokens, i - 1) == ","
         if is_identifier(value) && (follow == ":" || follow == ":=") {
             at := i + 2
             loop token(tokens, at) == "&" || token(tokens, at) == "~" || token(tokens, at) == "comptime" -> at += 1
             rhs: chain(tokens, at)
             if rhs.found {
-                target: expand(rhs.parts, aliases)
+                // A method of a typed receiver (`first := region.claim(…)`) is
+                // resolved through the receiver's type, as a call is below.
+                owner: receivers.get(rhs.parts[0]) ?? ""
+                target: if owner != "" && rhs.parts.len() > 1 -> with_head(owner, rhs.parts) else -> expand(rhs.parts, aliases)
                 typed := ""
                 if {
                     table.types.has_key(target) -> typed = target.copy()
-                    table.by_id.get(target) == .Val(row) -> typed = table.returns[row].copy()
+                    !listed && table.by_id.get(target) == .Val(row) -> typed = bound_type(table, row)
                 }
                 if typed != "" -> bind(receivers, undo, .Receiver, value, typed)
             }
@@ -1602,6 +1624,7 @@ fixture_rows: fn() -> [Function] Never! {
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
     rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}"))
+    rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(&self) -> Block? Never! {{ None }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
     rows
 }
 
@@ -1661,6 +1684,14 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 
 #Test("qualified types, typed receivers, inferred constructors and chained calls") {
     assert_eq(ids("use crypto: core.crypto\n    use core.crypto.[Hasher]\n    run: fn(h: Hasher) {{\n      h.digest()\n      value: crypto.new()\n      value.digest()\n      Hasher.new().digest()\n      unknown.digest()\n    }}", ""), [String]{"core.crypto.Hasher.digest", "core.crypto.new", "core.crypto.Hasher.digest", "core.crypto.Hasher.new", "core.crypto.Hasher.digest"})
+}
+
+#Test("a binding from a typed receiver's method or a generic result holds the declared type") {
+    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      region := mem.reserve()\n      first := region.claim() ?? panic(\"none\")\n      first.address()\n      cells := mem.window<Int>()\n      cells.len()\n    }}", ""), [String]{"core.mem.reserve", "core.mem.Region.claim", "core.mem.Block.address", "core.mem.window", "core.mem.Window.len"})
+}
+
+#Test("a named argument binds nothing, so it cannot shadow a module alias") {
+    assert_eq(ids("use crypto: core.crypto\n    run: fn() {{\n      wrap(crypto: crypto.new())\n      crypto.new()\n    }}", ""), [String]{"core.crypto.new", "core.crypto.new"})
 }
 
 #Test("a typed literal is a value of its type, and a literal kind is named unqualified") {

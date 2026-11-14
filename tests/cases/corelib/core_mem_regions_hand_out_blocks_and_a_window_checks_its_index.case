@@ -1,0 +1,29 @@
+# core.mem's Region, Block and Window methods called on their own types. A
+# reserved region's remaining bytes shrink as claim hands out blocks in
+# address order, a claim at alignment 3 is refused, Block.join grows a block
+# over its neighbour, Region.adopt wraps a claimed block's bytes and hands
+# out a block at its start, and close ends both regions, on every
+# optimization level and the built artifact. window.jet writes a window cell
+# through set and reads inside and outside it; it is checked only, because
+# building any core.mem Window<Int> stops in the IR builder today (the
+# Examples/LowLevel/RawPointerTools.jet run stops the same way).
+fixture: core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check window.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "claimed 64 of 4096, first at 0, joined 64 bytes, alignment 3 refused true\nadopted 256 bytes, 240 left, piece at the host's start true\n3 blocks kept\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "claimed 64 of 4096, first at 0, joined 64 bytes, alignment 3 refused true\nadopted 256 bytes, 240 left, piece at the host's start true\n3 blocks kept\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "claimed 64 of 4096, first at 0, joined 64 bytes, alignment 3 refused true\nadopted 256 bytes, 240 left, piece at the host's start true\n3 blocks kept\n"
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "claimed 64 of 4096, first at 0, joined 64 bytes, alignment 3 refused true\nadopted 256 bytes, 240 left, piece at the host's start true\n3 blocks kept\n"

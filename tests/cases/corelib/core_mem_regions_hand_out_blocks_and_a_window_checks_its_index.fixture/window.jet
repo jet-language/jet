@@ -1,0 +1,16 @@
+// A checked window over four heap Ints writes one through `set`, reads two
+// inside it and refuses an index outside it.
+use core.mem
+
+run: fn() {
+    #Unsafe("the four Ints are fresh heap storage, every access stays inside them, and they are released once") {
+        if mem.alloc_raw(32, 8) == .Val(bytes) {
+            ints: bytes.cast<Int>()
+            mem.fill(ints, 7, 4)
+            cells := mem.window(ints, 4)
+            cells.set(1, 20)
+            print("{cells.len()} cells: {cells.get(0) ?? -1} {cells.get(1) ?? -1}, outside {cells.get(9) ?? -1}")
+            mem.free_raw(bytes)
+        }
+    }
+}
