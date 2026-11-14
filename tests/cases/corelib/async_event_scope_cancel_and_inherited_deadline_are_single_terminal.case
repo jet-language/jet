@@ -1,4 +1,10 @@
-# Port of tests/corelib_parts/runtime.rs::async_event_scope_cancel_and_inherited_deadline_are_single_terminal; original source unchanged.
+# Port of tests/corelib_parts/runtime.rs::async_event_scope_cancel_and_inherited_deadline_are_single_terminal.
+# The handlers' started-channel sends end in `?? panic(...)`: a refused send fails
+# with SendError<Int>, which the handlers' String failure type cannot carry.
+# The two deadline emissions run in `emit_expiring`'s `#Deadline(20ms)` block,
+# and `run` joins them with no deadline: a passed deadline stops its task at
+# the next stop poll, so a joiner under it would end with E3003 instead of
+# reading the entry's DeadlineExceeded report.
 # ORACLE-LITERAL: tests/corelib_parts/runtime.rs:541.
 fixture: fixtures/async_event_scope_cancel_and_inherited_deadline_are_single_terminal
 step: jet build fixture.jet

@@ -14,7 +14,7 @@ run: fn() {
     { sender: cancel_hold_started_tx, receiver: cancel_hold_started_rx }: channel<Int>()
     { sender: cancel_hold_release_tx, receiver: cancel_hold_release_rx }: channel<Int>()
     cancel_event.on(hold_cancel_scope, fn(n: Int) {
-        cancel_hold_started_tx.send(n.copy())
+        cancel_hold_started_tx.send(n.copy()) ?? panic("cancel hold started send")
         held_sender: cancel_hold_release_tx.copy()
         released: cancel_hold_release_rx.receive() ?? panic("cancel hold")
     })
@@ -39,7 +39,7 @@ run: fn() {
     { sender: close_hold_started_tx, receiver: close_hold_started_rx }: channel<Int>()
     { sender: close_hold_release_tx, receiver: close_hold_release_rx }: channel<Int>()
     close_event.on(hold_close_scope, fn(n: Int) {
-        close_hold_started_tx.send(n.copy())
+        close_hold_started_tx.send(n.copy()) ?? panic("close hold started send")
         held_sender: close_hold_release_tx.copy()
         released: close_hold_release_rx.receive() ?? panic("close hold")
     })

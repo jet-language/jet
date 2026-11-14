@@ -18,7 +18,7 @@ run: fn() {
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
     ev.on(scope, fn(n: Int) {
-        started_tx.send(n.copy())
+        started_tx.send(n.copy()) ?? panic("started send")
         released: release_rx.receive() ?? panic("release")
     })
     first: ev.emit_async(1)

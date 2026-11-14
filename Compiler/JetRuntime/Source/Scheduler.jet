@@ -557,6 +557,7 @@ scheduler_delivered_status: fn() -> I64 {
         _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_empty()))
     }
     scheduler_check_loops(control)
+    scheduler_check_loop_deadline(control)
     scheduler_cleanup_mask(scheduler_control_status(control))
 }
 #Export(c) jet_scheduler_native_propagate: fn() -> I64 {
@@ -571,7 +572,12 @@ scheduler_delivered_status: fn() -> I64 {
 // for is given there before the stop is propagated.
 #Export(c) jet_rt_session_propagate: fn() -> I64 {
     scheduler_turn_give()
-    jet_scheduler_native_propagate()
+    control: scheduler_control_current()
+    if (control != I64{0}) {
+        scheduler_check_loops(control)
+        scheduler_check_loop_deadline(control)
+    }
+    scheduler_delivered_status()
 }
 
 #Export(c) jet_scheduler_shield_enter: fn() {
@@ -791,9 +797,7 @@ scheduler_wait_while_paused: fn() -> I64 {
 // and unwinds with its Drop cleanup; the bit is taken once (the cancel flag
 // itself stays for the wait points), and a root, which unwinds no cancel,
 // only drops it. The cancel flag is stored before the bit is raised, so a
-// poll that clears a raised bit sees the flag. Once a deadline has been set
-// (the bit stays), each poll reads the clock while the context holds a
-// deadline and no stop is published, and delivers E3003 once it has passed.
+// poll that clears a raised bit sees the flag.
 scheduler_check_loops: fn(control: I64) {
     attention: sync_load(wrapping(control + I64{24}))
     if (attention == I64{0}) || scheduler_shielded() -> return
@@ -802,7 +806,19 @@ scheduler_check_loops: fn(control: I64) {
         scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, false)
         if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
     }
-    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || (scheduler_control_status(control) != I64{0}) -> return
+}
+
+// Once a deadline has been set (the bit stays), each stop poll of compiled
+// code (jet_rt_session_propagate, jet_scheduler_native_poll) reads the clock
+// while the context holds a deadline and no stop is published, and delivers
+// E3003 once it has passed. The runtime's own stop checks
+// (jet_scheduler_native_propagate) leave it to the wait points: a typed
+// join waits past its joiner's deadline, an async entry turns its passed
+// deadline into its report, and a task body that has returned keeps its
+// value.
+scheduler_check_loop_deadline: fn(control: I64) {
+    attention: sync_load(wrapping(control + I64{24}))
+    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) -> return
     if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) -> scheduler_deliver_deadline(rt_static_text("a loop"))
 }
 

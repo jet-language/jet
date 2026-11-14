@@ -10,7 +10,7 @@ owner_teardown_task: fn() -> Task<DispatchReport<String>> {
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
     ev.on(owner_scope, fn(n: Int) {
-        started_tx.send(n.copy())
+        started_tx.send(n.copy()) ?? panic("started send")
         held_sender: release_tx.copy()
         released: release_rx.receive() ?? panic("release")
     })
@@ -20,13 +20,23 @@ owner_teardown_task: fn() -> Task<DispatchReport<String>> {
     return queued
 }
 
+// The emission inherits the block's 20ms deadline. The caller joins it with
+// no deadline of its own, so it reads the entry's DeadlineExceeded report
+// instead of being stopped once the deadline has passed.
+emit_expiring: fn(ev: AsyncEvent<Int, String>, n: Int) -> Task<DispatchReport<String>> {
+    #Deadline(20ms) {
+        return ev.emit_async(n)
+    }
+    panic("the deadline block returns")
+}
+
 run: fn() {
     cancel_scope: event.scope()
     cancelled: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: cancel_started_tx, receiver: cancel_started_rx }: channel<Int>()
     { sender: cancel_release_tx, receiver: cancel_release_rx }: channel<Int>()
     cancelled.on(cancel_scope, fn(n: Int) {
-        cancel_started_tx.send(n.copy())
+        cancel_started_tx.send(n.copy()) ?? panic("cancel started send")
         released: cancel_release_rx.receive() ?? panic("release")
     })
     cancel_running: cancelled.emit_async(1)
@@ -48,16 +58,14 @@ run: fn() {
     { sender: queued_started_tx, receiver: queued_started_rx }: channel<Int>()
     { sender: queued_release_tx, receiver: queued_release_rx }: channel<Int>()
     queued_deadline.on(queued_scope, fn(n: Int) {
-        queued_started_tx.send(n.copy())
+        queued_started_tx.send(n.copy()) ?? panic("queued started send")
         released: queued_release_rx.receive() ?? panic("release")
     })
     queued_running: queued_deadline.emit_async(10)
     queued_started: queued_started_rx.receive() ?? panic("started")
-    #Deadline(20ms) {
-        expires_queued: queued_deadline.emit_async(11)
-        queued_expired: expires_queued.join() ?? panic("deadline queued join")
-        print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
-    }
+    expires_queued: emit_expiring(queued_deadline, 11)
+    queued_expired: expires_queued.join() ?? panic("deadline queued join")
+    print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
     queued_scope.cancel()
     _: queued_running.join() ?? panic("queued running join")
 
@@ -66,17 +74,15 @@ run: fn() {
     { sender: pending_started_tx, receiver: pending_started_rx }: channel<Int>()
     { sender: pending_release_tx, receiver: pending_release_rx }: channel<Int>()
     pending_deadline.on(pending_scope, fn(n: Int) {
-        pending_started_tx.send(n.copy())
+        pending_started_tx.send(n.copy()) ?? panic("pending started send")
         released: pending_release_rx.receive() ?? panic("release")
     })
     pending_running: pending_deadline.emit_async(20)
     pending_started: pending_started_rx.receive() ?? panic("started")
     pending_queued: pending_deadline.emit_async(21)
-    #Deadline(20ms) {
-        expires_pending: pending_deadline.emit_async(22)
-        pending_expired: expires_pending.join() ?? panic("deadline pending join")
-        print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
-    }
+    expires_pending: emit_expiring(pending_deadline, 22)
+    pending_expired: expires_pending.join() ?? panic("deadline pending join")
+    print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
     pending_scope.cancel()
     _: pending_queued.join() ?? panic("pending queued join")
     _: pending_running.join() ?? panic("pending running join")

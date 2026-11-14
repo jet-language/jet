@@ -5,6 +5,8 @@
 # worker, so that gate let entries dispatch before the cancel and close. The
 # guest instead holds the event's run slot with a parked handler, which keeps
 # the same payloads Queued and Pending at the decision on any thread count.
+# The handlers' started-channel sends end in `?? panic(...)`: a refused send fails
+# with SendError<Int>, which the handlers' String failure type cannot carry.
 fixture: fixtures/async_event_cancel_and_close_winners_remain_immutable_after_task_drain
 step: jet build fixture.jet
 step: built
