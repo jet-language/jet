@@ -5238,7 +5238,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     published_effects := [String:String]{}
     loop (key_index, key) in node_by_key.texts {
         node_index: node_by_key.rows[key_index]
-        if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
+        // Core marks its audited `core.mem` operations `#Unsafe`; outside a
+        // gate sema already reports each call as E3101, so E3103 would say it twice.
+        core_audited: module_is_core(nodes[node_index].module_identity) && SEMA_CORE_MEM_AUDITED.contains(nodes[node_index].name)
+        if nodes[node_index].is_unsafe && !core_audited -> unsafe_names[key] = nodes[node_index].name
         if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
