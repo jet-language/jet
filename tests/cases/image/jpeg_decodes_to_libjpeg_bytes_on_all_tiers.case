@@ -1,0 +1,13 @@
+# core.image decodes cjpeg output to the pixels djpeg -dct int -nosmooth writes, and refuses progressive input, under jet run and a built binary.
+fixture: jpeg_decodes_to_libjpeg_bytes_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = jpeg_decodes_to_libjpeg_bytes_on_all_tiers.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = jpeg_decodes_to_libjpeg_bytes_on_all_tiers.out
+stdout: == default # the built binary agrees with jet run

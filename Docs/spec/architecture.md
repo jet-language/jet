@@ -2216,7 +2216,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Core/Units/Units.jet`; all tiers marshal `(value, uncertainty)`. |
-  | `core.image` | Kernel | `Core/Image/Image.jet` owns format detection, PNG decode and every budget check; comptime marshals values. |
+  | `core.image` | Kernel | `Core/Image/Image.jet` owns format detection, PNG and JPEG decode and every budget check; comptime marshals values. |
   | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `Core/Service/Service.jet`; structured export uses the existing `core.log` sink. |
   | `core.data.sketch.cms` | Jet | `Core/Data/Sketch/Cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
   | `core.data.sketch.hll` | Jet | `Core/Data/Sketch/Hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/Data/Sketch.jet`. |

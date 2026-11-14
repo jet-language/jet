@@ -3394,8 +3394,8 @@ run: fn() {
 | Operation | Returns | Description |
 | --- | --- | --- |
 | `image.inspect(bytes, limits)` | `ImageInfo ImageError!` | The header's `width`, `height`, `format` (`ImageFormat`) and `color` (`ImageColor`: `Gray`, `GrayAlpha`, `RGB`, `RGBA` or `Indexed`), checked against `limits` without decoding the pixels. |
-| `image.decode(bytes, limits)` | `Image ImageError!` | The pixels. PNG decodes every color type and bit depth, PLTE and tRNS transparency, all five row filters and Adam7 interlacing; sixteen-bit samples keep their high byte. |
-| `ImageError` | enum | `Malformed` input, an `Unsupported` format, color type or bit depth (JPEG and GIF are not decoded yet), or `TooLarge` for an exceeded budget. |
+| `image.decode(bytes, limits)` | `Image ImageError!` | The pixels. PNG decodes every color type and bit depth, PLTE and tRNS transparency, all five row filters and Adam7 interlacing; sixteen-bit samples keep their high byte. JPEG decodes baseline and extended sequential Huffman frames of 8-bit gray or YCbCr in one interleaved scan, with restart intervals; the inverse DCT and color conversion are libjpeg's integer ones and chroma repeats over the pixels it covers, so every tier writes the same bytes. JPEG pixels are opaque. For JPEG, the decoded-bytes budget also bounds the component planes, padded to whole 8 x 8 blocks. |
+| `ImageError` | enum | `Malformed` input, an `Unsupported` format, color type or bit depth (GIF, and progressive, lossless, arithmetic-coded, 12-bit, CMYK or multi-scan JPEG), or `TooLarge` for an exceeded budget. |
 
 `core.ui` decodes texture atlases through `core.image` and premultiplies the
 pixels as they load.
