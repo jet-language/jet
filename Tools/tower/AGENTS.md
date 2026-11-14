@@ -446,15 +446,17 @@ size basis from the section's `size_basis` (static stripped, else stripped plus
 every shared library including libc; web artifact; bundle; script+runtime),
 and each size bar names its basis.
 
-Tower searches `config.gauntletResults` (default `Tools/gauntlet/results`,
-relative to the project root) and the machine's shared results directory
-`$JET_STATE_ROOT/gauntlet/results`. The harness copies every run that has
-standings there, so a run in any worktree reaches the page served from any
-checkout. Reload the page to pick up a new run.
+The page shows the gauntlet table, `$JET_STATE_ROOT/gauntlet/table.json`
+(`Tools/gauntlet/harness/table.mjs`): the one durable record of every
+measurement, one row per entry and language. The harness writes each entry's
+rows into it as soon as that entry is measured, from a run in any worktree,
+and reuses a row whose program and toolchain are unchanged instead of
+measuring it again (`--remeasure` forces it). Cells the table has no row for
+read "not measured yet". `node Tools/gauntlet/harness/table.mjs import
+RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows.
 
 ```
-tower gauntlet standings [--results PATH] [--json]   # same table as text;
-                                  # PATH is a results file or a directory
+tower gauntlet standings [--table PATH] [--json]   # same table as text
 ```
 
 ## HTTP API (when `tower serve` is up, default :7878)

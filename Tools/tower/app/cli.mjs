@@ -20,7 +20,7 @@ import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
-import { readGauntletStandings, standingsLocations } from './gauntlet-standings.mjs';
+import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
@@ -168,7 +168,7 @@ const COMMAND_FLAGS = {
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
   board: { verbs: { commit: by(), check: [] } },
-  gauntlet: { verbs: { standings: ['results'] } },
+  gauntlet: { verbs: { standings: ['table'] } },
 };
 
 const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
@@ -1449,18 +1449,16 @@ function cmdBoard(store, { pos, flags }) {
   }
 }
 
-// #6834: the one gauntlet run the Gauntlet page shows, as a table: the newest
-// full or merged results file, else the planned grid from the entries'
-// manifests. --results names a results file or a directory of them; by
-// default config `gauntletResults` and the machine's shared results directory
-// ($JET_STATE_ROOT/gauntlet/results) are searched.
+// #6834: the gauntlet table the Gauntlet page shows, as text: every entry's
+// grid from the entries' manifests with the table's measured rows. --table
+// names another table file than the machine's
+// ($JET_STATE_ROOT/gauntlet/table.json).
 async function cmdGauntlet(store, { pos, flags }) {
   const [verb] = pos;
   if (verb !== 'standings') throw new TowerError('E_USAGE', `unknown gauntlet verb "${verb}" — standings`);
-  if (flags.results === true) throw new TowerError('E_USAGE', 'gauntlet standings --results needs a PATH');
+  if (flags.table === true) throw new TowerError('E_USAGE', 'gauntlet standings --table needs a PATH');
   const root = projectRoot(store.dataDir);
-  const locations = standingsLocations(root, store.config.gauntletResults, flags.results === undefined ? undefined : String(flags.results));
-  const view = projectGauntletStandings(await readGauntletStandings(root, locations));
+  const view = projectGauntletStandings(await readGauntletStandings(root, flags.table === undefined ? undefined : resolve(String(flags.table))));
   return out(flags, gauntletStandingsText(view), view);
 }
 

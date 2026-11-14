@@ -1,6 +1,6 @@
 // #6834: the standings projection the Gauntlet page and `tower gauntlet
 // standings` share, for a peers-only run (Jet pending), a run with Jet
-// merged and the planned grid, the results-file lookup, and the CLI table.
+// merged and the planned grid, the gauntlet table, and the CLI table.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -10,13 +10,15 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { empty, TowerError } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
-import { plannedStandings, readGauntletStandings, sharedResultsDir, standingsLocations } from '../app/gauntlet-standings.mjs';
+import { readGauntletStandings, tableStandings } from '../app/gauntlet-standings.mjs';
+import { readTable, recordEntry, tablePath, writeTable } from '../../gauntlet/harness/table.mjs';
 import { gauntletRunText, gauntletStandingsText, projectGauntletStandings, renderGauntletStandings } from '../app/ui/gauntlet.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/gauntlet-results.json', import.meta.url));
 const PEERS_FIXTURE = fileURLToPath(new URL('./fixtures/gauntlet-results-peers.json', import.meta.url));
 const report = (file = FIXTURE) => JSON.parse(readFileSync(file, 'utf8'));
-const view = (file = FIXTURE) => projectGauntletStandings({ file: 'results.json', scope: 'partial_entry', standings: report(file).standings });
+const TABLE = { updated: '2026-11-14T12:00:00.000Z', entries: 1, rows: 9 };
+const view = (file = FIXTURE) => projectGauntletStandings({ file: 'table.json', table: TABLE, standings: report(file).standings });
 const row = (projected, peer) => projected.entries[0].rows.find((item) => item.peer === peer);
 const cell = (projected, peer, metric) => row(projected, peer).cells.find((item) => item.metric === metric);
 const panel = (projected, metric) => projected.entries[0].panels.find((item) => item.metric === metric);
@@ -161,7 +163,7 @@ test('a run with Jet merged draws Jet beside the same peer bars, with ratios and
   assert.equal(panel(projected, 'startup').bars.find((bar) => bar.role === 'ceiling').text, '1.12 miss +12%');
 
   const text = gauntletStandingsText(projected);
-  assert.match(text, /^Gauntlet · run \? of .+ · commit not recorded · results results\.json · partial entry\n/);
+  assert.match(text, /^Gauntlet · table table\.json · 9 rows over 1 entries · updated 2026-11-14 12:00 UTC\n/);
   assert.match(text, /floor 29 pass, 1 fail, 10 other · ceiling 0 meet, 5 miss, 0 other/);
   assert.match(text, /\nsize basis \(each size value names its basis\):\n {2}static stripped: Jet, Rust, C, Zig, Go and asm/);
   assert.match(text, /\nhello \(batch\)\n {2}peer +startup +run wall +run cycles +peak RSS +size\n {2}Jet +331 µs +417 µs +57\.8 k cycles +292 kB +95\.6 kB\n/);
@@ -183,53 +185,44 @@ test('a run with Jet merged draws Jet beside the same peer bars, with ratios and
   assert.match(html, /<li class="standings__blocked--na"><b>Vite<\/b> <span>not applicable: /);
 });
 
-test('the results lookup shows only the newest full or merged run, else the planned grid', async () => {
+test('the page shows the gauntlet table: each row it holds, every other cell not measured yet or why not', async () => {
   const root = mkdtempSync(join(tmpdir(), 'tower-standings-'));
   try {
-    const dir = join(root, 'results');
-    const shared = join(root, 'shared');
-    assert.equal((await readGauntletStandings(root, [dir, shared])).scope, 'planned');
-    mkdirSync(dir);
-    const partial = report();
-    writeJSON(join(dir, '2026-11-14-hello.json'), partial);
-    writeJSON(join(dir, '2026-11-12-hello.json'), partial);
-    writeJSON(join(dir, '2026-11-15-axis-live_reload.json'), { contract: 'gauntlet-report-v1' });
-    mkdirSync(shared);
-    writeJSON(join(shared, '2026-11-15-languages-rust,c.json'), report(PEERS_FIXTURE));
-    const planned = await readGauntletStandings(root, [dir, shared]);
-    assert.deepEqual([planned.file, planned.scope, planned.run], [null, 'planned', null]);
-    writeJSON(join(dir, '2026-11-13.json'), { ...partial, options: { scope: 'full_matrix' }, run_id: 'run-13', provenance: { commit: 'abc' } });
-    const full = await readGauntletStandings(root, [dir, shared]);
-    assert.equal(full.file, join('results', '2026-11-13.json'));
-    assert.equal(full.scope, 'full_matrix');
-    assert.deepEqual(full.run, { id: 'run-13', generated: partial.generated ?? null, commit: 'abc', merged_from: null });
-    writeJSON(join(shared, '2026-11-15-merged-languages-asm.json'), { ...report(PEERS_FIXTURE), options: { scope: 'full_matrix' }, merged_from: { run_id: 'run-13', generated: 'g', commit: 'abc' } });
-    const merged = await readGauntletStandings(root, [dir, shared]);
-    assert.equal(merged.file, join('shared', '2026-11-15-merged-languages-asm.json'));
-    assert.deepEqual(merged.run.merged_from, { id: 'run-13', generated: 'g', commit: 'abc' });
-    assert.equal((await readGauntletStandings(root, [join(dir, '2026-11-12-hello.json')])).scope, 'partial_entry');
-    await assert.rejects(readGauntletStandings(root, [join(dir, '2026-11-15-axis-live_reload.json')]), (error) => error instanceof TowerError && error.code === 'E_INVALID');
-    writeFileSync(join(dir, '2026-11-16.json'), '{');
-    await assert.rejects(readGauntletStandings(root, [dir, shared]), (error) => error.code === 'E_INVALID');
+    const file = join(root, 'state', 'table.json');
+    const empty = await readGauntletStandings(root, file);
+    assert.deepEqual([empty.file, empty.table], [join('state', 'table.json'), { updated: null, entries: 0, rows: 0 }]);
+    assert.equal(projectGauntletStandings(empty).planned, true);
+    const table = await readTable(file);
+    recordEntry(table, { entry: { name: 'hello' }, rows: { jet: { status: 'broken', reason: 'jet row reason' } }, standings_rows: { rust: { status: 'broken', reason: 'rust row reason' }, c: { not_measured: true } } },
+      { runId: 'run-1', generated: '2026-11-14T12:00:00.000Z', commit: 'abc', toolchains: { rust: { version: 'rustc 1' } }, jetBinarySha256: 'jet-sha', programs: { rust: 'rust-sha' } });
+    assert.deepEqual(Object.keys(table.rows.hello).sort(), ['jet', 'rust'], 'a row the run did not measure stays out');
+    assert.deepEqual(table.rows.hello.rust.measured, { at: '2026-11-14T12:00:00.000Z', run_id: 'run-1', commit: 'abc', toolchain: 'rustc 1', program_sha256: 'rust-sha' });
+    await writeTable(table, file);
+    const shown = await readGauntletStandings(root, file);
+    assert.deepEqual(shown.table, { updated: '2026-11-14T12:00:00.000Z', entries: 1, rows: 2 });
+    const projected = projectGauntletStandings(shown);
+    assert.equal(projected.planned, false);
+    assert.equal(gauntletRunText(projected), 'table state/table.json · 2 rows over 1 entries · updated 2026-11-14 12:00 UTC');
+    const hello = Object.fromEntries(projected.entries.find((entry) => entry.entry === 'hello').grid.map((cell) => [cell.peer, cell.text]));
+    assert.equal(hello.rust, 'failed: rust row reason');
+    assert.equal(hello.c, 'not measured yet');
+    writeFileSync(file, '{');
+    await assert.rejects(readGauntletStandings(root, file), (error) => error instanceof TowerError && error.code === 'E_INVALID');
     const state = process.env.JET_STATE_ROOT;
     process.env.JET_STATE_ROOT = join(root, 'state');
     try {
-      assert.equal(sharedResultsDir(), join(root, 'state', 'gauntlet', 'results'));
-      assert.deepEqual(standingsLocations(root, 'Tools/gauntlet/results'), [join(root, 'Tools', 'gauntlet', 'results'), sharedResultsDir()]);
-      assert.deepEqual(standingsLocations(root, dir), [dir, sharedResultsDir()]);
+      assert.equal(tablePath(), join(root, 'state', 'gauntlet', 'table.json'));
     } finally {
       if (state === undefined) delete process.env.JET_STATE_ROOT;
       else process.env.JET_STATE_ROOT = state;
     }
-    assert.deepEqual(standingsLocations(root, 'Tools/gauntlet/results', dir), [dir]);
-    assert.throws(() => standingsLocations(root, ''), (error) => error.code === 'E_USAGE');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('the planned grid covers every entry × Jet, every peer and asm, each cell not measured yet or why not', async () => {
-  const projected = projectGauntletStandings({ file: null, scope: 'planned', run: null, standings: await plannedStandings() });
+  const projected = projectGauntletStandings({ file: null, table: { updated: null, entries: 0, rows: 0 }, standings: await tableStandings({ rows: {} }) });
   assert.equal(projected.planned, true);
   assert.equal(projected.jetMeasured, false);
   assert.deepEqual(projected.columns.map((column) => column.peer), ['jet', 'rust', 'c', 'zig', 'go', 'python', 'node', 'bun', 'vite', 'lua', 'luajit', 'asm']);
@@ -251,44 +244,39 @@ test('the planned grid covers every entry × Jet, every peer and asm, each cell 
   for (const cell of bare) assert.equal(cell.text, 'uncovered: no ceiling reference');
 
   const text = gauntletStandingsText(projected);
-  assert.equal(gauntletRunText(projected), 'no full or merged run yet: the planned grid from the entries\' manifests, every measurable cell not measured yet');
-  assert.match(text, /^Gauntlet · no full or merged run yet: /);
+  assert.equal(gauntletRunText(projected), 'gauntlet table: nothing measured yet, every measurable cell is not measured yet');
+  assert.match(text, /^Gauntlet · gauntlet table: nothing measured yet/);
   assert.match(text, /\nhello \(batch\)\n {2}Jet +not measured yet\n {2}Rust +not measured yet\n/);
   const html = renderGauntletStandings(projected);
-  assert.match(html, /^<section class="standings" aria-label="Gauntlet standings"><p class="gauntlet__run">no full or merged run yet: /);
+  assert.match(html, /^<section class="standings" aria-label="Gauntlet standings"><p class="gauntlet__run">gauntlet table: nothing measured yet/);
   assert.match(html, /<td class="ggrid ggrid--na" title="[^"]+ · asm ceiling: uncovered: no ceiling reference \([^"]+\)"><b>uncovered<\/b><small>no ceiling reference<\/small><\/td>/);
   assert.doesNotMatch(html, /standings__panel|gauntlet__pill/);
 });
 
-test('`tower gauntlet standings` prints the one run shown, else the planned grid', () => {
+test('`tower gauntlet standings` prints the gauntlet table', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-standings-cli-'));
   const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
   const cli = (...args) => spawnSync(process.execPath, ['--input-type=module', '--eval',
     `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`,
-    '--', ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '', JET_STATE_ROOT: join(cwd, 'state') } });
+    '--', ...args], { cwd, encoding: 'utf8', maxBuffer: 1 << 26, env: { ...process.env, TOWER_DATA: '', JET_STATE_ROOT: join(cwd, 'state') } });
   try {
     mkdirSync(join(cwd, '.tower'));
     writeJSON(join(cwd, '.tower', 'tower.json'), empty('Standings CLI'));
-    const shown = cli('gauntlet', 'standings', '--results', FIXTURE);
-    assert.equal(shown.status, 0, shown.stderr);
-    assert.equal(shown.stdout.trimEnd(), gauntletStandingsText(projectGauntletStandings({ file: FIXTURE, scope: 'partial_entry', run: { id: report().run_id ?? null, generated: report().generated ?? null, commit: null, merged_from: null }, standings: report().standings })));
-    const json = cli('gauntlet', 'standings', '--results', FIXTURE, '--json');
-    assert.equal(json.status, 0, json.stderr);
-    assert.equal(JSON.parse(json.stdout).entries[0].rows.length, 11);
-    const name = '2026-05-14-languages-rust,c,zig,go,python,node,bun,vite,lua,luajit.json';
-    const sharedDir = join(cwd, 'state', 'gauntlet', 'results');
-    mkdirSync(sharedDir, { recursive: true });
-    writeFileSync(join(sharedDir, name), readFileSync(PEERS_FIXTURE));
     const planned = cli('gauntlet', 'standings');
     assert.equal(planned.status, 0, planned.stderr);
-    assert.match(planned.stdout, /^Gauntlet · no full or merged run yet: /);
+    assert.match(planned.stdout, /^Gauntlet · table state\/gauntlet\/table\.json: nothing measured yet/);
     assert.match(planned.stdout, /\nhello \(batch\)\n {2}Jet +not measured yet\n/);
-    const merged = '2026-05-15-merged-languages-lua.json';
-    writeJSON(join(sharedDir, merged), { ...report(PEERS_FIXTURE), options: { scope: 'full_matrix' }, provenance: { commit: '0123456789abcdef' } });
-    const peers = cli('gauntlet', 'standings');
-    assert.equal(peers.status, 0, peers.stderr);
-    assert.match(peers.stdout, /^Gauntlet · run .+ · commit 0123456789ab · results state\/gauntlet\/results\/2026-05-15-merged-languages-lua\.json · full matrix\n/);
-    assert.match(peers.stdout, /\nhello \(batch\) · Jet pending\n/);
+    const file = join(cwd, 'other.json');
+    const table = await readTable(file);
+    recordEntry(table, { entry: { name: 'hello' }, rows: {}, standings_rows: { rust: { status: 'broken', reason: 'rust row reason' } } }, { runId: 'r', generated: '2026-05-15T08:00:00.000Z', toolchains: {} });
+    await writeTable(table, file);
+    const shown = cli('gauntlet', 'standings', '--table', 'other.json');
+    assert.equal(shown.status, 0, shown.stderr);
+    assert.ok(shown.stdout.length < 200_000, `the text table is ${shown.stdout.length} bytes`);
+    assert.match(shown.stdout, /^Gauntlet · table other\.json · 1 rows over 1 entries · updated 2026-05-15 08:00 UTC\n/);
+    const json = cli('gauntlet', 'standings', '--table', 'other.json', '--json');
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(JSON.parse(json.stdout).entries.find((entry) => entry.entry === 'hello').rows.length, 11);
     const help = cli('help', '--check');
     assert.equal(help.status, 0, help.stderr + help.stdout);
   } finally {

@@ -49,8 +49,11 @@ def times(wall_ns, first_ns, exit_code):
     }
 
 
-def emit_sample(wall_ns, first_ns, peak_kb, exit_code, steps=None, error=None):
+def emit_sample(wall_ns, first_ns, peak_kb, exit_code, steps=None, error=None, cycles=None):
     sample = {"schema": TIMER_SCHEMA, "clock": CLOCK, **times(wall_ns, first_ns, exit_code), "peak_rss_kb": peak_kb}
+    # User-mode cycles, when the launcher's counter counted every command.
+    if cycles is not None:
+        sample["cycles_u"] = cycles
     if steps is not None:
         sample["steps"] = steps
     if error is not None:
@@ -71,8 +74,8 @@ def launcher(scratch):
 
 def run_child(launch, report, command):
     """Runs `command` through the launcher with its stdout drained through a
-    pipe, stdin and stderr inherited. Returns its times, its peak KiB and its
-    exec errno (0 when it ran)."""
+    pipe, stdin and stderr inherited. Returns its times, its peak KiB, its
+    exec errno (0 when it ran) and its user-mode cycles (None uncounted)."""
     child = subprocess.Popen([launch, report, *command], stdout=subprocess.PIPE, stderr=None)
     while child.stdout.read(65536):
         pass
@@ -82,7 +85,8 @@ def run_child(launch, report, command):
     if len(fields.get("end", [])) != 7:
         raise Refusal(f"the launcher exited {launcher_code} without its report")
     code, wall_ns, first_ns, peak_kb, _, _, exec_errno = (int(field) for field in fields["end"])
-    return times(wall_ns, None if first_ns < 0 else first_ns, code), peak_kb, exec_errno
+    cycles = int(fields["cycles"][0]) if len(fields.get("cycles", [])) == 1 else -1
+    return times(wall_ns, None if first_ns < 0 else first_ns, code), peak_kb, exec_errno, None if cycles < 0 else cycles
 
 
 def run_commands(commands, sequence):
@@ -96,13 +100,15 @@ def run_commands(commands, sequence):
         first_ns = None
         peak_kb = 0
         exit_code = 0
+        cycles = 0
         steps = []
         for command in commands:
-            step, step_peak_kb, exec_errno = run_child(launch, report, command)
+            step, step_peak_kb, exec_errno, step_cycles = run_child(launch, report, command)
             if first_ns is None and step["time_to_first_stdout_ns"] is not None:
                 first_ns = wall_ns + step["time_to_first_stdout_ns"]
             wall_ns += step["wall_time_ns"]
             peak_kb = max(peak_kb, step_peak_kb)
+            cycles = None if cycles is None or step_cycles is None else cycles + step_cycles
             if exec_errno != 0:
                 error = f"cannot run `{command[0]}`: exec failed (errno {exec_errno})"
                 emit_sample(wall_ns, first_ns, peak_kb, 127, steps if sequence else None, error)
@@ -110,7 +116,7 @@ def run_commands(commands, sequence):
             steps.append(step)
             if step["exit_code"] != 0 and exit_code == 0:
                 exit_code = step["exit_code"]
-        emit_sample(wall_ns, first_ns, peak_kb, exit_code, steps if sequence else None)
+        emit_sample(wall_ns, first_ns, peak_kb, exit_code, steps if sequence else None, cycles=cycles)
 
 
 def commands_of(argv):

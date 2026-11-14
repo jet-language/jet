@@ -1,8 +1,8 @@
 // ---- Gauntlet standings ------------------------------------------------------
-// The Gauntlet page shows one run: the newest full or merged results file's
-// `standings` section (Tools/gauntlet/harness/standings.mjs), else, before any
-// such run exists, the planned grid the server builds from the entries'
-// manifests (Tower app/gauntlet-standings.mjs). Every comparison entry is a
+// The Gauntlet page shows the gauntlet table (Tools/gauntlet/harness/table.mjs):
+// its rows as a `standings` section (Tools/gauntlet/harness/standings.mjs)
+// over the grid the server plans from the entries' manifests (Tower
+// app/gauntlet-standings.mjs), filled in as the harness measures. Every comparison entry is a
 // row of the grid and Jet, every standings peer and the hand-written asm
 // ceiling are its columns; a cell is measured, not measured yet, or the reason
 // it cannot be (no program, not applicable, no ceiling reference, a failed
@@ -188,9 +188,9 @@ function standingPanel(metric, rows) {
   return { metric: metric.id, label: metric.label, what: metric.what, jet: jet !== null, bars, missing };
 }
 
-// `payload` is { file, scope, run, standings } as the server and the CLI read
-// it: a results file's, or the planned grid's (scope `planned`, no file and
-// no run); null when it holds no standings section.
+// `payload` is { file, table, standings } as the server and the CLI read it:
+// the table's file, its row counts and its standings section; null when it
+// holds no standings section. With no row measured the page is the grid only.
 export function projectGauntletStandings(payload) {
   const section = object(payload?.standings);
   if (section.schema !== STANDINGS_SCHEMA) return null;
@@ -215,17 +215,12 @@ export function projectGauntletStandings(payload) {
   const summary = object(section.summary);
   const floor = object(summary.floor);
   const ceiling = object(summary.ceiling);
-  const run = isObject(payload.run) ? payload.run : null;
+  const table = object(payload.table);
+  const rows = count(table.rows);
   return {
     file: payload.file ?? null,
-    scope: payload.scope ?? null,
-    planned: payload.scope === 'planned',
-    run: run && {
-      id: run.id ?? null,
-      generated: run.generated ?? null,
-      commit: run.commit ?? null,
-      mergedFrom: isObject(run.merged_from) ? { id: run.merged_from.id ?? null, generated: run.merged_from.generated ?? null, commit: run.merged_from.commit ?? null } : null,
-    },
+    table: { updated: table.updated ?? null, entries: count(table.entries), rows },
+    planned: isObject(payload.table) && rows === 0,
     generated: section.generated ?? null,
     columns: [{ peer: 'jet', label: 'Jet' }, ...order.map((peer) => ({ peer, label: standingPeerLabel(peer) }))],
     peers: order.map((peer) => ({ peer, label: standingPeerLabel(peer) })),
@@ -241,18 +236,13 @@ export function projectGauntletStandings(payload) {
   };
 }
 
-// Which run the page shows: its date and commit, the run a merged run merged
-// into, and its file; or that no full run exists yet.
-const runDate = (iso) => typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : iso ?? 'date not recorded';
-const runCommit = (commit) => commit ? `commit ${String(commit).slice(0, 12)}` : 'commit not recorded';
-const PLANNED_RUN = 'no full or merged run yet: the planned grid from the entries\' manifests, every measurable cell not measured yet';
+// Which table the page shows: its file, how many rows it holds and when it
+// last changed; or that nothing is measured yet.
+const tableDate = (iso) => typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : iso ?? 'date not recorded';
 export function gauntletRunText(view) {
-  if (view.planned) return PLANNED_RUN;
-  const run = view.run ?? {};
-  const merged = run.mergedFrom
-    ? ` · merged into run ${run.mergedFrom.id ?? '?'} of ${runDate(run.mergedFrom.generated)}, ${runCommit(run.mergedFrom.commit)}` : '';
-  return [`run ${run.id ?? '?'} of ${runDate(run.generated ?? view.generated)}`, `${runCommit(run.commit)}${merged}`, view.file ? `results ${view.file}` : null, view.scope ? standingWords(view.scope) : null]
-    .filter(Boolean).join(' · ');
+  const file = view.file ? `table ${view.file}` : 'gauntlet table';
+  if (view.planned) return `${file}: nothing measured yet, every measurable cell is not measured yet`;
+  return `${file} · ${view.table.rows} rows over ${view.table.entries} entries · updated ${tableDate(view.table.updated)}`;
 }
 
 const STANDING_BARS = 'every peer value is a bar Jet must beat (lower is better); the asm ceiling is the marked bar';

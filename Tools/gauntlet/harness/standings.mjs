@@ -23,6 +23,9 @@ export const STANDINGS_METRICS = Object.freeze([
 ]);
 
 const METRIC_IDS = STANDINGS_METRICS.map((metric) => metric.id);
+// The reason a measurable cell with no row yet shows (the Gauntlet page's
+// own words for it).
+export const PENDING_REASON = "not measured yet";
 
 export const STANDINGS_JUDGEMENT = Object.freeze({
   ratio: "jet / peer",
@@ -297,11 +300,13 @@ function judge(role, jet, peer) {
 
 // One entry's standings from its plan and its harness result (rows for the
 // declared languages, standings_rows for the standings-only peers and the
-// ceiling). `runtimes` holds the interpreter footprints.
-export function entryStandings(plan, result, { runtimes = {} } = {}) {
+// ceiling). `runtimes` holds the interpreter footprints. With `pending` (the
+// gauntlet table, which fills in as runs measure) a measurable cell with no
+// row is not measured yet, never failed.
+export function entryStandings(plan, result, { runtimes = {}, pending = false } = {}) {
   const entry = { name: plan.entry, mode: plan.mode };
   const jetRow = result?.rows?.jet ?? null;
-  const jetStatus = rowStatus(jetRow);
+  const jetStatus = !jetRow && pending ? { status: "not_measured", reason: PENDING_REASON } : rowStatus(jetRow);
   const peers = {};
   for (const [peer, item] of Object.entries(plan.peers)) {
     const metrics = {};
@@ -311,7 +316,9 @@ export function entryStandings(plan, result, { runtimes = {} } = {}) {
       continue;
     }
     const row = result?.standings_rows?.[peer] ?? result?.rows?.[peer] ?? null;
-    const status = row ? rowStatus(row) : { status: "failed", reason: result?.reason ?? "the harness recorded no row" };
+    const status = row ? rowStatus(row)
+      : pending ? { status: "not_measured", reason: PENDING_REASON }
+      : { status: "failed", reason: result?.reason ?? "the harness recorded no row" };
     for (const metric of METRIC_IDS) {
       if (status.status !== "ok") {
         metrics[metric] = { jet: null, peer: null, ratio: null, verdict: status.status, reason: status.reason };

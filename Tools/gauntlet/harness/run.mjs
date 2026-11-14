@@ -14,6 +14,7 @@ import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-sy
 import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
 import { buildStandings, ceilingMeasurements as standingsCeilingMeasurements, entryStandings, planCells, planEntry, PEER_KINDS, standingsLines, standingsPolicy } from "./standings.mjs";
 import { stateRoot } from "../../agent/roots.mjs";
+import { currentRow, readTable, recordEntry, toolchainKey, writeTable } from "./table.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
@@ -301,7 +302,7 @@ function shellQuote(value) {
 }
 
 function parseArgs(argv) {
-  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null, languages: null, merge: null, dryRun: false };
+  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null, languages: null, merge: null, dryRun: false, remeasure: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis" || arg === "--ceiling-results" || arg === "--languages" || arg === "--merge") {
@@ -321,8 +322,14 @@ function parseArgs(argv) {
       options.dryRun = true;
       continue;
     }
+    // Measure every selected row again, even one the gauntlet table already
+    // holds for the same program and toolchain.
+    if (arg === "--remeasure") {
+      options.remeasure = true;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node Tools/gauntlet/harness/run.mjs [--dry-run] [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json] [--languages jet,c,... [--merge earlier-results.json]]");
+      console.log("usage: node Tools/gauntlet/harness/run.mjs [--dry-run] [--remeasure] [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json] [--languages jet,c,... [--merge earlier-results.json]]");
       process.exit(0);
     }
     throw new Error(`unknown argument: ${arg}`);
@@ -1767,9 +1774,16 @@ async function measureCycles(cwd, commands, count, { full = false, reset = null 
   return { status: "ok", value: median(samples), samples, statistic: "median", counter: "cycles:u" };
 }
 
-// A standings run counts every measured row's cycles beside its timed runs.
+// A standings run counts every measured row's cycles. The launcher counts
+// them in the timed runs themselves (cycles:u from a counter it opens on the
+// command), so they come with no second pass; only when a timed sample lacks
+// them (the counter could not open) are they counted by `perf stat` runs.
 async function countCycles(row, cwd, commands, count, options) {
-  row.cycles = await measureCycles(cwd, commands, count, options);
+  const timed = Array.isArray(row.runtime?.samples) ? row.runtime.samples : [];
+  const counted = timed.map((sample) => sample?.cycles_u);
+  row.cycles = timed.length > 0 && counted.every((cycles) => Number.isFinite(cycles) && cycles > 0)
+    ? { status: "ok", value: median(counted), samples: counted, statistic: "median", counter: "cycles:u", source: "timed runs" }
+    : await measureCycles(cwd, commands, count, options);
   row.metrics.runtime_cycles = row.cycles.value;
 }
 
@@ -4707,12 +4721,86 @@ async function main() {
       ...standingsSpec.issues.map((issue) => `standings: ${issue}`),
     ];
   for (const issue of validationIssues) console.warn(`WARN corpus: ${issue}`);
+  // Interpreted peers count their runtime in their size: measure each
+  // interpreter's footprint once per run.
+  const runtimes = {};
+  if (!axisOnly) {
+    for (const [peer, interpreter] of Object.entries(STANDINGS_INTERPRETERS)) {
+      if (standingsSpec.peers.includes(peer)) runtimes[peer] = await interpreterFootprint(runDir, interpreter);
+    }
+  }
+  // One file per run. Full-matrix runs own the bare <date>.json, and a merged
+  // run <date>-merged-<languages>.json beside the run it merged; partial and
+  // axis runs carry their scope so a later partial run never overwrites the
+  // day's full report (status.mjs merges every file in this directory).
+  // A run with standings is copied to the machine's shared results directory,
+  // where Tower's Gauntlet page finds a run made in any checkout.
+  const resultDir = path.join(repoDir, "Tools/gauntlet/results");
+  await fs.mkdir(resultDir, { recursive: true });
+  const languagesTag = options.languages === null ? null : `languages-${options.languages.join("-")}`;
+  const resultName = axisOnly
+    ? `${dateStamp()}-axis-${options.axis}.json`
+    : fullScope
+      ? `${dateStamp()}${mergeSource ? `-merged-${languagesTag}` : ""}.json`
+      : `${dateStamp()}-${[options.entry, languagesTag].filter(Boolean).join("-")}.json`;
+  const resultPath = path.join(resultDir, resultName);
+  const sharedResultDir = path.join(stateRoot(), "gauntlet/results");
+  const commit = await checkoutCommit();
+  const jetBinarySha256 = await fileSha256(jetBin);
+  const writeResults = async (reportText, shared) => {
+    await fs.writeFile(resultPath, reportText);
+    if (!shared) return;
+    await fs.mkdir(sharedResultDir, { recursive: true });
+    await fs.writeFile(path.join(sharedResultDir, resultName), reportText);
+  };
+  // The gauntlet table (table.mjs) is the durable record the Gauntlet page
+  // shows. A row it already holds for the same program and toolchain is
+  // reused, not measured again (unless --remeasure); each entry's measured
+  // rows go into it as soon as the entry finishes, so the page fills in as
+  // the run goes.
+  const table = axisOnly ? null : await readTable();
+  if (table) {
+    Object.assign(table.runtimes, runtimes);
+    Object.assign(table.toolchains, toolchains);
+  }
+  const rowSourceDir = (item, stage, language) => language === "asm"
+    ? stage.ceiling?.dir ?? null
+    : path.join(item.dir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
   const results = [];
   for (const item of loaded) {
     console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
+    const stage = plans.find((plan) => plan.item === item).stage;
+    const entryLanguages = sortedUnique([...(item.entry.languages ?? []), ...stage.peers, ...(stage.ceiling ? ["asm"] : [])]);
+    const programs = {};
+    for (const language of entryLanguages) {
+      const dir = rowSourceDir(item, stage, language);
+      programs[language] = dir && await exists(dir) ? await treeSha256(dir) : null;
+    }
+    const reused = {};
+    if (table && !options.remeasure) {
+      for (const language of entryLanguages) {
+        const row = currentRow(table, item.entry.name, language, programs[language], toolchainKey(language, toolchains, jetBinarySha256));
+        if (row && (measure === null || measure.has(language))) reused[language] = row;
+      }
+    }
+    const wanted = entryLanguages.filter((language) => (measure === null || measure.has(language)) && !reused[language]);
+    if (Object.keys(reused).length) console.error(`gauntlet: entry ${item.entry.name} reuses table rows ${Object.keys(reused).join(",")}`);
     try {
-      const result = await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev, plans.find((plan) => plan.item === item).stage, measure);
-      results.push(mergeSource ? mergeEarlierResult(result, mergeSource.entries.get(item.entry.name) ?? null, mergeSource) : result);
+      const entryMeasure = Object.keys(reused).length ? new Set(wanted) : measure;
+      const staged = wanted.length === 0
+        ? { entry: item.entry, status: "ok", languages: item.entry.languages ?? [], rows: {}, standings_rows: {}, comparisons: {} }
+        : await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev, stage, entryMeasure);
+      // A reused row stands in for the row this run left unmeasured.
+      for (const [language, row] of Object.entries(reused)) {
+        if ((item.entry.languages ?? []).includes(language)) staged.rows = { ...staged.rows, [language]: row };
+        else staged.standings_rows = { ...(staged.standings_rows ?? {}), [language]: row };
+      }
+      const result = mergeSource ? mergeEarlierResult(staged, mergeSource.entries.get(item.entry.name) ?? null, mergeSource) : staged;
+      results.push(result);
+      if (table) {
+        recordEntry(table, { ...result, rows: Object.fromEntries(Object.entries(result.rows ?? {}).filter(([language]) => !reused[language])), standings_rows: Object.fromEntries(Object.entries(result.standings_rows ?? {}).filter(([language]) => !reused[language])) }, { runId, generated: new Date().toISOString(), commit, toolchains, jetBinarySha256, programs });
+        await writeTable(table);
+      }
     } catch (error) {
       console.error(`gauntlet: entry ${item.entry.name} CRASHED: ${error.message}`);
       results.push({
@@ -4730,14 +4818,6 @@ async function main() {
       });
     }
     console.error(`gauntlet: entry ${item.entry.name} done`);
-  }
-  // Interpreted peers count their runtime in their size: measure each
-  // interpreter's footprint once per run.
-  const runtimes = {};
-  if (!axisOnly) {
-    for (const [peer, interpreter] of Object.entries(STANDINGS_INTERPRETERS)) {
-      if (standingsSpec.peers.includes(peer)) runtimes[peer] = await interpreterFootprint(runDir, interpreter);
-    }
   }
   const standings = axisOnly ? null : buildStandings(
     plans.map(({ item, plan }) => entryStandings(plan, results.find((result) => result.entry === item.entry), { runtimes })),
@@ -4815,8 +4895,8 @@ async function main() {
       matrix_sha256: sha256(matrixText),
       measurement_manifest_sha256: sourceManifest ? sha256(await fs.readFile(manifestPath)) : null,
       corpus_tree_sha256: await treeSha256(entriesDir),
-      commit: await checkoutCommit(),
-      jet_binary_sha256: await fileSha256(jetBin),
+      commit,
+      jet_binary_sha256: jetBinarySha256,
       toolchains,
       host: { platform: process.platform, arch: process.arch, node: process.version },
     },
@@ -4834,28 +4914,7 @@ async function main() {
     entries: results,
     tools: toolResults,
   };
-  // One file per run. Full-matrix runs own the bare <date>.json, and a merged
-  // run <date>-merged-<languages>.json beside the run it merged; partial and
-  // axis runs carry their scope so a later partial run never overwrites the
-  // day's full report (status.mjs merges every file in this directory).
-  // A run with standings is copied to the machine's shared results directory,
-  // where Tower's Gauntlet page finds a run made in any checkout.
-  const resultDir = path.join(repoDir, "Tools/gauntlet/results");
-  await fs.mkdir(resultDir, { recursive: true });
-  const languagesTag = options.languages === null ? null : `languages-${options.languages.join("-")}`;
-  const resultName = axisOnly
-    ? `${dateStamp()}-axis-${options.axis}.json`
-    : fullScope
-      ? `${dateStamp()}${mergeSource ? `-merged-${languagesTag}` : ""}.json`
-      : `${dateStamp()}-${[options.entry, languagesTag].filter(Boolean).join("-")}.json`;
-  const resultPath = path.join(resultDir, resultName);
-  const reportText = `${JSON.stringify(report, null, 2)}\n`;
-  await fs.writeFile(resultPath, reportText);
-  if (standings) {
-    const sharedResultDir = path.join(stateRoot(), "gauntlet/results");
-    await fs.mkdir(sharedResultDir, { recursive: true });
-    await fs.writeFile(path.join(sharedResultDir, resultName), reportText);
-  }
+  await writeResults(`${JSON.stringify(report, null, 2)}\n`, Boolean(standings));
   const statusPath = path.join(repoDir, "Tools/gauntlet/status.json");
   if (fullScope) {
     const status = projectStatus(report, resultPath);

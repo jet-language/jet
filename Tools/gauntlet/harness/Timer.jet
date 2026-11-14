@@ -36,22 +36,26 @@ Times: struct {
 }
 
 // The one JSON object the timer prints: the times at its top level, beside
-// the schema, the clock they are read from, the peak resident memory, a
-// sequence's steps and a command's error.
+// the schema, the clock they are read from, the peak resident memory, the
+// user-mode cycles when the launcher counted every command, a sequence's
+// steps and a command's error.
 Sample: struct {
     schema: String
     clock: Dyn
     #Flatten times: Times
     peak_rss_kb: Int
+    cycles_u: Int?
     steps: [Times]?
     error: String?
 }
 
-// What the launcher reports of one command.
+// What the launcher reports of one command; `cycles` is None when its
+// counter could not open.
 Launched: struct {
     times: Times
     peak_kb: Int
     exec_errno: Int
+    cycles: Int?
 }
 
 // Times the commands one after another as one sample: its wall time is the
@@ -74,6 +78,7 @@ run: fn() {
     wall_ns := 0
     first_ns := Int?{None}
     peak_kb := 0
+    cycles := Int?{Val(0)}
     exit_code := 0
     steps := [Times]{}
     error := String?{None}
@@ -83,6 +88,10 @@ run: fn() {
         if first_ns == None -> first_ns = step.times.time_to_first_stdout_ns.map(fn(gap) { wall_ns + gap })
         wall_ns += step.times.wall_time_ns
         if step.peak_kb > peak_kb -> peak_kb = step.peak_kb
+        cycles = if cycles == {
+            .Val(total) -> step.cycles.map(fn(counted) { total + counted })
+            None -> None
+        }
         if step.exec_errno != 0 {
             exit_code = 127
             error = Val("cannot run `{command[0]}`: exec failed (errno {step.exec_errno})")
@@ -96,6 +105,7 @@ run: fn() {
         schema: "jet.gauntlet.timer.v2",
         clock: json.parse("{{\"source\":\"launch.c\",\"implementation\":\"clock_gettime(CLOCK_MONOTONIC)\",\"resolution_ns\":1,\"monotonic\":true,\"adjustable\":false}}"),
         peak_rss_kb: peak_kb,
+        cycles_u: if error == None -> cycles else -> None,
         steps: sequence.map(fn(_) { steps }),
         error: error
     }
@@ -144,16 +154,19 @@ run_child: fn(launch: String, report: String, command: [String]) -> Launched IOE
 
 // The launcher's report as Launched: its `end` line's exit code (minus a
 // signal's number), wall time, first stdout byte's time (-1 for none), peak
-// KiB, user and system time, and exec errno. None without an end line.
+// KiB, user and system time, and exec errno, and its `cycles` line's count
+// (-1 or no line for none). None without an end line.
 launched_of: fn(text: String) -> Launched? {
     end := [String]{}
+    counted := -1
     loop line in text.split("\n") {
         fields: line.split(" ").to_list()
         if fields[0] == "end" -> end = fields
+        if fields[0] == "cycles" && fields.len() == 2 -> counted = report_int(fields[1])
     }
     if end.len() != 8 -> return None
     first_ns: report_int(end[3])
-    Val(Launched{times: times_of(report_int(end[2]), if first_ns < 0 -> None else -> Val(first_ns), report_int(end[1])), peak_kb: report_int(end[4]), exec_errno: report_int(end[7])})
+    Val(Launched{times: times_of(report_int(end[2]), if first_ns < 0 -> None else -> Val(first_ns), report_int(end[1])), peak_kb: report_int(end[4]), exec_errno: report_int(end[7]), cycles: if counted < 0 -> None else -> Val(counted)})
 }
 
 report_int: fn(field: String) -> Int {
@@ -173,8 +186,8 @@ refuse: fn(message: String) -> Never {
 
 #Test("a sample flattens its times beside the schema, clock and steps") {
     times: Times{wall_time_ns: 500000000, wall_seconds: 0.5, exit_code: 3, time_to_first_stdout_ns: None, time_to_first_stdout_seconds: None}
-    sample: Sample{schema: "s", clock: Dyn.Text("c"), times: times, peak_rss_kb: 7, steps: Val([Times]{times}), error: None}
-    assert_eq(json.to_string(sample) ?? panic("sample: {err}"), "{{\"schema\":\"s\",\"clock\":\"c\",\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3,\"peak_rss_kb\":7,\"steps\":[{{\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3}}]}}")
+    sample: Sample{schema: "s", clock: Dyn.Text("c"), times: times, peak_rss_kb: 7, cycles_u: Val(9), steps: Val([Times]{times}), error: None}
+    assert_eq(json.to_string(sample) ?? panic("sample: {err}"), "{{\"schema\":\"s\",\"clock\":\"c\",\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3,\"peak_rss_kb\":7,\"cycles_u\":9,\"steps\":[{{\"wall_time_ns\":500000000,\"wall_seconds\":0.5,\"exit_code\":3}}]}}")
 }
 
 #Test("a launcher report gives the command's times, peak and exec errno") {
@@ -184,6 +197,9 @@ refuse: fn(message: String) -> Never {
     assert_eq(ran.times.exit_code, -9)
     assert_eq(ran.peak_kb, 144)
     assert_eq(ran.exec_errno, 0)
+    assert_eq(ran.cycles, None)
+    counted: launched_of("start 41 1000\ncycles 1234\nend 0 4000 500 144 10 20 0\n") ?? panic("a counted report reads")
+    assert_eq(counted.cycles, Val(1234))
     failed: launched_of("start 41 1000\nend 127 2000 -1 1196 0 30 2\n") ?? panic("a failed exec's report reads")
     assert(failed.times.time_to_first_stdout_ns == None && failed.exec_errno == 2)
     assert(launched_of("start 41 1000\n") == None)

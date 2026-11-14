@@ -20,7 +20,7 @@ import { gzipSync } from 'node:zlib';
 import { DOCS_DIR, UI, projectRoot, readLatestJSON } from './paths.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
-import { readGauntletStandings, standingsLocations } from './gauntlet-standings.mjs';
+import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
 import * as docs from './docs.mjs';
@@ -403,12 +403,11 @@ export function serve(store, port = 7878, open = false) {
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return sendBody(req, res, live.index().body);
-      // #6834: the one gauntlet run the page shows, the newest full or merged
-      // results file (config gauntletResults and the machine's shared results
-      // directory), else the planned grid from the entries' manifests.
+      // #6834: the gauntlet table the page shows (the machine's
+      // $JET_STATE_ROOT/gauntlet/table.json), over the grid planned from the
+      // entries' manifests.
       if (req.method === 'GET' && url.pathname === '/api/gauntlet/standings') {
-        const root = projectRoot(store.dataDir);
-        return send(res, 200, await readGauntletStandings(root, standingsLocations(root, store.config.gauntletResults)));
+        return send(res, 200, await readGauntletStandings(projectRoot(store.dataDir)));
       }
       if (req.method === 'GET' && url.pathname === '/api/card') {
         const ref = url.searchParams.get('id') || url.searchParams.get('card');

@@ -23,8 +23,13 @@
 //
 // REPORT gets one line when the command is about to exec:
 //   start <pid> <monotonic ns>
-// and one when it has been reaped and its stdout has closed:
+// and, when it has been reaped and its stdout has closed:
+//   cycles <user-mode cycles>
 //   end <exit code> <wall ns> <first stdout ns> <peak KiB> <user us> <system us> <exec errno>
+// The cycles are counted by a perf counter the launcher opens on the
+// command before its exec (cycles:u, enabled at exec and inherited by every
+// process it starts), so one timed run gives the wall time, the peak and the
+// cycles with no second run under perf; -1 when the counter cannot open.
 // The wall time runs from just before exec to just after the reap, and the
 // first stdout byte's time (-1 for none) from the same start; both are read
 // here. User and system time are the command's and its reaped descendants'.
@@ -46,6 +51,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <linux/perf_event.h>
+#include <sys/syscall.h>
 
 static int64_t monotonic_ns(void) {
     struct timespec now;
@@ -91,6 +98,33 @@ static int traced(void) {
     }
     fclose(status);
     return tracer != 0;
+}
+
+// A user-mode cycle counter on process `pid`, which has not exec'd yet: off
+// until its exec, then counting it and every process it starts. -1 when the
+// counter cannot open (no PMU, or perf_event_paranoid forbids it).
+static int open_cycles(pid_t pid) {
+    struct perf_event_attr attr;
+    memset(&attr, 0, sizeof attr);
+    attr.size = sizeof attr;
+    attr.type = PERF_TYPE_HARDWARE;
+    attr.config = PERF_COUNT_HW_CPU_CYCLES;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    attr.inherit = 1;
+    attr.disabled = 1;
+    attr.enable_on_exec = 1;
+    return (int)syscall(SYS_perf_event_open, &attr, pid, -1, -1, PERF_FLAG_FD_CLOEXEC);
+}
+
+// The counter's total once the command is reaped: its own cycles and those
+// of every process it started that has exited. -1 without a counter.
+static long long read_cycles(int fd) {
+    if (fd < 0) return -1;
+    uint64_t count = 0;
+    long long value = read(fd, &count, sizeof count) == (ssize_t)sizeof count ? (long long)count : -1;
+    close(fd);
+    return value;
 }
 
 // The traced processes seen stopped so far: a process the launcher has not
@@ -201,6 +235,9 @@ int main(int argc, char **argv) {
         long options = PTRACE_O_TRACEEXIT | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL;
         if (ptrace(PTRACE_SETOPTIONS, pid, NULL, (void *)options) != 0) fail("ptrace");
     }
+    // The command is stopped (traced) or waiting for its byte (untraced)
+    // before its exec, so the counter starts with exactly its exec.
+    int cycles_fd = open_cycles(pid);
     struct relay relay = {output[0], -1};
     pthread_t relay_thread;
     errno = pthread_create(&relay_thread, NULL, relay_stdout, &relay);
@@ -257,6 +294,7 @@ int main(int argc, char **argv) {
         ptrace(PTRACE_CONT, stopped, NULL, (void *)(long)deliver);
     }
     pthread_join(relay_thread, NULL);
+    fprintf(report, "cycles %lld\n", read_cycles(cycles_fd));
     int64_t first = relay.first_ns < 0 ? -1 : (relay.first_ns > started ? relay.first_ns - started : 0);
     fprintf(report, "end %d %lld %lld %ld %lld %lld %d\n", code, (long long)(ended - started), (long long)first, peak_kb,
         (long long)usage.ru_utime.tv_sec * 1000000 + usage.ru_utime.tv_usec,
