@@ -29,42 +29,69 @@ kit_no_nix_matches: fn(bytes: [U8], offset: Int, marker: [U8]) -> Bool {
     true
 }
 
-// Match the original harness's NUL-terminated Nix ld-linux interpreter slot
-// and point it at the same loader in the directory the launcher passes at
-// fd 9. Leave non-Nix and static ELF images alone; a patch never grows the image.
-kit_no_nix_patch_bytes: fn(source: [U8]) -> [U8]? {
-    if source.len() < 4 || !kit_no_nix_matches(source, 0, [U8]{127, 69, 76, 70}) -> return None
-    marker: "/nix/store/".bytes()
-    loader: "ld-linux".bytes()
-    prefix: "/proc/self/fd/9/".bytes()
-    offset := 0
-    loop offset + marker.len() <= source.len() {
-        if !kit_no_nix_matches(source, offset, marker) {
-            offset += 1
-            next
-        }
-        end := offset
-        loop end < source.len() && source[end] != (U8{0}) -> end += 1
-        found := false
-        loop i in offset..<end {
-            if i + loader.len() <= end && kit_no_nix_matches(source, i, loader) -> found = true
-        }
-        if found {
-            name := offset
-            loop i in offset..<end {
-                if source[i] == (U8{47}) -> name = i + 1
-            }
-            replacement := prefix
-            loop i in name..<end -> replacement.push(source[i])
-            if replacement.len() >= end - offset -> return None
-            result := source
-            loop i in offset..<end -> result[i] = U8{0}
-            loop i in 0..<replacement.len() -> result[offset + i] = replacement[i]
-            return Val(result)
-        }
-        offset = end + 1
+// The little-endian unsigned field of `width` bytes at `offset`; None past the
+// image's end or above Int's range.
+kit_no_nix_field: fn(image: [U8], offset: Int, width: Int) -> Int? {
+    if offset < 0 || offset + width > image.len() -> return None
+    if width == 8 && (Int{image[offset + 7]}) > 127 -> return None
+    value := 0
+    loop i in 0..<width -> value = value * 256 + Int{image[offset + width - 1 - i]}
+    Val(value)
+}
+
+// The bytes of the image's PT_INTERP path, from its first byte up to its NUL;
+// None for an image without one (a static image, such as Jet's own binaries)
+// and for any header but little-endian ELF32 or ELF64.
+kit_no_nix_interpreter: fn(image: [U8]) -> (start: Int, end: Int)? {
+    if image.len() < 6 || (Int{image[5]}) != 1 -> return None
+    class: Int{image[4]}
+    if class != 1 && class != 2 -> return None
+    wide: class == 2
+    word: if wide -> 8 else -> 4
+    table: kit_no_nix_field(image, if wide -> 32 else -> 28, word) ?? return None
+    entry_size: kit_no_nix_field(image, if wide -> 54 else -> 42, 2) ?? return None
+    count: kit_no_nix_field(image, if wide -> 56 else -> 44, 2) ?? return None
+    loop index in 0..<count {
+        header: table + index * entry_size
+        if kit_no_nix_field(image, header, 4) != Val(3) -> next
+        start: kit_no_nix_field(image, header + (if wide -> 8 else -> 4), word) ?? return None
+        size: kit_no_nix_field(image, header + (if wide -> 32 else -> 16), word) ?? return None
+        if size < 1 || start + size > image.len() -> return None
+        end := start
+        loop end < start + size && image[end] != (U8{0}) -> end += 1
+        return Val((start: start, end: end))
     }
     None
+}
+
+// Point the original harness's Nix ld-linux interpreter, the program header's
+// PT_INTERP path, at the same loader in the directory the launcher passes at
+// fd 9. Only that path is read: Jet strings carry no NUL, so a scan of the
+// whole image for `/nix/store/` would zero unrelated constants. Leave non-Nix
+// and static ELF images alone; a patch never grows the image.
+kit_no_nix_patch_bytes: fn(source: [U8]) -> [U8]? {
+    if source.len() < 4 || !kit_no_nix_matches(source, 0, [U8]{127, 69, 76, 70}) -> return None
+    interpreter: kit_no_nix_interpreter(source) ?? return None
+    offset: interpreter.start
+    end: interpreter.end
+    if !kit_no_nix_matches(source, offset, "/nix/store/".bytes()) -> return None
+    loader: "ld-linux".bytes()
+    found := false
+    loop i in offset..<end {
+        if i + loader.len() <= end && kit_no_nix_matches(source, i, loader) -> found = true
+    }
+    if !found -> return None
+    name := offset
+    loop i in offset..<end {
+        if source[i] == (U8{47}) -> name = i + 1
+    }
+    replacement := "/proc/self/fd/9/".bytes()
+    loop i in name..<end -> replacement.push(source[i])
+    if replacement.len() >= end - offset -> return None
+    result := source
+    loop i in offset..<end -> result[i] = U8{0}
+    loop i in 0..<replacement.len() -> result[offset + i] = replacement[i]
+    Val(result)
 }
 
 kit_no_nix_patch: fn(source: String, destination: String) -> String Err! {

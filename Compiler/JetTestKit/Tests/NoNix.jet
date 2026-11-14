@@ -67,13 +67,15 @@ no_nix_test_assets: fn(root: String) {
     assert(kit_expect_named(argv, "--mount"))
     assert(kit_expect_named(argv, "private"))
     assert(kit_expect_named(argv, "--net"))
-    bytes := [U8]{127, 69, 76, 70}
-    loop byte in "/nix/store/not-loader".bytes() -> bytes.push(byte)
-    bytes.push(U8{0})
+    // A NUL-free constant with a loader name ahead of the interpreter: only
+    // the PT_INTERP path changes.
+    decoy: "/nix/store/not-loader/ld-linux-in-a-string-pool".bytes()
+    bytes := no_nix_test_elf64(decoy)
     interpreter_offset: bytes.len()
     loop byte in "/nix/store/aaaaaaaa-glibc/lib/ld-linux-x86-64.so.2".bytes() -> bytes.push(byte)
     bytes.push(U8{0})
     loop byte in "tail".bytes() -> bytes.push(byte)
+    no_nix_test_interp(bytes, interpreter_offset, "/nix/store/aaaaaaaa-glibc/lib/ld-linux-x86-64.so.2".bytes().len() + 1)
     source: files.join(root, "image")
     destination: files.join(root, "patched")
     files.write_bytes(source, bytes) ?? panic("write ELF")
@@ -82,9 +84,42 @@ no_nix_test_assets: fn(root: String) {
     patched: files.read_bytes(destination) ?? panic("read patched ELF")
     assert_eq(patched.len(), bytes.len())
     assert_eq((files.stat(destination) ?? panic("stat patch")).mode % 512, 0o751)
+    assert_eq(patched.slice(0, interpreter_offset), bytes.slice(0, interpreter_offset))
     assert(kit_no_nix_matches(patched, interpreter_offset, "/proc/self/fd/9/ld-linux-x86-64.so.2".bytes()))
     assert_eq(patched[interpreter_offset + "/proc/self/fd/9/ld-linux-x86-64.so.2".bytes().len()], U8{0})
+    // A static image (no PT_INTERP) is left alone even when its constants
+    // name a Nix loader.
+    static_source: files.join(root, "static")
+    files.write_bytes(static_source, no_nix_test_elf64(decoy)) ?? panic("write static ELF")
+    assert_eq(kit_no_nix_patch(static_source, files.join(root, "static-patched")) ?? panic("{err}"), "")
     files.remove_all(root) ?? panic("remove no-nix ELF scratch")
+}
+
+// A little-endian ELF64 header with one program header slot (PT_NULL until
+// no_nix_test_interp fills it), followed by `body`.
+no_nix_test_elf64: fn(body: [U8]) -> [U8] {
+    bytes := [U8]{127, 69, 76, 70, 2, 1, 1}
+    loop bytes.len() < 120 -> bytes.push(U8{0})
+    no_nix_test_put(bytes, 32, 8, 64)
+    no_nix_test_put(bytes, 54, 2, 56)
+    no_nix_test_put(bytes, 56, 2, 1)
+    loop byte in body -> bytes.push(byte)
+    bytes
+}
+
+// Make the image's one program header PT_INTERP over `size` bytes at `offset`.
+no_nix_test_interp: fn(bytes: &[U8], offset: Int, size: Int) {
+    no_nix_test_put(bytes, 64, 4, 3)
+    no_nix_test_put(bytes, 72, 8, offset)
+    no_nix_test_put(bytes, 96, 8, size)
+}
+
+no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
+    rest := value
+    loop i in 0..<width {
+        bytes[offset + i] = U8{rest % 256}
+        rest = rest /% 256
+    }
 }
 
 #Test("env-clear drops host and kit base values before explicit case and step overlays") {
