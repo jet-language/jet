@@ -31,7 +31,10 @@ use {
         TextEdit,
         Type,
         expr_span,
+        name_index,
+        name_intern,
         name_start,
+        name_table,
         type_name,
     ]
     jet_lexer.[
@@ -2242,10 +2245,10 @@ jfmt_lines: fn(text: String) -> [String] Never! {
 jet_format_unified_diff: fn(path: String, old: String, new: String) -> String Never! {
     old_lines: jfmt_lines(old)
     new_lines: jfmt_lines(new)
-    // Lines compare as numbers: equal text, equal number.
-    numbers := [String:Int]{}
-    a: loop line in old_lines -> jfmt_diff_line_number(numbers, line)
-    b: loop line in new_lines -> jfmt_diff_line_number(numbers, line)
+    // Lines compare as numbers: each distinct line text interns to one id.
+    numbers := name_table()
+    a: loop line in old_lines -> name_index(name_intern(numbers, line))
+    b: loop line in new_lines -> name_index(name_intern(numbers, line))
     old_kept := [Bool]{}
     new_kept := [Bool]{}
     loop _ in 0..<a.len() -> old_kept.push(false)
@@ -2270,13 +2273,6 @@ jet_format_unified_diff: fn(path: String, old: String, new: String) -> String Ne
         loop k in start_j..<j -> parts.push("+{new_lines[k]}\n")
     }
     parts.join("")
-}
-
-jfmt_diff_line_number: fn(numbers: &[String:Int], line: String) -> Int Never! {
-    numbers.get(line) ?? {
-        numbers[line.copy()] = numbers.len()
-        numbers.len() - 1
-    }
 }
 
 // A hunk side's 1-based first line; an empty side names the line it follows.

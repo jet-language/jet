@@ -4,7 +4,7 @@
 // --style`, `jet fix --style` and the repository guard
 // tests/guards/impl_placement all call this one rule.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, ImplDef, MARKER_TARGET, Program, Span, diagnostic_from_registry]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, ImplDef, MARKER_TARGET, Program, Span, diagnostic_from_registry, name_find, name_index, name_intern, name_table_sized]
 }
 
 // Why a top-level impl stays outside its type's body. Two exceptions need no
@@ -36,18 +36,21 @@ JetParserImplPlacementRule: enum {
 // parsed text and `diagnostics` the check's own reports on it so far; an
 // error inside an impl's head keeps that impl out (rule f).
 parser_impl_placement_lints: fn(program: Program, source: [U8], diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
-    declared := [String:Bool]{}
+    // The struct and enum names the program declares, interned: a name the
+    // table holds past its empty spelling (id 0) is declared here.
+    declared := name_table_sized(64)
     loop item in program.items {
         if item == {
-            .Struct(value) -> declared[value.name] = true
-            .Enum(value) -> declared[value.name] = true
+            .Struct(value) -> _ := name_intern(declared, value.name)
+            .Enum(value) -> _ := name_intern(declared, value.name)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     found := [Diagnostic]{}
     loop item in program.items {
         if item == .Impl(value) {
-            if !declared.has_key(value.type_name) || parser_impl_placement_rule(value, source, diagnostics) != None -> next
+            known: name_find(declared, value.type_name) ?? { next }
+            if name_index(known) == 0 || parser_impl_placement_rule(value, source, diagnostics) != None -> next
             head: if value.trait_name == .Val(name) -> "{value.type_name}.{name}" else -> value.type_name.copy()
             span: Span{start: value.span.start, end: (value.trait_span ?? value.type_span).end}
             found.push(diagnostic_from_registry("L0535", Val(span), "`impl {head}` sits outside the body of `{value.type_name}`", "`{value.type_name}` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else", "Move it into the body of `{value.type_name}`: its methods as `fn` members, a trait impl as a nested `impl Trait {{ … }}`"))

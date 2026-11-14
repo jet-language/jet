@@ -6,7 +6,8 @@
 use {
     jet_foundation.[
         CallArg, ComptimeEvalError, ComptimeNameSite, CtValue, Expr, Func, JET_CONFIG_VALUE_NAME, Span,
-        comptime_walk_identifiers, expr_span, jet_config_eval_error, jet_config_literal,
+        comptime_walk_identifiers, expr_span, jet_config_eval_error, jet_config_literal, name_index, name_intern,
+        name_table_sized,
     ]
     jet_lexer.[TOKEN_LPAREN, TOKEN_RPAREN, Token, lex_config]
 }
@@ -25,7 +26,11 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], global
         loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
         sites.insert(index, site)
     }
-    constants := [String: String]{}
+    // Per global read, by id in a table of their names: the number of the
+    // constant it became, or -1 before its first read.
+    globals_read := name_table_sized(16)
+    constant_of := [Int]{}
+    constants := 0
     lines := [String]{}
     loop name in funcs.keys() {
         if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
@@ -35,14 +40,16 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], global
     cursor := span.start
     loop site in sites {
         if site.span.start < cursor -> next
-        constant := constants.get(site.name) ?? ""
-        if constant == "" {
-            constant = "JET_CONFIG_GLOBAL_{constants.len()}"
+        read: name_index(name_intern(globals_read, site.name))
+        loop constant_of.len() <= read -> constant_of.push(-1)
+        if constant_of[read] < 0 {
+            constant_of[read] = constants
+            constants += 1
             value: globals[site.name]
             literal: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
-            constants[site.name] = constant
-            lines.push("{constant}: {literal}")
+            lines.push("JET_CONFIG_GLOBAL_{constant_of[read]}: {literal}")
         }
+        constant: "JET_CONFIG_GLOBAL_{constant_of[read]}"
         text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
         text.push(constant)
         cursor = site.span.end

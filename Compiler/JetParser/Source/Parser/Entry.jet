@@ -34,6 +34,8 @@ use {
         name_count,
         name_find,
         name_index,
+        name_intern,
+        name_table_sized,
         sema_casing_marker_qualifier,
         target_os_gates,
         target_os_named,
@@ -646,14 +648,19 @@ parser_parse_chunk_part: fn(inputs: Shared<ParserChunkShared>, part: Shared<Pars
 parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
     candidates := [String]{}
     used := [String]{}
-    used_names := [String:Bool]{}
+    // The module roots read so far, by id in a table of their own (a root
+    // may be a dotted path no token spells): `rooted[id]` once `used` has it.
+    roots := name_table_sized(16)
+    rooted := [Bool]{}
     import_spans := [Span]{}
     loop declaration in imports {
         import_spans.push(declaration.span)
         if declaration.kind == {
             .Unqualified(module_alias, _, items, _, _) -> {
-                if used_names.get(module_alias) == None {
-                    used_names.add(module_alias.copy(), true).drop("checked absent above")
+                root: name_index(name_intern(roots, module_alias))
+                loop rooted.len() <= root -> rooted.push(false)
+                if !rooted[root] {
+                    rooted[root] = true
                     used.push(module_alias.copy())
                 }
                 loop item in items {
