@@ -282,7 +282,9 @@ ir_opt_header_kept: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [Strin
 }
 
 // Whether instruction `at` is a runtime route that only reads the buffer it
-// is handed, leaving its owners as they were: the growth's jet_rt_mem_move,
+// is handed, leaving its owners as they were: the growth's
+// jet_rt_alloc_value_grow, which reads the old buffer only to find the
+// allocator that served it (Alloc.jet alloc_grow_carrier), jet_rt_mem_move,
 // jet_rt_block_release and jet_rt_free; jet_rt_block_unique, which loads its
 // count (Refcount.jet jet_rt_rc_unique); jet_rt_block_inherit_zero, which
 // loads its zero mark and marks only the replica; and jet_string_from_bytes
@@ -290,7 +292,7 @@ ir_opt_header_kept: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [Strin
 // (TextBytes.jet: text_bytes_owned, rt_text_builder_with_capacity).
 ir_opt_buffer_reader: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] != .CallRuntime -> return false
-    readers: [String]{"jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_string_from_bytes", "jet_string_from_bytes_lossy"}
+    readers: [String]{"jet_rt_alloc_value_grow", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_string_from_bytes", "jet_string_from_bytes_lossy"}
     loop route in readers {
         if ir_opt_calls_route(m, f, at, route) -> return true
     }
