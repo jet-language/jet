@@ -316,6 +316,7 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
             .Text(text) -> {
                 matches: if op == "~" -> text.contains(expected_type) else if op == "!~" -> !text.contains(expected_type) else if op == "^=" -> text.starts_with(expected_type) else -> text.ends_with(expected_type)
                 if matches -> return None
+                return Val("JSON string differs: expected {op} {expected_type}, got {text}")
             }
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Val("JSON string predicate needs a string")
         }
