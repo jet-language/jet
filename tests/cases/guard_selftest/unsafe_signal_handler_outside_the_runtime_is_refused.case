@@ -1,0 +1,18 @@
+# Signal handlers stay inside the vetted runtime boundary: the unsafe ratchet
+# accepts an #Unsafe region that calls sigaction under Compiler/JetRuntime, and
+# refuses the same region in an ordinary program, even with --update.
+fixture: unsafe_signal_handler_outside_the_runtime_is_refused.fixture
+write: package.jet = "name: \"fixture\"\nversion: \"0.1.0\"\n"
+write: safety.md = "# Safety\n"
+copy: handler.source Compiler/JetRuntime/Source/Hook.jet
+step: jet {root}/Tools/agent/UnsafeRatchet.jet --root {work} --baseline {work}/safety.md --update
+exit: 0
+step: jet {root}/Tools/agent/UnsafeRatchet.jet --root {work} --baseline {work}/safety.md --check
+exit: 0
+stdout: ~ "baseline unchanged" # the runtime's handler region is recorded like any other region
+copy: handler.source main.jet
+step: jet {root}/Tools/agent/UnsafeRatchet.jet --root {work} --baseline {work}/safety.md --update
+exit: nonzero
+stderr: ~ "outside the vetted runtime boundary register a signal handler" # the signal rule names its failure
+stderr: ~ "main.jet:8:5 reason \"install an ordinary SIGINT handler\"" # the ordinary program's region, by position and reason
+stderr: !~ "Hook.jet" # the same region inside the runtime boundary is not reported

@@ -1,0 +1,11 @@
+// A program that installs its own SIGINT handler: an ordinary #Unsafe region
+// calling libc's sigaction.
+#[Unsafe("the action block and the handler outlive the call"), FFI(c)]
+sigaction: fn(number: Int, action: Int, old: Int) -> Int
+
+run: fn() {
+    action: [Int]{0, 0, 0, 0}
+    #Unsafe("install an ordinary SIGINT handler") {
+        _ := sigaction(2, action.addr(), 0)
+    }
+}

@@ -51,6 +51,19 @@ MANIFEST_NAME: "^name\\s*:\\s*\"([^\"]+)\""
 LETTER: Regex{"\p{{L}}"}
 LETTER_OR_NUMBER: Regex{"[\p{{L}}\p{{N}}]"}
 
+// The vetted runtime boundary for signal handlers: an `#Unsafe` region outside
+// these paths may not install a signal handler, whatever the baseline says.
+// The runtime owns the process's signal hub, and the image loader sets the
+// loaded program's initial dispositions before the runtime starts. Programs
+// reach signals through core.process.signals, core.process.on_signal and
+// core.sys.on_interrupt, which that hub serves.
+SIGNAL_BOUNDARY: ["Compiler/JetRuntime/", "Compiler/JetBackend/Source/Image/Loader.jet"]
+// rt_sigaction (by name, by its x86-64 number 13 as the first syscall argument,
+// or by its OS_SYS constant), the C signal family, and the Core calls that
+// register a handler. core.sys.reset_signal only restores the default action;
+// it is a POSIX control, gated like the others.
+SIGNAL_REGISTRATION: Regex{"\b(?:rt_sigaction|sigaction|bsd_signal|sysv_signal|sigset|signal|on_signal|on_interrupt)\s*\(|\b(?:OS_SYS_RT_SIGACTION|SYS_rt_sigaction)\b|\bos_syscall\w*\s*\(\s*(?:I64\s*\{{\s*)?13\s*[}},]"}
+
 NEWLINE: 10
 BANG: 33
 QUOTE: 34
@@ -127,6 +140,14 @@ MarkerGroup: struct {
     // Markers named Unsafe, not negated, with a plain reason literal; the
     // first one's reason.
     reasoned_unsafe: Int
+    reason: String
+}
+
+// A region's marker in the source: its `#` offset, the offset past its
+// arguments, and its reason.
+RegionMarker: struct {
+    start: Int
+    end: Int
     reason: String
 }
 
@@ -626,8 +647,9 @@ locate: fn(source: [U8], cursor: &LineCursor, index: Int) -> (line: Int, column:
     (line: cursor.line, column: column)
 }
 
-scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
-    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+// Every `#Unsafe` region marker in `source`, in source order.
+unsafe_markers: fn(source: [U8]) -> [RegionMarker] {
+    markers := [RegionMarker]{}
     index := 0
     loop index < source.len() {
         byte: Int{source[index]}
@@ -643,8 +665,7 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
                 if marker_group_at(source, index) == {
                     .Val(group) -> {
                         if group.reasoned_unsafe == 1 && leads_to_function(source, group.end) {
-                            at: locate(source, cursor, index)
-                            regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: group.reason.copy()})
+                            markers.push(RegionMarker{start: index, end: group.end, reason: group.reason.copy()})
                         }
                         index = group.end
                         next
@@ -654,8 +675,7 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
             }
             if unsafe_marker_at(source, index) == {
                 .Val(marker) -> {
-                    at: locate(source, cursor, index)
-                    regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
+                    markers.push(RegionMarker{start: index, end: marker.end, reason: marker.reason.copy()})
                     index = marker.end
                     next
                 }
@@ -664,6 +684,78 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
         }
         index += 1
     }
+    markers
+}
+
+scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
+    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    loop marker in unsafe_markers(source) {
+        at: locate(source, cursor, marker.start)
+        regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Signal handlers
+
+signal_boundary: fn(file: String) -> Bool {
+    loop prefix in SIGNAL_BOUNDARY {
+        if file.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// The end of the region whose marker ends at `start` in literal-blanked
+// `code`: the close of the first brace block outside parentheses and brackets,
+// so a function marker's body comes after its parameter list, whose default
+// values may hold braces. A function header that ends its line outside them
+// is a bodiless (FFI) declaration, which ends there.
+region_end: fn(code: [U8], start: Int) -> Int {
+    parens := 0
+    header := false
+    index := start
+    loop index < code.len() {
+        byte: Int{code[index]}
+        if byte == OPEN_PAREN || byte == OPEN_BRACKET {
+            parens += 1
+        } else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
+            parens -= 1
+        } else if byte == OPEN_BRACE && parens == 0 {
+            return skip_balanced(code, index, OPEN_BRACE, CLOSE_BRACE)
+        } else if byte == NEWLINE && parens == 0 && header {
+            return index
+        } else if fn_keyword_at(code, index) && !identifier_char_before(code, index) {
+            header = true
+        }
+        index += 1
+    }
+    code.len()
+}
+
+// The regions of `source` whose code (comments and quoted text aside)
+// registers a signal handler, pushed onto `out`.
+signal_registrations: fn(source: [U8], file: String, owner: String, out: &[Region]) {
+    text: String.from_bytes_lossy(source)
+    if !text.contains("Unsafe") -> return
+    if !text.contains("sig") && !text.contains("SIG") && !text.contains("syscall") && !text.contains("interrupt") -> return
+    code: blank_literals(source)
+    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    loop marker in unsafe_markers(source) {
+        body: String.from_bytes_lossy(code[marker.end..<region_end(code, marker.end)])
+        if SIGNAL_REGISTRATION.is_match(body) {
+            at: locate(source, cursor, marker.start)
+            // copy: the row outlives this file's scan
+            out.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
+        }
+    }
+}
+
+format_signals: fn(regions: [Region]) -> String RatchetError! {
+    lines := [String]{"unsafe ratchet: #Unsafe regions outside the vetted runtime boundary register a signal handler:"}
+    loop region in regions -> lines.push(region_line(region) ?? return Err(err))
+    lines.push("register handlers through core.process.signals, core.process.on_signal or core.sys.on_interrupt; only")
+    lines.push("{SIGNAL_BOUNDARY.join(", ")} may install one (SIGNAL_BOUNDARY in Tools/agent/UnsafeRatchet.jet)")
+    Ok(lines.join("\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +827,9 @@ compare_regions: fn(left: Region, right: Region) -> Ordering {
     left.reason <=> right.reason
 }
 
-scan: fn(root: String) -[FS]> Census RatchetError! {
+// The census of `root`; the regions that register a signal handler outside
+// the vetted runtime boundary go to `signals`.
+scan: fn(root: String, signals: &[Region]) -[FS]> Census RatchetError! {
     paths := [String]{}
     jet_files(root, "", paths) ?? return Err(err)
     regions := [Region]{}
@@ -743,6 +837,7 @@ scan: fn(root: String) -[FS]> Census RatchetError! {
         source: read_source(files.join(root, file)) ?? return Err(err)
         owner: package_name(root, file) ?? return Err(err)
         scan_source(source, file, owner, regions)
+        if !signal_boundary(file) -> signal_registrations(source, file, owner, signals)
     }
     // #6319: sort_by with a named comparator crashes; the lambda forwards to it.
     regions.sort_by(fn(left: Region, right: Region) { compare_regions(left, right) })
@@ -1305,8 +1400,8 @@ write_text: fn(path: String, text: String) RatchetError! -[FS]> {
 }
 
 // Compare the scan with the baseline; false when the check failed.
-ratchet: fn(options: Options) -[FS, IO]> Bool RatchetError! {
-    current: scan(options.root) ?? return Err(err)
+ratchet: fn(options: Options, signals: &[Region]) -[FS, IO]> Bool RatchetError! {
+    current: scan(options.root, signals) ?? return Err(err)
     baseline: read_baseline(options.baseline) ?? {
         if !options.update -> return Err(err)
         text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> "# Safety\n"
@@ -1392,7 +1487,12 @@ unsafe_ratchet_main: fn(args: [String]) -[FS, Env, IO]> Bool RatchetError! {
         print(usage())
         return Ok(true)
     }
-    passed := ratchet(options) ?? return Err(err)
+    signals := [Region]{}
+    passed := ratchet(options, signals) ?? return Err(err)
+    if signals.len() > 0 {
+        term.eprint(format_signals(signals) ?? return Err(err))
+        passed = false
+    }
     baseline_text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> ""
     problems: check_corelib(options.root, baseline_text) ?? return Err(err)
     if problems != "" {
@@ -1463,6 +1563,28 @@ audited: fn(text: String) -> CoreLibScan {
     assert_eq(defaults.abstractions[0].function, "default_gated")
     quoted: audited("f: fn() {{ s: \"core.sys.kill(1)\" // p.*\n}}\n")
     assert_eq(quoted.violations.len(), 0)
+}
+
+signals_in: fn(text: String) -> [Region] {
+    regions := [Region]{}
+    signal_registrations(text.bytes(), "app.jet", "pkg", regions)
+    regions
+}
+
+#Test("an #Unsafe region that registers a signal handler is reported") {
+    ffi: signals_in("main: fn() {{\n    #Unsafe(\"install\") {{\n        sigaction(2, act, 0)\n    }}\n}}\n")
+    assert_eq(ffi.len(), 1)
+    assert_eq(ffi[0].line, 2)
+    assert_eq(ffi[0].reason, "install")
+    raw: signals_in("#Unsafe(\"raw\")\nhook: fn(a: Opts = Opts{{}}) {{\n    _ := os_syscall_i64(I64{{13}}, 2, h, 0, 8, 0, 0)\n}}\n")
+    assert_eq(raw.len(), 1)
+    assert_eq(raw[0].line, 1)
+    quiet: signals_in("main: fn() {{\n    // sigaction(2)\n    #Unsafe(\"read\") {{ x: \"signal(2)\" }}\n    signal(1)\n}}\n")
+    assert_eq(quiet.len(), 0)
+    declared: signals_in("#[Unsafe(\"abi\"), FFI(c)]\nsigaction: fn(n: Int) -> Int\n\nrun: fn() {{\n    #Unsafe(\"call\") {{ _ := sigaction(2) }}\n}}\n")
+    assert_eq(declared.len(), 1)
+    assert_eq(declared[0].line, 5)
+    assert(signal_boundary("Compiler/JetRuntime/Source/Fault.jet") && !signal_boundary("Core/Ui/Dbus.jet"))
 }
 
 #Test("the generated section round-trips and stale rows are refused") {

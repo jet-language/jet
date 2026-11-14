@@ -200,6 +200,19 @@ refreshes.
 `UnsafeRatchet.jet --check` on every lane check, so an unrecorded region, a
 stale row or a failed CoreLib audit stops the check before commit.
 
+Signal handlers stay inside the vetted runtime boundary, whatever the baseline
+records. That boundary is `SIGNAL_BOUNDARY`: the runtime
+(`Compiler/JetRuntime/`) and the image loader
+(`Compiler/JetBackend/Source/Image/Loader.jet`), which sets the loaded program's
+initial dispositions. The checker fails on every `#Unsafe` region outside it
+whose code installs a signal handler. That covers `rt_sigaction` by name, by its
+syscall number or by its `OS_SYS` constant; the C `signal`/`sigaction` family;
+and the Core calls that register a handler. It fails with `--update` too.
+`core.sys.reset_signal` only restores the default action; it stays a gated
+POSIX control. Programs reach signals through `core.process.signals`,
+`core.process.on_signal` and `core.sys.on_interrupt`, which the runtime's
+signal hub serves.
+
 Every region kind lowers to its own sentry (D-MEM-SENTRY1): a block, a gated
 `#Unsafe fn` body, and a gated `#FFI`/`#Import(c)` declaration, whose sentry
 wraps each call.
