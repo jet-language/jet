@@ -786,6 +786,27 @@ sema_effect_set_add: fn(set: &[String], value: String) -> Bool Never! {
     true
 }
 
+// One value of a set being ordered, with its root's rank.
+SemaEffectRanked: struct {
+    rank: Int
+    name: String
+}
+
+// The set sema_effect_set_add builds from `values` added in any order: each
+// value once, by its root's rank, then by name. Ranks each value once and
+// sorts once, where adding one at a time scans and re-ranks the set per
+// value.
+sema_effect_set_of: fn(values: [String]) -> [String] Never! {
+    ranked := loop value in values -> SemaEffectRanked{rank: sema_effect_rank(value), name: value}
+    ranked.sort_by(fn(left: SemaEffectRanked, right: SemaEffectRanked) { (left.rank <=> right.rank).then(left.name <=> right.name) })
+    set := [String]{}
+    loop entry in ranked {
+        if set.len() > 0 && set[set.len() - 1] == entry.name -> next
+        set.push(entry.name)
+    }
+    set
+}
+
 sema_effect_set_union: fn(target: &[String], values: [String]) -> Bool Never! {
     changed := false
     loop value in values {
@@ -5462,7 +5483,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     trait_implementers := [String:[String]]{}
     loop (group_row, trait_key) in tables.implementer_keys -> trait_implementers[trait_key] = tables.implementer_lists[group_row]
     dyn_impls := [String:[String]]{}
-    loop (group_row, method_key) in tables.dyn_keys -> dyn_impls[method_key] = tables.dyn_lists[group_row]
+    loop (group_row, method_key) in tables.dyn_keys -> dyn_impls[method_key] = sema_effect_set_of(tables.dyn_lists[group_row])
     trait_impls := tables.trait_impls.move()
     // The `…:close` method keys in key order, grouped by owner type.
     close_keys := [String]{}
@@ -5869,7 +5890,7 @@ sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModul
             tables.dyn_keys.push(method_key)
             tables.dyn_lists.push([String]{})
         }
-        sema_effect_set_add(tables.dyn_lists[group_row], function.key)
+        tables.dyn_lists[group_row].push(function.key)
     }
 }
 
