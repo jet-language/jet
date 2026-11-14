@@ -370,7 +370,7 @@ expression, computed while building and stored in the program
 (D-MODULE-VALUE1, D-MODULE-BUILD1). Every read of an immutable global is an
 ordinary copy. A mutable global starts from its computed value, which may be
 any storable value, `[U8]`, `[T]`, maps (tuple, enum and struct keys
-included, a key type's written `Comparable` order applied while building),
+included, a key type's `KeyBy` order applied while building),
 structs holding them and exact Ints beyond a machine word included: the
 program starts holding it as data laid out while building, with no copy at
 startup, and an assignment replaces it (D-JAI-COMPTIME1=A). Only a starting

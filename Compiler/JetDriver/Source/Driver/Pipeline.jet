@@ -1188,7 +1188,9 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // effect would be lost. A Display type's `display` and a Printable type's
 // `show` (sema_comptime_render_methods), its own or a nested value's, make
 // its text in an interpolation or a `print`, so a value computed while
-// building renders as it does at run time.
+// building renders as it does at run time; a KeyBy type's `key` and a
+// written Comparable's `compare` order its Map keys and Set members, so a
+// Map built while building keeps the order it has at run time.
 jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
     rendered := [Int:Bool]{}
     loop type_id in ir_comptime_expression_types(tree, roots, body) {

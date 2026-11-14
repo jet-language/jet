@@ -9321,8 +9321,9 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // What sema_comptime_render_methods has read of each nominal type in one
 // comptime run, so each body walk reads each type once per run, not once per
 // function: per nominal (its row in `methods` and `children`, by symbol id
-// in `ids`), the `display` / `show` methods its own impls and trait blocks
-// add, and the nominal types its fields, then its payloads, hold, in the
+// in `ids`), the methods its own impls and trait blocks add that lowering
+// selects by owner type (sema_comptime_render_method_name), and the nominal
+// types its fields, then its payloads, hold, in the
 // order the walk meets them (sema_comptime_render_nominals). A run's
 // nominal types, impls and fields never change while it runs: landed
 // values change constant rows only.
@@ -9332,10 +9333,11 @@ SemaComptimeRenderMemo: struct {
     children: [[Int]]{[[Int]]{}}
 }
 
-// The `display` (Display) and `show` (Printable) methods a value of type `ty`
-// renders through, `ty` named from module `module_identity`. Lowering selects
-// them by owner type for an interpolation, a `print` and a nested value's
-// text (JetIR ir_render), and no call fact records them. Each nominal type
+// The methods a value of type `ty` renders, keys or orders through, `ty`
+// named from module `module_identity` (sema_comptime_render_method_name).
+// Lowering selects them by owner type for an interpolation, a `print`, a
+// nested value's text (JetIR ir_render) and a Map key's or Set member's
+// order, and no call fact records them. Each nominal type
 // `ty` holds, itself or as an element, member, argument, field or payload,
 // adds its own; `seen` holds the nominals (rows of `memo`) already read.
 sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, memo: &SemaComptimeRenderMemo, ty: Type, module_identity: ModuleID, seen: &[Int:Bool]) -> [(module_identity: ModuleID, key: String)] {
@@ -9421,17 +9423,18 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
             next
         }
         loop method in implementation.methods {
-            if method.symbol.name == method_name {
+            if method.symbol.name == method_name && !sema_comptime_derived_compare(method_name, method.declaration.compiler_generated) {
                 found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
             }
         }
     }
-    // An `impl Display { … }` or `impl Printable { … }` block in the type's
-    // own body, whose methods the nominal registers.
+    // An `impl Display { … }`, `impl Printable { … }`, `impl KeyBy { … }` or
+    // `impl Comparable { … }` block in the type's own body, whose methods the
+    // nominal registers.
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             method_name: sema_comptime_render_method_name(block.trait_name, block.trait_name)
-            if method_name == "" -> next
+            if method_name == "" || sema_comptime_derived_compare(method_name, block.compiler_generated) -> next
             loop method in nominal.methods {
                 if method.symbol.name != method_name -> next
                 loop written in block.methods {
@@ -9458,12 +9461,23 @@ sema_comptime_render_nominal: fn(graph: SemaRegistrationGraph, memo: &SemaCompti
     id
 }
 
-// The rendering method a trait named `written` (or resolved as `resolved`)
-// selects: `display` for Display, `show` for Printable, else none.
+// The method lowering selects by owner type for a trait named `written` (or
+// resolved as `resolved`): `display` for Display and `show` for Printable
+// (JetIR ir_render), `key` for KeyBy (ir_key_impl) and `compare` for
+// Comparable (ir_compare_impl), which order and compare Map keys, Set
+// members and `<`; else none.
 sema_comptime_render_method_name: fn(written: String, resolved: String) -> String {
     if written == "Display" || resolved == "Display" -> return "display"
     if written == "Printable" || resolved == "Printable" -> return "show"
+    if written == "KeyBy" || resolved == "KeyBy" -> return "key"
+    if written == "Comparable" || resolved == "Comparable" -> return "compare"
     ""
+}
+
+// Whether `method_name` is a derived `compare`: a derived Comparable orders
+// structurally in lowering (JetIR ir_order_nominal), which calls no method.
+sema_comptime_derived_compare: fn(method_name: String, compiler_generated: Bool) -> Bool {
+    method_name == "compare" && compiler_generated
 }
 
 // The `close` method a value of type `ty` runs when it is closed, `ty` named
