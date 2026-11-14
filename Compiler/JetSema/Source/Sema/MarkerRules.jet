@@ -1172,7 +1172,11 @@ sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScope
             row: sema_scope_caller_row(environment, graph)
             if row < 0 -> return
             loop index in 0..<graph.modules[row].program.rule_facts.len() {
-                if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
+                // The statement walk asks once per statement, over every
+                // application of the module, so the target compares field by
+                // field rather than through a `Val(target)` built each pass.
+                fact_target: graph.modules[row].program.rule_facts[index].target ?? next
+                if fact_target.start != target.start || fact_target.end != target.end -> next
                 if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
                 if sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Meta) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Deadline) -> next
                 if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) -> next
