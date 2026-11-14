@@ -644,12 +644,12 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
 // The positions of a tuple- or struct-keyed Map constant's `entries` (key
 // type row `key_row`) in its Map's order: each key's members in the order
 // ir_order_into compares them, the later of two equal keys kept. A key type
-// a written Comparable impl orders keeps the entries' own order: the
-// compile-time run built the Map with that impl's compare and read it back
-// in its order (jet_eval_ir_data), each key once. None when a key holds a
-// member this does not order.
+// whose own code orders it (a KeyBy key or a written Comparable impl) keeps
+// the entries' own order: the compile-time run built the Map with that code
+// and read it back in its order (jet_eval_ir_data), each key once. None when
+// a key holds a member this does not order.
 ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
-    if ir_static_written_order(m, p, key_row) {
+    if ir_static_own_order(m, p, key_row) {
         return Val(loop index in 0..<entries.len() -> index)
     }
     keys := [(key: [(n: Int, s: String)], at: Int)]{}
@@ -667,29 +667,32 @@ ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: 
     Val(kept)
 }
 
-// Whether a written Comparable impl orders keys of type row `row`, the type's
-// own or a member's (ir_compare_impl, ir_order_nominal). A payload-free enum
-// orders by variant index whatever its impl (ir_order_into).
-ir_static_written_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+// Whether code of the program orders keys of type row `row`, the type's own
+// or a member's: a KeyBy key (ir_key_impl) or a written Comparable impl
+// (ir_compare_impl, ir_order_nominal). A payload-free enum orders by variant
+// index whatever its impls (ir_order_into).
+ir_static_own_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.types[row].kind == .Word -> return false
     ty: ir_untag(m.types[row].ty)
     if ty == .Tuple(declared) {
         tuple_members: ir_tuple_members(m, p, declared) ?? return false
-        return ir_static_written_members(m, p, tuple_members)
+        return ir_static_own_members(m, p, tuple_members)
     }
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
-    selected: if p.render_impls.len() == 0 -> None else -> p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}")
-    if selected == .Val(index) && !p.functions[index].synthetic -> return true
+    if p.render_impls.len() > 0 {
+        type_key: ir_render_type_key(p.type_rows, p.types, m.types[row].ty)
+        if p.render_impls.has_key("KeyBy|{type_key}") -> return true
+        if p.render_impls.get("Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic -> return true
+    }
     members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
-    ir_static_written_members(m, p, members)
+    ir_static_own_members(m, p, members)
 }
 
-// Whether a written Comparable impl orders any of `members`
-// (ir_static_written_order).
-ir_static_written_members: fn(m: &IRModule, p: IRProgram, members: [IRMember]) -> Bool Never! {
+// Whether code of the program orders any of `members` (ir_static_own_order).
+ir_static_own_members: fn(m: &IRModule, p: IRProgram, members: [IRMember]) -> Bool Never! {
     loop member in members {
-        if ir_static_written_order(m, p, member.ty) -> return true
+        if ir_static_own_order(m, p, member.ty) -> return true
     }
     false
 }

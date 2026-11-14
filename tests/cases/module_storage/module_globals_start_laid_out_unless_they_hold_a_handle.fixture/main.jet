@@ -1,7 +1,7 @@
 // Mutable module globals whose starting values hold an exact Int beyond a
 // machine word, or a map keyed by an enum or a struct, start from static
-// data laid out while compiling. `Tier`'s own compare orders its keys
-// (highest first), which the compile-time run applied. Only `score`, a
+// data laid out while compiling. `Tier`'s key orders its keys (highest
+// level first), which the compile-time run applied. Only `score`, a
 // `Shared` cell, is built on first use. One task runs, so its plain writes
 // sit in `#Unsafe`.
 Shade: enum {
@@ -18,12 +18,10 @@ Spot: struct {
 Tier: struct {
     level: Int
 
-    impl Comparable {
-        compare: fn(self, rhs: Tier) -> Ordering {
-            if self.level > rhs.level -> return Ordering.Less
-            if self.level < rhs.level -> return Ordering.Greater
-            return Ordering.Equal
-        }
+    impl KeyBy {
+        Key: Int
+
+        key: fn(self) -> Int { 0 - self.level }
     }
 }
 

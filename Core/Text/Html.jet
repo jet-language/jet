@@ -106,7 +106,7 @@ HTML: struct {
 
     // A checked `HTML{…}` literal: each hole becomes markup, an HTML value as it
     // is and any other value as its text-escaped display text. `build` then
-    // escapes a hole inside an attribute value for that value (html_value_hole).
+    // escapes a hole inside an attribute value for that value (__html_value_hole).
     impl CheckedText {
         Error: Never
         Hole: String
@@ -122,19 +122,19 @@ HTML: struct {
 
         build: fn(parts: [String], holes: [String]) -[]> HTML {
             markup := parts[0].copy()
-            state := html_state_after(HTML_TEXT, parts[0])
+            state := __html_state_after(HTML_TEXT, parts[0])
             loop index in 0..<holes.len() {
                 hole := holes[index].copy()
                 if state == HTML_DOUBLE_VALUE || state == HTML_SINGLE_VALUE {
-                    hole = html_value_hole(hole, false)
+                    hole = __html_value_hole(hole, false)
                 } else if state == HTML_AFTER_EQUALS || state == HTML_UNQUOTED_VALUE {
-                    hole = html_value_hole(hole, true)
+                    hole = __html_value_hole(hole, true)
                     if hole != "" -> state = HTML_UNQUOTED_VALUE
                 } else {
-                    state = html_state_after(state, hole)
+                    state = __html_state_after(state, hole)
                 }
                 markup = "{markup}{hole}{parts[index + 1]}"
-                state = html_state_after(state, parts[index + 1])
+                state = __html_state_after(state, parts[index + 1])
             }
             HTML{markup: markup}
         }
@@ -152,7 +152,7 @@ HTML_DOUBLE_VALUE: 4
 HTML_SINGLE_VALUE: 5
 
 // The markup state after `text`, read from `state`.
-html_state_after: fn(state: Int, text: String) -> Int Never! {
+__html_state_after: fn(state: Int, text: String) -> Int Never! {
     at := state
     loop byte in text.bytes() {
         b: Int{byte}
@@ -165,10 +165,10 @@ html_state_after: fn(state: Int, text: String) -> Int Never! {
             if b == 34 -> at = HTML_DOUBLE_VALUE
             else if b == 39 -> at = HTML_SINGLE_VALUE
             else if b == 62 -> at = HTML_TEXT
-            else if !html_space(b) -> at = HTML_UNQUOTED_VALUE
+            else if !__html_space(b) -> at = HTML_UNQUOTED_VALUE
         } else if at == HTML_UNQUOTED_VALUE {
             if b == 62 -> at = HTML_TEXT
-            else if html_space(b) -> at = HTML_TAG
+            else if __html_space(b) -> at = HTML_TAG
         } else if at == HTML_DOUBLE_VALUE {
             if b == 34 -> at = HTML_TAG
         } else if b == 39 -> at = HTML_TAG
@@ -176,13 +176,13 @@ html_state_after: fn(state: Int, text: String) -> Int Never! {
     at
 }
 
-html_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b == 12 || b == 13 }
+__html_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b == 12 || b == 13 }
 
 // A hole inside an attribute value: its quotes and angle brackets become
 // entities, and in an unquoted value its whitespace, `=` and backtick too,
 // so the hole stays inside the one value. An `&` is left as it is: a text
 // hole's was already escaped, and an HTML hole's starts an entity.
-html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
+__html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
     out := [U8]{}
     loop byte in hole.bytes() {
         b: Int{byte}
@@ -191,7 +191,7 @@ html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
         else if b == 39 -> entity = "&#x27;"
         else if b == 60 -> entity = "&lt;"
         else if b == 62 -> entity = "&gt;"
-        else if unquoted && (html_space(b) || b == 61 || b == 96) -> entity = "&#{b};"
+        else if unquoted && (__html_space(b) || b == 61 || b == 96) -> entity = "&#{b};"
         if entity == "" {
             out.push(byte)
         } else {

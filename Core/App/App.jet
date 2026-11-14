@@ -86,7 +86,7 @@ Remote: struct<S> {
     // the server, and `fail` gives a `CallError` as the method's own error.
     __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
         if self.service == .Val(service) -> return direct(service)
-        reply: remote_post(self.address, method, args) ?? return fail(err)
+        reply: __remote_post(self.address, method, args) ?? return fail(err)
         tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
         if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
         value: live_json.at<R>(tree, "/ok") ?? return fail(.Unreachable("the server's reply to `{method}` has no value"))
@@ -96,7 +96,7 @@ Remote: struct<S> {
     // A call of the endpoint method `method` of `S`, which can't fail.
     __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
         if self.service == .Val(service) -> return Ok(direct(service))
-        reply: remote_post(self.address, method, args)
+        reply: __remote_post(self.address, method, args)
         tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
         value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
         Ok(value)
@@ -143,13 +143,13 @@ remote_at: fn<S>(address: String) -> Remote<S> Never! { Remote<S>{service: None,
 
 // One remote call: POST the JSON array of `args` to `{address}/{method}`;
 // the reply's body on 200, else the failure its status names.
-remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
+__remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
     response: http.post("{address}/{method}", "[{args.join(",")}]") ?? return Err(.Unreachable("{address}/{method}: {err}"))
     text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
     if {
         response.status == 200 -> Ok(text)
         response.status == 401 -> Err(.SignedOut)
-        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
+        response.status == 422 -> Err(.Invalid(__remote_invalid(text)))
         response.status == 426 -> Err(.UpdateRequired)
         response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
         else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
@@ -158,7 +158,7 @@ remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wai
 
 // The field errors of a 422 reply, `{"invalid": [{"path": …, "reason":
 // …}, …]}`; a reply that is not that shape is one error with its text.
-remote_invalid: fn(text: String) -> [FieldError] Never! {
+__remote_invalid: fn(text: String) -> [FieldError] Never! {
     tree: live_json.parse(text) ?? return [FieldError]{FieldError{path: "", reason: "{text}"}}
     errors := [FieldError]{}
     index := 0
