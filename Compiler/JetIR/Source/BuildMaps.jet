@@ -1214,7 +1214,11 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
     shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
     key: ir_value_as(m, p, b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 || right < 0 -> return
-    binary: op ?? return ir_map_set(m, p, b, row, map, key, right)
+    binary: op ?? {
+        ir_map_close_replaced(m, p, b, row, shape, map, key, span)
+        if ir_failed(b) -> return
+        return ir_map_set(m, p, b, row, map, key, right)
+    }
     address: ir_map_value_address(m, p, b, row, map, key)
     ir_release(m, b, key)
     current: ir_load_at(m, b, address, 0, shape.value.ty)
@@ -1226,6 +1230,23 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
     if ir_failed(b) -> return
     if m.types[shape.value.ty].drop != "" -> ir_emit(b.f, IROp.Drop, -1, current, -1, -1, b.line)
     ir_store_at(m, p, b, address, 0, result)
+}
+
+// `map[key] = value` over a present key: the entry's old value closes first,
+// as a field write closes it; map.set then drops it.
+ir_map_close_replaced: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape: IRMapShape, map: Int, key: Int, span: Span) Never! {
+    glue: ir_close_glue(m, p, b, shape.value.ty, false, span)
+    if glue < 0 -> return
+    word: ir_word_row(m)
+    found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word)
+    none: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ge, found, none)
+    ir_open_if(b.f, present, b.line)
+    entries: ir_load_word(m, b, map, 16)
+    entry: ir_element_address(m, b, entries, found, shape.stride)
+    old: ir_load_at(m, b, entry, shape.value.offset, shape.value.ty)
+    ir_close_call(b, glue, old)
+    ir_end(b.f, b.line)
 }
 
 // Whether `base[index] = value` is one probe (ir_map_update): the map is a
@@ -1303,14 +1324,17 @@ ir_map_update: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: I
     b.probe = None
     if ir_failed(b) || right < 0 -> return
     owned: ir_own(m, p, b, right)
+    glue: ir_close_glue(m, p, b, shape.value.ty, false, span)
+    if ir_failed(b) -> return
     none: ir_word_const(m, b, 0)
     present: ir_bool_op(m, b, IROp.Ge, found, none)
     ir_open_if(b.f, present, b.line)
     entries: ir_load_word(m, b, map, 16)
     entry: ir_element_address(m, b, entries, found, shape.stride)
-    if m.types[shape.value.ty].drop != "" {
+    if glue >= 0 || m.types[shape.value.ty].drop != "" {
         old: ir_load_at(m, b, entry, shape.value.offset, shape.value.ty)
-        ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        if glue >= 0 -> ir_close_call(b, glue, old)
+        if m.types[shape.value.ty].drop != "" -> ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
     }
     ir_emit(b.f, IROp.Store, -1, entry, shape.value.offset, owned, b.line)
     if b.fresh[key] && ir_has_drop(m, b, key) -> ir_emit(b.f, IROp.Drop, -1, key, -1, -1, b.line)

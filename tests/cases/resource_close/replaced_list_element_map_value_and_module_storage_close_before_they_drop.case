@@ -1,0 +1,13 @@
+# Claim: a plain write that replaces a Close value in a List element (`xs[i] = v`), a Map entry (`m[k] = v`) or module storage closes the old value before it drops, as a field write does, on o0, o1 and o2. The checked heap traps a second end.
+# Hand-derived: "a" closes at `xs[0] =`; the first `m["k"] =` finds no entry and closes nothing, the second closes "d"; the storage write closes the starting "s1". At scope end the Map closes "e", then the List closes "c" and "b"; module storage is not closed when the program ends, so "s2" prints nothing.
+fixture: replaced_list_element_map_value_and_module_storage_close_before_they_drop.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc --optimize=none main.jet
+exit: 0 # o0
+stdout: = replaced_list_element_map_value_and_module_storage_close_before_they_drop.out # o0
+step: jet run --checked-alloc --optimize=basic main.jet
+exit: 0 # o1
+stdout: = replaced_list_element_map_value_and_module_storage_close_before_they_drop.out # o1
+step: jet run --checked-alloc --optimize=full main.jet
+exit: 0 # o2
+stdout: = replaced_list_element_map_value_and_module_storage_close_before_they_drop.out # o2

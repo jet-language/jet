@@ -1,0 +1,23 @@
+R: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+held := R{name: "s1"}
+
+run: fn() {
+    xs := [R]{R{name: "a"}, R{name: "b"}}
+    xs[0] = R{name: "c"}
+    print("after list")
+    m := [String: R]{}
+    m["k"] = R{name: "d"}
+    m["k"] = R{name: "e"}
+    print("after map")
+    #Unsafe("the test runs one task") {
+        held = R{name: "s2"}
+    }
+    print("after storage")
+}

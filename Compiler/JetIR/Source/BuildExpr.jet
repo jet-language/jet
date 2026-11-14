@@ -1661,9 +1661,9 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
     }
     if ir_body_node(p, b, place).kind == .SharedGuardValue(guard) {
         // `guard.value (op)= value`: the value first, then the cell's slot
-        // (the write place `&guard.value`), written in place. A plain write
-        // closes the old payload first, as a field write does: nothing moves
-        // out of a guard (E0120), so the old payload is whole.
+        // (the write place `&guard.value`), written in place; a plain write
+        // closes the old payload (ir_assign_at). Nothing moves out of a
+        // guard (E0120), so the old payload is whole.
         place_ty: ir_ty(p, b, place)
         row: ir_value_type(m, p, place_ty) ?? return ir_fail(b, span, "assignment to a Shared guard value of {ir_type_name(place_ty)}")
         slot: ir_value_as(m, p, b, value, row, span)
@@ -1674,16 +1674,6 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
         if ir_failed(b) || payload < 0 || slot < 0 {
             return
         }
-        if op == None {
-            glue: ir_close_glue(m, p, b, row, false, span)
-            if ir_failed(b) {
-                return
-            }
-            if glue >= 0 {
-                old: ir_load_at(m, b, payload, 0, row)
-                ir_close_call(b, glue, old)
-            }
-        }
         return ir_assign_at(m, p, b, payload, row, op, slot, value_ty, false, span)
     }
     place_kind: ir_expr_kind_name(ir_body_node(p, b, place).kind)
@@ -1693,7 +1683,7 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
 // `storage (op)= value` for module storage `key`: the value, then the
 // read-modify-write through the storage cell. The cell owns its value: the
 // new one is owned first (it may be a read of the cell itself), then the
-// old one drops (a static starting value's drop leaves it alone).
+// old one closes and drops (a static starting value's drop leaves it alone).
 ir_storage_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty: ir_ty(p, b, value)
     at: p.constants.get(key) ?? return ir_fail(b, span, "storage: module {key} without a declaration")
@@ -1709,9 +1699,9 @@ ir_storage_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op
     if address < 0 {
         return
     }
+    row: ir_value_type(m, p, definition.ty) ?? return ir_fail(b, span, "storage: module {definition.name} of {ir_type_name(definition.ty)}")
     result := right
     if op == .Val(binary) {
-        row: ir_value_type(m, p, definition.ty) ?? return ir_fail(b, span, "storage: module {definition.name} of {ir_type_name(definition.ty)}")
         current: ir_load_at(m, b, address, 0, row)
         site: b.line
         result = ir_binary(m, p, b, binary, ir_assign_overflow(binary), site, definition.ty, current, right, value_ty, span)
@@ -1724,10 +1714,19 @@ ir_storage_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op
     // Module storage outlives every `#Context(allocator:)` block: its value
     // moves to the heap (BuildMove.jet).
     ir_move_heap(m, p, b, owned)
-    if ir_has_drop(m, b, owned) {
-        row: ir_value_type(m, p, definition.ty) ?? return ir_fail(b, span, "storage: module {definition.name} of {ir_type_name(definition.ty)}")
+    // A plainly overwritten value closes, as a field write closes it.
+    glue := -1
+    if op == None {
+        glue = ir_close_glue(m, p, b, row, false, span)
+        if ir_failed(b) {
+            return
+        }
+    }
+    drops: ir_has_drop(m, b, owned)
+    if glue >= 0 || drops {
         old: ir_load_at(m, b, address, 0, row)
-        ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        if glue >= 0 -> ir_close_call(b, glue, old)
+        if drops -> ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
     }
     ir_store_at(m, p, b, address, 0, owned)
 }
@@ -7210,8 +7209,9 @@ ir_list_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, i
 }
 
 // `place (op)= slot` into the storage of type row `row` at `address`: the
-// operation reads the current value, an overwritten value with drop glue
-// drops (unless `initializing`), then the result is stored.
+// operation reads the current value; unless `initializing`, a plainly
+// overwritten value closes, as a field write closes it, and a value with
+// drop glue drops; then the result is stored.
 ir_assign_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: Int, op: TBinaryOp?, value: Int, value_ty: Type, initializing: Bool, span: Span) Never! {
     slot := value
     current := -1
@@ -7226,9 +7226,19 @@ ir_assign_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: I
             return
         }
     }
-    if m.types[row].drop != "" && !initializing {
-        old: if current >= 0 -> current else -> ir_load_at(m, b, address, 0, row)
-        ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+    if !initializing {
+        glue := -1
+        if op == None {
+            glue = ir_close_glue(m, p, b, row, false, span)
+            if ir_failed(b) {
+                return
+            }
+        }
+        if glue >= 0 || m.types[row].drop != "" {
+            old: if current >= 0 -> current else -> ir_load_at(m, b, address, 0, row)
+            if glue >= 0 -> ir_close_call(b, glue, old)
+            if m.types[row].drop != "" -> ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        }
     }
     ir_store_at(m, p, b, address, 0, slot)
     ir_move_stored(m, p, b, row, address, 0)
