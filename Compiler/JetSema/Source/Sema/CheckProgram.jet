@@ -10681,12 +10681,15 @@ SemaCoreEffectResult: struct {
     rows: [SemaCoreEffectRow]
 }
 
-// The effect rows of each Core module of `graph`, a graph that walked every
-// body, as its effect sources give them.
+// The effect rows of each module of `graph`, a graph that walked every body,
+// as its effect sources give them. Every module has its row, an empty one
+// when no function of it has body facts, as sema_taint_core_crossings gives
+// every module its crossing row: the Core record holds the Prelude's modules
+// with Core's, and a Prelude module's identity has no Core bit
+// (module_is_core), so the record takes the rows of the modules it holds.
 sema_core_effect_rows: fn(graph: SemaRegistrationGraph) -> [SemaCoreEffectResult] Never! {
     results := [SemaCoreEffectResult]{}
     loop source_module in graph.modules {
-        if !module_is_core(source_module.module_identity) -> next
         sources := sema_comptime_effect_sources(graph, source_module, [U32:SemaEffectTypeCap]{})
         rows := [SemaCoreEffectRow]{}
         sources.reverse()
