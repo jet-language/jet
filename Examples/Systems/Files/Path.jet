@@ -4,6 +4,8 @@ package: {
     authority: { allow: [Env, FS, IO] }
 }
 
+use files: core.files
+
 run: fn() {
     home_child: Path.home().join("logs").join("x.txt")
     home_join_ok: home_child.to_string().ends_with("x.txt")
@@ -21,10 +23,16 @@ run: fn() {
         child: d.join("output.txt")
         print("child: {child.to_string()}")
     }
-    // Walk a bounded source directory. Walking the workspace root also scans
-    // build outputs and agent worktrees, so runtime depends on ambient state.
-    paths: Path.from("Examples/Systems").walk()
-    print("walk non-empty: {paths.len() > 0}")
+    // Walk a directory the example makes, so the output is the same from any
+    // working directory.
+    scratch: files.temp_dir("path-walk") ?? panic("temp dir")
+    files.write_bytes(files.join(scratch.path, "data.json"), "[]".bytes()) ?? panic("write data.json")
+    files.write_bytes(files.join(scratch.path, "notes.txt"), "notes".bytes()) ?? panic("write notes.txt")
+    root: Path.from(scratch.path)
+    walked := [String]{}
+    loop entry in root.walk() -> walked.push(files.basename(entry.to_string()))
+    walked.sort()
+    print("walk: {walked.join(", ")}")
 
     // `is_within` is lexical. Use `canonicalize` when symlink identity matters.
     inside: Path.from("/srv/root/a/../file").is_within(Path.from("/srv/root"))
