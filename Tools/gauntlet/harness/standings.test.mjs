@@ -85,6 +85,18 @@ test("a plan gives every peer and the ceiling a row: measured, uncovered, not ap
   assert.equal(web.peers.vite.plan, "measure");
 });
 
+test("a peer the entry declares non_applicable plans as not applicable with the entry's reason, not as uncovered", () => {
+  const reason = "Python has no browser runtime and no compile path to a Wasm or JavaScript widget artifact.";
+  const widget = { name: "web-widget", mode: "web", cells: [], languages: ["jet", "rust", "python"], non_applicable: { python: { status: "not_applicable", basis: "no_wasm_artifact", reason } } };
+  const plan = planEntry(widget, policy, { programs: programs(["rust"]), references: [] });
+  assert.deepEqual(plan.peers.python, { role: "peer", plan: "not_applicable", reason, program: null });
+  assert.equal(plan.peers.rust.plan, "measure");
+  assert.equal(plan.peers.lua.plan, "uncovered");
+  const cells = planCells([plan]).filter((cell) => cell.peer === "python");
+  assert.equal(cells.length, METRICS.length);
+  for (const cell of cells) assert.deepEqual([cell.status, cell.reason], ["not_applicable", reason]);
+});
+
 test("dry-run cells cover entry x peer x metric; service cycles and a missing perf stay rows with reasons", () => {
   const service = planEntry({ name: "http-service", mode: "service", cells: [] }, policy, { programs: programs(["rust"]), references: [] });
   const perfless = planEntry(batchEntry, policy, { programs: programs(["rust"]), references: [], toolchains: { perf: { status: "unavailable", command: ["perf", "--version"], exit_code: 127 } } });

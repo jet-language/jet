@@ -114,7 +114,13 @@ export function standingsPolicy(matrix, manifest) {
   };
 }
 
+// A peer the entry itself declares it cannot run (entry.json
+// `non_applicable`, the fact run.mjs records as the peer's row) is not
+// applicable for the entry's own reason; otherwise a manifest rule may rule
+// the peer out for every entry of the mode.
 function notApplicable(policy, peer, entry) {
+  const declared = entry.non_applicable?.[peer];
+  if (declared) return { peer, reason: declared.reason };
   return policy.not_applicable.find((rule) => rule.peer === peer && rule.modes.includes(entry.mode)) ?? null;
 }
 

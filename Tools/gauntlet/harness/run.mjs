@@ -72,7 +72,7 @@ const COMPARISON_METRICS = [
   "tokens",
   "source_tokens",
 ];
-const WEB_WASM_LANGUAGES = new Set(["jet", "rust"]);
+const WEB_WASM_LANGUAGES = new Set(["jet", "rust", "go"]);
 const WEB_ARTIFACT_ASSET_PATTERN = /\.(?:js|mjs|wasm)$/i;
 const TIMER_SCHEMA = "jet.gauntlet.timer.v2";
 const MODE_PRIMARY_METRIC = {
@@ -1167,7 +1167,7 @@ function metricApplicability(entry, language, metric) {
       status: "not_applicable",
       basis: "no_wasm_artifact",
       reason: `${language} web rail is script-only and has no Wasm binary artifact.`,
-      evidence: "Only Jet and Rust web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
+      evidence: "Only Jet, Rust and Go web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
     };
   }
   return { status: "required" };

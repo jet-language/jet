@@ -19,7 +19,7 @@ CEILING_REFERENCE_SOURCE: "ref.S"
 // Both peer-floor metrics: every matched peer and Jet must carry a reading.
 PEER_FLOOR_METRICS: ["runtime_wall_seconds", "runtime_peak_rss_kb"]
 // The web rails that build a Wasm binary; the others are script-only.
-WEB_WASM_LANGUAGES: ["jet", "rust"]
+WEB_WASM_LANGUAGES: ["jet", "rust", "go"]
 // The AGENTS.md Performance gate paragraphs the gate encodes, word for word.
 POLICY_PARAGRAPHS: [
     "Jet's performance target has two stages. The first stage is the peer floor, and it is a hard, structural requirement: a Jet program must be faster and use less peak memory than the same program in every other language. Jet/peer must be below `1.00` for every matched peer, for each required cell and for both wall time and peak memory. Rust is judged like every other peer, with no parity band. A loss to any peer on either metric is a codegen, runtime or Core failure. It is fixed generally and structurally, so that any Jet program beats the other languages, never only the measured one. The second and final stage is the machine ceiling: hand-written, maximally optimized machine code for the same workload, which Jet must match or beat in both cycles and bytes (Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can. Closing the remaining ceiling gap is the hill-climbing stage: until the owner opens it, a cell passes the gate on the peer floor, and its ceiling ratio is measured and reported but does not fail the gate.",
@@ -306,7 +306,7 @@ metric_applicability: fn(entry: Dyn, language: String, metric: String) -> Dyn {
             "status": "not_applicable",
             "basis": "no_wasm_artifact",
             "reason": "{language} web rail is script-only and has no Wasm binary artifact.",
-            "evidence": "Only Jet and Rust web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
+            "evidence": "Only Jet, Rust and Go web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
         }}
     }
     Dyn{[String: Dyn]{"status": "required"}}

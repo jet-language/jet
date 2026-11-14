@@ -337,6 +337,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
     }
     if source_file == "" -> return Ok(disqualified(row, "unsupported language"))
     if !files.exists(path_joined(source_dir, source_file)) -> return Ok(disqualified(row, "missing {language}/{source_file}"))
+    source_tree_sha256: tree_sha256(source_dir)
     staged: path_joined(st.entry_stage, language)
     copy_path(source_dir, staged)
     fixture_state: path_joined(staged, "fixture-state")
@@ -369,6 +370,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
     provenance := Dyn.object()
     provenance["source"] = Dyn.Text(files.relative(path_joined(source_dir, source_file), st.entry_dir))
     provenance["source_sha256"] = dyn_at(metrics, "source_sha256")
+    provenance["source_tree_sha256"] = Dyn.Text(source_tree_sha256.copy())
     provenance["base_language"] = Dyn.Text(base.copy())
     provenance["authoring"] = member(st.entry, "authoring/{language}") ?? member(st.entry, "expert/{language}") ?? Dyn.Null
     provenance["peer_script"] = member(st.entry, "spec/peer/script") ?? Dyn.Null
