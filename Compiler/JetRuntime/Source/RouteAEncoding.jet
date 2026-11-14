@@ -367,6 +367,31 @@ encoding_fd_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     I64{-1}
 }
 
+// The hostile read plan before one read: 0 to read, 1 for a pending
+// interrupt, 2 when the JET_ENC_HOSTILE_FAIL_READ_AFTER budget is spent.
+// FileReader.read_into (CompilerFS.jet) and encoding_file_read share it.
+encoding_hostile_read_gate: fn(state: I64) -> I64 {
+    rt_text_store(wrapping(state + I64{72}), rt_text_word(wrapping(state + I64{72})) + I64{1})
+    pending: rt_text_word(wrapping(state + I64{24}))
+    if (pending != I64{0}) {
+        rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
+        rt_text_store(wrapping(state + I64{24}), pending - I64{1})
+        return I64{1}
+    }
+    limited: rt_text_word(wrapping(state + I64{40})) != I64{0}
+    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{120})), rt_text_word(wrapping(state + I64{48})))) -> return I64{2}
+    I64{0}
+}
+
+// Counts `count` bytes read under the hostile plan; true when they pass the
+// JET_ENC_HOSTILE_FAIL_READ_AFTER budget, so the read fails.
+encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
+    total: rt_text_word(wrapping(state + I64{120})) + count
+    rt_text_store(wrapping(state + I64{120}), total)
+    rt_text_store(wrapping(state + I64{96}), rt_text_word(wrapping(state + I64{96})) + count)
+    rt_text_word(wrapping(state + I64{40})) != I64{0} && alloc_unsigned_less(rt_text_word(wrapping(state + I64{48})), total)
+}
+
 // jet_encoding_file_read: the count, or -1 with the EncodingCause stored at
 // `cause`.
 encoding_file_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
@@ -376,26 +401,14 @@ encoding_file_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 
     }
     state: encoding_hostile_state()
     if (state == I64{0}) -> return encoding_fd_read(reader, bytes, if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK, cause)
-    rt_text_store(wrapping(state + I64{72}), rt_text_word(wrapping(state + I64{72})) + I64{1})
-    pending: rt_text_word(wrapping(state + I64{24}))
-    if (pending != I64{0}) {
-        rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
-        rt_text_store(wrapping(state + I64{24}), pending - I64{1})
-        rt_text_store(cause, encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted")))
-        return I64{-1}
-    }
-    limited: rt_text_word(wrapping(state + I64{40})) != I64{0}
-    limit: rt_text_word(wrapping(state + I64{48}))
-    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{120})), limit)) {
-        rt_text_store(cause, encoding_hostile_fail_cause())
+    gate: encoding_hostile_read_gate(state)
+    if (gate != I64{0}) {
+        rt_text_store(cause, if (gate == I64{1}) -> encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted")) else -> encoding_hostile_fail_cause())
         return I64{-1}
     }
     count: encoding_fd_read(reader, bytes, encoding_hostile_read_cap(state, length), cause)
     if (count <= I64{0}) -> return count
-    total: rt_text_word(wrapping(state + I64{120})) + count
-    rt_text_store(wrapping(state + I64{120}), total)
-    rt_text_store(wrapping(state + I64{96}), rt_text_word(wrapping(state + I64{96})) + count)
-    if (limited && alloc_unsigned_less(limit, total)) {
+    if encoding_hostile_read_done(state, count) {
         rt_text_store(cause, encoding_hostile_fail_cause())
         return I64{-1}
     }

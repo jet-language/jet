@@ -2266,6 +2266,8 @@ sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInM
     if collection.ty == {
         .Apply(name, args) -> {
             if name == "Receiver" && args.len() == 1 -> return Val(TForInMethod.ChannelReceiver)
+            // A generic encoding reader (`JSONReader<R>`) walks like a plain one.
+            if sema_stmt_for_in_encoding_item_type(name) != None -> return Val(TForInMethod.EncodingReader{reader_type: name})
         }
         .Named(name) -> {
             if sema_stmt_for_in_encoding_item_type(name) != None -> return Val(TForInMethod.EncodingReader{reader_type: name})
@@ -3225,6 +3227,7 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
         .Map(key, _, value) -> return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key.copy()}, TypeTupleField{name: "value", ty: value.copy()}}})
         .Apply(name, args) -> {
             if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 -> return Val(args[0])
+            return sema_stmt_for_in_encoding_item_type(name)
         }
         .Named(name) -> {
             if name == "FileLines" || name == "StdinLines" || name == "ProcessLines" -> return Val(Type.String)

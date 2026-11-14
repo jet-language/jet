@@ -119,9 +119,9 @@ module core.encoding.hex exports { HexError, decode, encode, encode_prefixed, en
 source_module core.encoding.hex path Core/Encoding/Hex.jet alias core_core_encoding_hex owns { a2b_base64, a2b_hex, a2b_qp, a2b_uu, b2a_base64, b2a_hex, b2a_qp, b2a_uu, crc32, crc_hqx, decode, dump, encode, encode_prefixed, encode_sep, encode_upper, hexlify, is_hex, unhexlify }
 module core.encoding.ini exports { Pair, Section, Ini, empty, parse, to_string, sections, has_section, has_option, get, get_or, get_int, get_bool, get_float, items, options, set, remove_option, remove_section, defaults, INIError } types { Pair:plain, Section:plain, Ini:plain, INIError:plain } depends_on [core.encoding]
 source_module core.encoding.ini path Core/Encoding/Ini.jet alias core_core_encoding_ini owns { defaults, empty, get, get_bool, get_float, get_int, get_or, has_option, has_section, items, options, parse, remove_option, remove_section, sections, set, to_string }
-module core.encoding.json exports { JSONReader, JSONWriter, at, canonical, decode, dump, dumps, events, load, loads, parse, parse_allow_duplicates, parse_with_limits, patch, patch_with_limits, pointer, reader, reader_allow_duplicates, stringify, to_string, to_string_pretty, writer, __input_json } types { JSONReader:plain, JSONWriter:plain } depends_on [core.encoding, core.math]
+module core.encoding.json exports { JSONReader, JSONWriter, at, canonical, decode, dump, dumps, events, load, loads, parse, parse_allow_duplicates, parse_with_limits, patch, patch_with_limits, pointer, reader, reader_allow_duplicates, stringify, to_string, to_string_pretty, writer, __input_json } types { JSONReader:generic(1), JSONWriter:plain } depends_on [core.encoding, core.math]
 source_module core.encoding.json path Core/Encoding/Json.jet alias core_core_encoding_json owns { at, canonical, decode, dump, dumps, events, load, loads, parse, parse_allow_duplicates, parse_with_limits, patch, patch_with_limits, pointer, reader, reader_allow_duplicates, stringify, to_string, to_string_pretty, writer, __input_json } types { JSONReader, JSONWriter }
-module core.encoding.jsonl exports { JSONLReader, JSONLWriter, parse, reader, to_string, writer, loads, dumps, count_rows, append_line, first } types { JSONLReader:plain, JSONLWriter:plain } depends_on [core.encoding, core.encoding.json]
+module core.encoding.jsonl exports { JSONLReader, JSONLWriter, parse, reader, to_string, writer, loads, dumps, count_rows, append_line, first } types { JSONLReader:generic(1), JSONLWriter:plain } depends_on [core.encoding, core.encoding.json]
 source_module core.encoding.jsonl path Core/Encoding/Jsonl.jet alias core_core_encoding_jsonl owns { append_line, count_rows, dumps, first, loads, parse, reader, to_string, writer } types { JSONLReader, JSONLWriter }
 module core.encoding.toml exports { decode, load, loads, parse, to_string } depends_on [core.encoding]
 source_module core.encoding.toml path Core/Encoding/Toml.jet alias core_core_encoding_toml owns { decode, load, loads, parse, to_string }
@@ -636,8 +636,6 @@ dispatcher_row plain core.encoding.jsonl to_string | CoreCallRecord::source_owne
 dispatcher_row plain core.encoding.jsonl dumps | CoreCallRecord::source_owned("core.encoding.jsonl", "dumps", &[true])
 dispatcher_row plain core.encoding.jsonl append_line | CoreCallRecord::source_owned("core.encoding.jsonl", "append_line", &[true, true])
 dispatcher_row plain core.encoding.csv query | CoreCallRecord::source_owned("core.encoding.csv", "query", &[true, true])
-dispatcher_row plain core.encoding.json reader | CoreCallRecord::source_owned("core.encoding.json", "reader", &[false, true])
-dispatcher_row plain core.encoding.jsonl reader | CoreCallRecord::source_owned("core.encoding.jsonl", "reader", &[false, true])
 dispatcher_row plain core.encoding.cbor reader | CoreCallRecord::source_owned("core.encoding.cbor", "reader", &[false, true])
 dispatcher_row plain core.encoding.cbor writer | CoreCallRecord::source_owned("core.encoding.cbor", "writer", &[false, true])
 dispatcher_row adapter core.encoding.xml reader | CoreCallRecord::source_owned("core.encoding.xml", "reader", &[false, true, true])

@@ -365,7 +365,7 @@ __CSVRowSource: struct {
 // The JSON event cursor behind `json_reader<T>`; the opening `[` is read on
 // the first pull and the closing `]` ends the stream.
 __JSONRowSource: struct {
-    parser: encoding_stream.JSONPull
+    parser: encoding_stream.JSONPull<FileReader>
     array_started: Bool
     array_done: Bool
     row: Int
@@ -1790,7 +1790,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
 // reader's allocation budget, and a failure stays latched.
 json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
-    parser := encoding_stream.json_reader(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
+    parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
     state: Shared{__JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
     source: Shared{__StreamSource<T>{

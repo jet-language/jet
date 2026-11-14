@@ -12,8 +12,9 @@
 // `parse`, `first`, and `count_rows` operate on text the caller already holds.
 // `parse` splits eagerly: it materializes every record before it returns, and
 // one bad record fails the whole call with no records. The bounded `reader`
-// consumes a `files.FileReader.move()` incrementally: it holds one buffer and one
-// record, yields the records before a bad one, and its first error is sticky.
+// consumes any byte source (`files.FileReader.move()`, a socket, any `Reader`)
+// incrementally: it holds one buffer and one record, yields the records before
+// a bad one, and its first error is sticky.
 // 
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
@@ -23,7 +24,7 @@ use {
     core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
     json: core.encoding.json
     stream: __core_encoding_stream
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
 }
 
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
@@ -39,19 +40,19 @@ writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) 
     Ok(JSONLWriter{output: output.move()})
 }
 
-/// A bounded pull reader over a consumed file: one nonblank record per `next()`.
-/// The source pull engine owns framing, limits and sticky errors.
-reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLReader EncodingError! {
-    source: stream.jsonl_reader(input, limits, false) ?? {
+/// A bounded pull reader over a consumed byte source: one nonblank record per
+/// `next()`. The source pull engine owns framing, limits and sticky errors.
+reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLReader<R> EncodingError! {
+    source: stream.jsonl_reader<R>(input, limits, false) ?? {
         error := err
         error.format = .JSONL
         return Err(error)
     }
-    Ok(JSONLReader{input: source.move()})
+    Ok(JSONLReader<R>{input: source.move()})
 }
 
-JSONLReader: struct {
-    input: stream.JSONLinesPull
+JSONLReader: struct<R: Reader> {
+    input: stream.JSONLinesPull<R>
 
     next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! { self.input.next() }
 }

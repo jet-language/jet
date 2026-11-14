@@ -1,0 +1,84 @@
+// json.reader and jsonl.reader take any Prelude `Reader`, not only a
+// FileReader. `Chunks` hands out a few bytes per read, so tokens and records
+// cross read boundaries; `Reset` fails every read, and its IOError reaches
+// the reader's EncodingError as the cause, keeping its kind and OS code.
+use {
+    encoding: core.encoding
+    json: core.encoding.json
+    jsonl: core.encoding.jsonl
+}
+
+Chunks: struct {
+    data: [U8]
+    at: Int
+    step: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            out := [U8]{}
+            _: self.read_into(out, limit) ?? return Err(err)
+            Ok(out)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            count := 0
+            loop count < limit && count < self.step && self.at < self.data.len() {
+                buffer.push(self.data[self.at])
+                self.at += 1
+                count += 1
+            }
+            Ok(count)
+        }
+    }
+}
+
+Reset: struct {
+    peer: String
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+    }
+}
+
+event_name: fn(event: encoding.DataEvent) -> String {
+    if event == {
+        .Null -> "null"
+        .Bool(value) -> "bool:{value}"
+        .Int(value) -> "int:{value}"
+        .Float(value) -> "float:{value}"
+        .Number(text) -> "number:{text}"
+        .Text(text) -> "text:{text}"
+        .Bytes(bytes) -> "bytes:{bytes.len()}"
+        .ArrayStart -> "["
+        .ArrayEnd -> "]"
+        .ObjectStart -> "{{"
+        .Key(key) -> "key:{key}"
+        .ObjectEnd -> "}}"
+    }
+}
+
+run: fn() (EncodingError | IOError)! {
+    events: Chunks{data: "{{\"a\": [1, true], \"b\": \"xy\"}}".bytes(), at: 0, step: 3}
+    reader: json.reader(events) ?? return
+    loop event in reader -> print(event_name(event))
+    rows: Chunks{data: "{{\"n\":1}}\n\n[2,3]\r\n".bytes(), at: 0, step: 2}
+    lines: jsonl.reader(rows) ?? return
+    loop row in lines -> print("row {json.to_string(row) ?? return}")
+    broken := json.reader(Reset{peer: "socket"}) ?? return
+    if broken.next() == {
+        .Ok(_) -> print("read past a failed source")
+        .Err(error) -> {
+            print("io {error.kind == .IO}")
+            if error.cause() == {
+                .Val(cause) -> print("cause {cause.kind} {cause.os_code ?? 0} {cause.message}")
+                None -> print("no cause")
+            }
+        }
+    }
+}

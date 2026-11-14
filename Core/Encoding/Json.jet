@@ -35,7 +35,7 @@
 use {
     core: core
     core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, __DecodeSource, __Decoding]
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
@@ -218,24 +218,25 @@ stringify: fn<T: Encode>(value: T, indent: Int{0}) -> String Never! {
     String.from_bytes_lossy(out)
 }
 
-/// A bounded pull reader over a consumed file. The source pull engine owns
-/// framing, limits and sticky errors; text already in memory uses `parse` and
-/// `events`. A repeated key in one object is a
-/// sticky `Syntax` error.
-reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
-    source: stream.json_reader(input, limits, false) ?? return Err(err)
-    Ok(JSONReader{input: source.move()})
+/// A bounded pull reader over a consumed byte source: a
+/// `files.FileReader.move()`, a socket, or any other `Reader`. The source
+/// pull engine owns framing, limits and sticky errors; text already in memory
+/// uses `parse` and `events`. A repeated key in one object is a sticky
+/// `Syntax` error.
+reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
+    source: stream.json_reader<R>(input, limits, false) ?? return Err(err)
+    Ok(JSONReader<R>{input: source.move()})
 }
 
-/// The duplicate-permitting file reader reports each key occurrence as its
-/// own `Key` event.
-reader_allow_duplicates: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
-    source: stream.json_reader(input, limits, true) ?? return Err(err)
-    Ok(JSONReader{input: source.move()})
+/// The duplicate-permitting reader reports each key occurrence as its own
+/// `Key` event.
+reader_allow_duplicates: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
+    source: stream.json_reader<R>(input, limits, true) ?? return Err(err)
+    Ok(JSONReader<R>{input: source.move()})
 }
 
-JSONReader: struct {
-    input: stream.JSONPull
+JSONReader: struct<R: Reader> {
+    input: stream.JSONPull<R>
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }

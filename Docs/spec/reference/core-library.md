@@ -4041,9 +4041,9 @@ becomes a nested ordered object, and the keys keep the order written. A
 | `json.at<T>(tree, path)` | `T ![FieldError]` | Read the value at a `/`-separated path (`"receipts/3/metrics/p50"`, pointer escapes, an optional leading `/`) as `T` by typed decode: `at<String>`, `at<Int>`, `at<[Dyn]>`, `at<[String]>`. Each `FieldError` carries the path read (a list element appends `[i]`) and names the missing step or the expected and actual types: ``at `metrics/name`: expected Int, found text "cold"``. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
+| `json.reader<R: Reader>(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader<R> !EncodingError` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
 | `json.writer(output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
-| `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `JSONReader<R>.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
@@ -4066,8 +4066,9 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(input, limits)` / `jsonl.writer(output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
-| `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
+| `jsonl.reader<R: Reader>(input, limits)` | `JSONLReader<R> !EncodingError` | Construct a bounded line stream over any byte source. |
+| `jsonl.writer(output, limits)` | `JSONLWriter !EncodingError` | Construct a bounded file-backed line writer. |
+| `JSONLReader<R>.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
 ### `core.encoding.csv` — comma-separated rows

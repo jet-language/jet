@@ -1519,10 +1519,8 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     if !reader && member != "writer" -> return None
     file_type := if reader -> Type.Named{name: "FileReader"} else -> Type.Named{name: "FileWriter"}
     handle_type := if {
-        module_name == "core.encoding.json" && reader -> "JSONReader"
-        module_name == "core.encoding.json" -> "JSONWriter"
-        module_name == "core.encoding.jsonl" && reader -> "JSONLReader"
-        module_name == "core.encoding.jsonl" -> "JSONLWriter"
+        module_name == "core.encoding.json" && !reader -> "JSONWriter"
+        module_name == "core.encoding.jsonl" && !reader -> "JSONLWriter"
         module_name == "core.encoding.csv" && reader -> "CSVReader"
         module_name == "core.encoding.csv" -> "CSVWriter"
         module_name == "core.encoding.cbor" && reader -> "CBORReader"
@@ -1579,10 +1577,14 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     Val(params)
 }
 
+// The FileReader/FileWriter-bound codec constructors. JSON and JSONL readers
+// are generic over `R: Reader` (D-CORE-FILE-ADAPTERS1=A) and check as
+// ordinary Core source calls.
 sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if module_name != "core.encoding.json" && module_name != "core.encoding.jsonl" && module_name != "core.encoding.csv" && module_name != "core.encoding.cbor" && module_name != "core.encoding.xml" -> return None
     if member != "reader" && member != "writer" -> return None
+    if member == "reader" && (module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") -> return None
     if !sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, diagnostics) {
         sema_data_check_discarded_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         return Val(SemaDirectSpecialCheck{handled: true, value: None})
@@ -1613,9 +1615,7 @@ sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: 
         types.push(ty)
     }
     handle_type := if {
-        module_name == "core.encoding.json" && member == "reader" -> "JSONReader"
         module_name == "core.encoding.json" -> "JSONWriter"
-        module_name == "core.encoding.jsonl" && member == "reader" -> "JSONLReader"
         module_name == "core.encoding.jsonl" -> "JSONLWriter"
         module_name == "core.encoding.csv" && member == "reader" -> "CSVReader"
         module_name == "core.encoding.csv" -> "CSVWriter"

@@ -5,7 +5,7 @@
 use {
     core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
     encoding: core.encoding
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     mem: core.mem
     math: core.math
     rt: jet.runtime.encoding
@@ -129,6 +129,88 @@ io_error: fn(offset: Int, line: Int, column: Int, cause: EncodingCause) -> Encod
     error
 }
 
+// A Reader's IOError as the cause a stream failure carries. An OS error keeps
+// its code and the std::io::ErrorKind name Linux gives it; any other keeps
+// its variant name.
+io_cause: fn(error: IOError) -> EncodingCause Never! {
+    context: if error == {
+        .InvalidInput(value) -> Val(value)
+        .NotFound(value) -> Val(value)
+        .PermissionDenied(value) -> Val(value)
+        .TimedOut(value) -> Val(value)
+        .Cancelled(value) -> Val(value)
+        .Closed(value) -> Val(value)
+        .Protocol(value) -> Val(value)
+        .Other(value) -> Val(value)
+        .AlreadyExists(value) -> Val(value)
+        .Unsupported(value) -> Val(value)
+        .ResourceLimit(_) -> None
+    }
+    code: if context == .Val(value) -> value.os_code else -> None
+    kind: if code == .Val(errno) -> errno_kind(errno) else -> if error == {
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        .PermissionDenied(_) -> "PermissionDenied"
+        .TimedOut(_) -> "TimedOut"
+        .Cancelled(_) -> "Interrupted"
+        .Closed(_) -> "BrokenPipe"
+        .Protocol(_) -> "InvalidData"
+        .Other(_) -> "Other"
+        .AlreadyExists(_) -> "AlreadyExists"
+        .Unsupported(_) -> "Unsupported"
+        .ResourceLimit(_) -> "OutOfMemory"
+    }
+    message: if context == .Val(value) -> value.cause ?? "{error}" else -> "{error}"
+    EncodingCause{kind: kind, os_code: code, message: message}
+}
+
+// format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux (the
+// Rust 1.97 sys::decode_error_kind table).
+errno_kind: fn(code: Int) -> String Never! {
+    if code == {
+        1 -> "PermissionDenied"
+        13 -> "PermissionDenied"
+        2 -> "NotFound"
+        4 -> "Interrupted"
+        7 -> "ArgumentListTooLong"
+        11 -> "WouldBlock"
+        12 -> "OutOfMemory"
+        16 -> "ResourceBusy"
+        17 -> "AlreadyExists"
+        18 -> "CrossesDevices"
+        20 -> "NotADirectory"
+        21 -> "IsADirectory"
+        22 -> "InvalidInput"
+        26 -> "ExecutableFileBusy"
+        27 -> "FileTooLarge"
+        28 -> "StorageFull"
+        29 -> "NotSeekable"
+        30 -> "ReadOnlyFilesystem"
+        31 -> "TooManyLinks"
+        32 -> "BrokenPipe"
+        35 -> "Deadlock"
+        36 -> "InvalidFilename"
+        38 -> "Unsupported"
+        95 -> "Unsupported"
+        39 -> "DirectoryNotEmpty"
+        40 -> "FilesystemLoop"
+        98 -> "AddrInUse"
+        99 -> "AddrNotAvailable"
+        100 -> "NetworkDown"
+        101 -> "NetworkUnreachable"
+        103 -> "ConnectionAborted"
+        104 -> "ConnectionReset"
+        107 -> "NotConnected"
+        110 -> "TimedOut"
+        111 -> "ConnectionRefused"
+        113 -> "HostUnreachable"
+        115 -> "InProgress"
+        116 -> "StaleNetworkFileHandle"
+        122 -> "QuotaExceeded"
+        else -> "Uncategorized"
+    }
+}
+
 // Size-compatible frame slots use machine integers, not exact Int carriers.
 ReadFrame: enum {
     ArrayValueOrEnd(first: Bool, index: U64)
@@ -138,8 +220,8 @@ ReadFrame: enum {
     ObjectCommaOrEnd
 }
 
-JSONPull: struct {
-    input: FileReader
+JSONPull: struct<R: Reader> {
+    input: R
     limits: EncodingLimits
     total: Int
     offset: Int
@@ -239,7 +321,12 @@ JSONPull: struct {
             if mem.__list_capacity<U8>(self.buffer) == 0 && !reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) -> return Err(self.item_error("read buffer"))
             self.buffer.clear()
             self.buffered = 0
-            count: rt.read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? return Err(io_error(self.offset, self.line, self.column, err))
+            // A Reader may grow the buffer past its reserve (FileReader keeps
+            // its error words there); the growth is charged like any other.
+            capacity: mem.__list_capacity<U8>(self.buffer)
+            count: self.input.read_into(self.buffer, self.limits.buffer_bytes) ?? return Err(io_error(self.offset, self.line, self.column, io_cause(err)))
+            grown: mem.__list_capacity<U8>(self.buffer) - capacity
+            if grown > 0 && !self.allocation.charge(grown) -> return Err(self.item_error("read buffer"))
             if count == 0 -> return Ok(None)
         }
         Ok(Val(self.buffer[self.buffered]))
@@ -733,7 +820,7 @@ JSONPull: struct {
                     item: child
                     if item == .ArrayEnd -> return Ok(Dyn.Array(values))
                     value: self.fold(item, heap)
-                    fold_reserve<Dyn>(self, values, heap)
+                    fold_reserve<Dyn, R>(self, values, heap)
                     values.push(value)
                 }
             }
@@ -753,7 +840,7 @@ JSONPull: struct {
                         first: self.next()
                         if first == None -> return Err(self.error(.Truncated, "object key has no value"))
                         value: self.fold(first, heap)
-                        fold_reserve<(key: String, value: Dyn)>(self, entries, heap)
+                        fold_reserve<(key: String, value: Dyn), R>(self, entries, heap)
                         entries.push((key: owned_key, value: value))
                     } else { return Err(self.error(.State, "expected an object key")) }
                 }
@@ -763,7 +850,7 @@ JSONPull: struct {
     }
 }
 
-fold_reserve: fn<T>(parser: &JSONPull, values: &[T], heap: &FoldBudget) EncodingError! {
+fold_reserve: fn<T, R: Reader>(parser: &JSONPull<R>, values: &[T], heap: &FoldBudget) EncodingError! {
     old: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     additional: if values.len() == mem.__list_capacity<T>(values) -> if values.len() == 0 -> 1 else -> values.len() else -> 0
     if additional == 0 -> return
@@ -774,9 +861,9 @@ fold_reserve: fn<T>(parser: &JSONPull, values: &[T], heap: &FoldBudget) Encoding
     heap.tracked += mem.__list_capacity<T>(values) * mem.__type_size<T>() - old
 }
 
-json_reader: fn(input: &&FileReader, limits: EncodingLimits, allow_duplicates: Bool) -> JSONPull EncodingError! {
+json_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, allow_duplicates: Bool) -> JSONPull<R> EncodingError! {
     validate_limits(limits)
-    Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, buffer: [U8]{}, buffered: 0, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_starts: [Int]{}})
+    Ok(JSONPull<R>{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, buffer: [U8]{}, buffered: 0, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_starts: [Int]{}})
 }
 
 valid_number: fn(bytes: [U8]) -> Bool Never! {
@@ -1744,8 +1831,8 @@ wire_float: fn(value: Float) -> String Never! {
     ascii_text(bytes)
 }
 
-JSONLinesPull: struct {
-    parser: JSONPull
+JSONLinesPull: struct<R: Reader> {
+    parser: JSONPull<R>
     record_index: Int
     terminal: EncodingError?
 
@@ -1806,12 +1893,12 @@ JSONLinesPull: struct {
     }
 }
 
-jsonl_reader: fn(input: &&FileReader, limits: EncodingLimits, typed_numbers: Bool) -> JSONLinesPull EncodingError! {
+jsonl_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, typed_numbers: Bool) -> JSONLinesPull<R> EncodingError! {
     // The record fold rejects a repeated key itself while building each record.
-    parser := json_reader(input, limits, true) ?? return Err(err)
+    parser := json_reader<R>(input, limits, true) ?? return Err(err)
     parser.record_mode = true
     parser.typed_numbers = typed_numbers
-    Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})
+    Ok(JSONLinesPull<R>{parser: parser, record_index: 0, terminal: None})
 }
 
 write_tree: fn(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {

@@ -208,7 +208,7 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool{value: false}),
             core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool{value: false}),
         })
-        core_sig_one_of(module_name, [String]{"core.encoding.json", "core.encoding.jsonl", "core.encoding.cbor"}) && member == "reader" -> Val([CoreCallParameterContract]{
+        module_name == "core.encoding.cbor" && member == "reader" -> Val([CoreCallParameterContract]{
             core_param_required("source"), core_param_optional("limits", ParamZone.Either, limits),
         })
         module_name == "core.encoding.xml" && member == "reader" -> Val([CoreCallParameterContract]{
