@@ -6824,8 +6824,20 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         }
     }
     // A fresh carrier hands a present payload over (ir_box_take) and is
-    // dropped once the fallback has run.
-    owned_subject: b.fresh[subject] && (ir_box_row(m, b.f.slot_type[subject]) || ir_option_inline(m, b.f.slot_type[subject]))
+    // dropped once the fallback has run. So is the Option of
+    // `held.move() ?? fallback` when the variable owns it on every path
+    // here: the variable gives it up to the `??`. A lent payload would share
+    // its buffers with a box the variable keeps until its scope ends, so the
+    // result's first write to each buffer would copy it. An absent Option
+    // holds nothing, so a fallback that leaves (`?? return`) strands no
+    // value; a Result's error would be, so a Result keeps the lend.
+    carrier_row: b.f.slot_type[subject]
+    takes_payload: ir_box_row(m, carrier_row) || ir_option_inline(m, carrier_row)
+    if b.moving == subject && !is_result && takes_payload && ir_movable_binding(b, subject) {
+        ir_disown(b, subject)
+        b.fresh[subject] = true
+    }
+    owned_subject: b.fresh[subject] && takes_payload
     test: if is_result -> ir_result_is_ok(m, b, subject) else -> ir_option_is_some(m, b, subject)
     // Each path starts from the ownership before the `??`: a variable the
     // fallback moves (`x ?? return keep(owner.move())`) still owns its value
