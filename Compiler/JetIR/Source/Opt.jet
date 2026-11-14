@@ -49,7 +49,7 @@
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
 
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, NameRows, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_set, name_rows_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -224,7 +224,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     }
     ir_opt_dump(m, names, "before", report)
     // Before IR Lint reads the signatures: a return slot is a parameter.
-    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m)
+    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(m, threads)
     // IR Lint reads every callee's signature while the bodies are out.
     lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     entry_lint := if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
@@ -260,7 +260,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
         ir_opt_unview(m, view)
         ir_opt_unrows(functions, bodies)
     }
-    if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, functions, options, entry_lint, report)
+    if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, functions, options, entry_lint, threads, report)
     if level >= 1 && ir_opt_enabled(options, "reduce") {
         reduced: ir_opt_reduce_module(m, functions, report)
         if options.verify && reduced.len() > 0 {
@@ -278,7 +278,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
             loop id in split -> _ := ir_opt_lint(m, entry_lint, functions[id], "split", report)
         }
     }
-    if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions)
+    if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions, threads)
     if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
     ir_opt_dump(m, names, "after", report)
@@ -354,7 +354,7 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
         part -= 1
     }
     slots.reverse()
-    shared: Shared{IROptFactsView{views: [IRModule]{view.move()}, options: options.copy()}}
+    shared: Shared{IROptFactsView{views: [IRModule]{view.move()}, options: options.copy(), versions: false}}
     _: ir_opt_fact_finders(slots, shared, 0) ?? panic("the IR facts threads failed")
     loop slot in slots {
         held := slot.guard_edit()
@@ -366,18 +366,21 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
     compiler_transfer_rows<IRFunction>(m.functions, functions)
 }
 
-// The functions of one thread of ir_opt_module_facts, in order, and the
-// report of their facts.
+// The functions of one thread of ir_opt_module_facts or
+// ir_opt_version_entries, in order, and the report of their passes.
 IROptFactsPart: struct {
     functions: [IRFunction]
     report: IROptReport
 }
 
 // What every thread of ir_opt_module_facts reads: the module's view
-// (ir_opt_view), in a list of one, and the options.
+// (ir_opt_view), in a list of one, and the options; for
+// ir_opt_version_entries (`versions`), the module's lent rows (ir_opt_lend)
+// instead of the view.
 IROptFactsView: struct {
     views: [IRModule]
     options: IROptOptions
+    versions: Bool
 }
 
 // Runs a facts thread per slot from `at`; returns the facts they rewrote.
@@ -395,21 +398,105 @@ ir_opt_fact_finders: fn(slots: [Shared<IROptFactsPart>], shared: Shared<IROptFac
 ir_opt_facts_part: fn(slot: Shared<IROptFactsPart>, shared: Shared<IROptFactsView>) -> Int {
     reads: shared.guard_read()
     held := slot.guard_edit()
+    if reads.value.versions {
+        lint: ir_lint_context_none()
+        loop id in 0..<held.value.functions.len() -> ir_opt_version_body(reads.value.views[0], held.value.functions[id], reads.value.options, lint, held.value.report)
+        return held.value.report.int_facts
+    }
     loop id in 0..<held.value.functions.len() -> _ := ir_opt_ssa_facts(reads.value.views[0], held.value.functions[id], reads.value.options, held.value.report)
     held.value.report.int_facts
 }
 
 // The entry form of versioning (OptVersion.jet) over the final bodies, and
 // each body it copied through the SSA round trip again, for the inline Int
-// facts the copy is there to give.
-ir_opt_version_entries: fn(m: IRModule, functions: &[IRFunction], options: IROptOptions, lint: IRLintContext, report: &IROptReport) Never! {
-    loop id in 0..<functions.len() {
-        if functions[id].cold || !ir_range_wanted(m, functions[id]) || ir_opt_version_entry(m, functions[id]) == 0 -> next
-        if options.verify && !ir_opt_lint(m, lint, functions[id], "version", report) -> next
-        before: report.lint.len()
-        ir_opt_ssa(m, functions[id], options, report)
-        if options.verify && report.lint.len() == before -> _ := ir_opt_lint(m, lint, functions[id], "ssa", report)
+// facts the copy is there to give. A body's copy reads only its own
+// instructions and the module's rows, which the threads read lent
+// (ir_opt_lend), so the functions split into consecutive parts
+// (compiler_threads_partition by size), one thread each, joined in part
+// order: every body and the report are the same for any thread count. IR
+// Lint (`options.verify`) reads the whole module, so it keeps them on the
+// calling thread.
+ir_opt_version_entries: fn(m: &IRModule, functions: &[IRFunction], options: IROptOptions, lint: IRLintContext, threads: CompilerThreads, report: &IROptReport) Never! {
+    weights := [Int]{}
+    total := 0
+    loop f in functions {
+        weights.push(1 + f.op.len())
+        total += 1 + f.op.len()
     }
+    count: functions.len()
+    workers: if options.verify -> 1 else -> compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop id in 0..<count -> ir_opt_version_body(m, functions[id], options, lint, report)
+        return
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    // Parts leave the list last-first: part `workers - 1` pops first.
+    slots := [Shared<IROptFactsPart>]{}
+    part := workers - 1
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        loop functions.len() > bounds[part] {
+            row: functions.pop() ?? panic("the IR optimizer lost a function to versioning")
+            rows.push(row)
+        }
+        rows.reverse()
+        slots.push(Shared{IROptFactsPart{functions: rows.move(), report: ir_opt_report(options.level)}})
+        part -= 1
+    }
+    slots.reverse()
+    lent: ir_opt_lend(m)
+    shared: Shared{IROptFactsView{views: [IRModule]{lent.move()}, options: options.copy(), versions: true}}
+    _: ir_opt_fact_finders(slots, shared, 0) ?? panic("the IR versioning threads failed")
+    loop slot in slots {
+        held := slot.guard_edit()
+        functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
+        ir_opt_report_add(report, held.value.report)
+    }
+    held := shared.guard_edit()
+    ir_opt_lend_into(m, held.value.views[0])
+}
+
+// One body's entry versioning and SSA round trip (ir_opt_version_entries).
+ir_opt_version_body: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintContext, report: &IROptReport) Never! {
+    if f.cold || !ir_range_wanted(m, f) || ir_opt_version_entry(m, f) == 0 -> return
+    if options.verify && !ir_opt_lint(m, lint, f, "version", report) -> return
+    before: report.lint.len()
+    ir_opt_ssa(m, f, options, report)
+    if options.verify && report.lint.len() == before -> _ := ir_opt_lint(m, lint, f, "ssa", report)
+}
+
+// The rows of `m` the passes after the bodies read besides the bodies (the
+// types, type keys, data, names, the name, function and type rows, and the
+// entry), moved into a module of their own that threads share: each reads
+// exactly what `m` holds. ir_opt_lend_into(m, lent) moves them back.
+ir_opt_lend: fn(m: &IRModule) -> IRModule Never! {
+    lent := ir_module_new()
+    ir_opt_lend_into(lent, m)
+    lent
+}
+
+ir_opt_lend_into: fn(to: &IRModule, from: &IRModule) Never! {
+    compiler_transfer_rows<IRType>(to.types, from.types)
+    compiler_transfer_rows<String>(to.type_keys, from.type_keys)
+    compiler_transfer_rows<[U8]>(to.data, from.data)
+    compiler_transfer_rows<String>(to.names, from.names)
+    ir_opt_lend_rows(to.name_rows, from.name_rows)
+    ir_opt_lend_rows(to.function_rows, from.function_rows)
+    ir_opt_lend_rows(to.type_rows, from.type_rows)
+    to.entry = from.entry
+}
+
+// Name rows moved whole from `from` into `to`, replacing what `to` held.
+ir_opt_lend_rows: fn(to: &NameRows, from: &NameRows) Never! {
+    to.texts.clear()
+    to.hashes.clear()
+    to.rows.clear()
+    to.slots.clear()
+    compiler_transfer_rows<String>(to.texts, from.texts)
+    compiler_transfer_rows<Int>(to.hashes, from.hashes)
+    compiler_transfer_rows<Int>(to.rows, from.rows)
+    compiler_transfer_rows<Int>(to.slots, from.slots)
+    to.mask = from.mask
 }
 
 // Cold functions (O2): the generated typed-CLI parser (`__jet_cli_parse`,
@@ -987,13 +1074,12 @@ ir_opt_caller_edges: fn(count: Int, callee_start: [Int], callees: [Int], caller_
 // recursive, how many direct call sites each has, and the options; per
 // function its body in a cell of its own (taken out while its passes run,
 // final once it is done), its final ir_opt_inline_cost (-1 until it is
-// done) and how many of the callees it waits for are not done; the edges
-// both ways; and `ring`, the functions in the order they became ready (-1 at a
-// position not yet published), with `head` the next position a thread
-// claims and `tail` the next one a finished function publishes into. A
-// thread changes only the atomics and the cells of the functions it claims.
-// `marked[g]` is function g's IRFunction.inline_always. `lint` is IR
-// Lint's view of the module (empty unless the options verify).
+// done), how many of the callees it waits for are not done, and its rank
+// (IROptQueue); the edges both ways; and the ready queue with the Condition
+// its waiting threads park on. A thread changes only the atomics, the
+// queue and the cells of the functions it claims. `marked[g]` is function
+// g's IRFunction.inline_always. `lint` is IR Lint's view of the module
+// (empty unless the options verify).
 IROptGraph: struct {
     views: [IRModule]
     keys: [String]
@@ -1005,13 +1091,13 @@ IROptGraph: struct {
     cells: [Shared<IROptCell>]
     sizes: [IROptCount]
     pending: [IROptCount]
+    ranks: [Int]
     callee_start: [Int]
     callees: [Int]
     caller_start: [Int]
     callers: [Int]
-    ring: [IROptCount]
-    head: Atomic<Int>
-    tail: Atomic<Int>
+    queue: Shared<IROptQueue>
+    changed: Condition
 }
 
 IROptCell: struct {
@@ -1022,56 +1108,70 @@ IROptCount: struct {
     value: Atomic<Int>
 }
 
-// Checks of a waiting thread (ir_opt_ready) with no function published in
-// between, after which it stops waiting: about a second, far longer than a
-// function's passes, so only a run whose thread stopped (a panic) gets here.
-IR_OPT_STALL_CHECKS: 1073741824
+// The functions ready to claim, a binary heap with the highest rank on top
+// (ir_opt_heap_before): a function's rank is the weight of the longest
+// chain of callers that wait for it, its own included, so the threads
+// start the work that still has the most to run one function after another
+// first. `claimed` counts the functions claimed of `count`; `failed` says a
+// thread stopped (a panic) before every function was claimed. A thread
+// with nothing to claim waits on the queue's Condition (it does not spin).
+IROptQueue: struct {
+    heap: [Int]
+    claimed: Int
+    count: Int
+    failed: Bool
+}
 
 // The module's functions on `workers` threads in dependency order: a
 // function becomes ready once every callee it waits for
-// (ir_opt_callee_edges) is done, and the threads claim the ready functions
-// in the order they became ready (the first ones heaviest first), so a
-// function runs while unrelated ones still do and no thread waits for a
-// whole call depth to finish. A function's passes read only its own body
-// and copies of the final bodies of the callees it may inline, so every body
-// is the one the single-threaded bottom-up walk produces, for any thread
-// count. What a stalled run left runs on the calling thread afterward, in
-// bottom-up order.
+// (ir_opt_callee_edges) is done, and the threads claim the ready function
+// with the longest chain still behind it (IROptQueue), so a function runs
+// while unrelated ones still do, no thread waits for a whole call depth to
+// finish, and the longest chain of callers starts as early as it can. A
+// function's passes read only its own body and copies of the final bodies
+// of the callees it may inline, so every body is the one the
+// single-threaded bottom-up walk produces, for any thread count and claim
+// order.
 ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], order: OptOrder, sites: &&[Int], calls: OptCalls, weights: [Int], options: IROptOptions, lint: &&IRLintContext, workers: Int, report: &IROptReport) {
+    count: functions.len()
     callee_start := [Int]{}
     callees := [Int]{}
     ir_opt_callee_edges(calls, order.recursive, callee_start, callees)
     caller_start := [Int]{}
     callers := [Int]{}
-    ir_opt_caller_edges(functions.len(), callee_start, callees, caller_start, callers)
-    ready := [Int]{}
-    ready_weights := [Int]{}
+    ir_opt_caller_edges(count, callee_start, callees, caller_start, callers)
+    // Callers come after their callees bottom-up, so walking the order back
+    // finds every caller's rank before its callees need it.
+    ranks := [Int]{}
+    loop id in 0..<count -> ranks.push(weights[id])
+    loop at in 0..<order.order.len() {
+        id: order.order[order.order.len() - 1 - at]
+        longest := 0
+        loop k in caller_start[id]..<caller_start[id + 1] {
+            if ranks[callers[k]] > longest -> longest = ranks[callers[k]]
+        }
+        ranks[id] = weights[id] + longest
+    }
+    heap := [Int]{}
     pending := [IROptCount]{}
     sizes := [IROptCount]{}
-    loop id in 0..<functions.len() {
+    loop id in 0..<count {
         waits: callee_start[id + 1] - callee_start[id]
         pending.push(IROptCount{value: waits})
         sizes.push(IROptCount{value: -1})
-        if waits == 0 {
-            ready.push(id)
-            ready_weights.push(weights[id])
-        }
+        if waits == 0 -> ir_opt_heap_push(heap, ranks, id)
     }
-    ring := [IROptCount]{}
-    loop at in compiler_threads_heaviest_first(ready_weights) -> ring.push(IROptCount{value: ready[at]})
-    published: ring.len()
-    loop ring.len() < functions.len() -> ring.push(IROptCount{value: -1})
     marked := [Bool]{}
     loop f in functions -> marked.push(f.inline_always)
     cells := [Shared<IROptCell>]{}
     loop functions.len() > 0 {
-        body := functions.pop() ?? { break }
+        body: functions.pop() ?? { break }
         cells.push(Shared{IROptCell{body: [IRFunction]{body.move()}}})
     }
     cells.reverse()
-    view := ir_opt_view(m, keys)
-    graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), marked: marked.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), ring: ring.move(), head: 0, tail: published}}
-    parts := ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
+    view: ir_opt_view(m, keys)
+    graph: Shared{IROptGraph{views: [IRModule]{view.move()}, keys: keys.move(), recursive: order.recursive.copy(), sites: sites.move(), marked: marked.move(), options: options.copy(), lint: lint.move(), cells: cells.move(), sizes: sizes.move(), pending: pending.move(), ranks: ranks.move(), callee_start: callee_start.move(), callees: callees.move(), caller_start: caller_start.move(), callers: callers.move(), queue: Shared{IROptQueue{heap: heap.move(), claimed: 0, count: count, failed: false}}, changed: Condition.new()}}
+    parts: ir_opt_schedulers(graph, workers) ?? panic("the IR optimizing threads failed")
     loop part in parts -> ir_opt_report_add(report, part)
     held := graph.guard_edit()
     bodies := [[IRFunction]]{}
@@ -1079,11 +1179,6 @@ ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], o
         own := cell.guard_edit()
         bodies.push(compiler_take_rows<IRFunction>(own.value.body))
     }
-    left := [Int]{}
-    loop id in order.order {
-        if held.value.sizes[id].value.load() < 0 -> left.push(id)
-    }
-    if left.len() > 0 -> ir_opt_serial(held.value.views[0], bodies, held.value.keys, held.value.recursive, held.value.sites, held.value.options, held.value.lint, left, report)
     ir_opt_unview(m, held.value.views[0])
     ir_opt_unrows(functions, bodies)
 }
@@ -1095,7 +1190,7 @@ ir_opt_schedulers: fn(graph: Shared<IROptGraph>, tasks: Int) -> [IROptReport] {
     task.group ir_opt_threads {
         head: task ir_opt_scheduled_thread(graph)
         parts = ir_opt_schedulers(graph, tasks - 1)
-        part := head.join() ?? ir_opt_stopped(err)
+        part: head.join() ?? ir_opt_stopped(err)
         parts.push(part)
     }
     parts
@@ -1106,22 +1201,23 @@ ir_opt_stopped: fn(failure: TaskFailure) -> IROptReport Never! {
     panic(compiler_threads_failure_text(failure))
 }
 
-// One thread: claims the next ring position until none is left, waits for
-// its function, optimizes it against copies of the final bodies of the
-// callees it may inline (`callees[g]`, one row while it runs, else empty),
-// publishes its size and body, and publishes each function it was the last
-// pending callee of.
+// One thread: claims the ready function of the highest rank until every
+// function is claimed, optimizes it against copies of the final bodies of
+// the callees it may inline (`callees[g]`, one row while it runs, else
+// empty), publishes its size and body, and readies each function it was
+// the last pending callee of. A thread that stops early marks the queue
+// failed, so the others stop waiting for what it held.
 ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
     reads: graph.guard_read()
+    defer { _ := ir_opt_abandon(reads.value.queue, reads.value.changed) ?? false }
     report := ir_opt_report(0)
     count: reads.value.cells.len()
     once: reads.value.options.level >= 2 && ir_opt_enabled(reads.value.options, "once")
     callees := [[IRFunction]]{}
     loop _ in 0..<count -> callees.push([IRFunction]{})
+    ready := [Int]{}
     loop {
-        rank: reads.value.head.add(1)
-        if rank >= count -> break
-        id: ir_opt_ready(reads.value, rank)
+        id: ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
         if id < 0 -> break
         first: reads.value.callee_start[id]
         last: reads.value.callee_start[id + 1]
@@ -1129,37 +1225,91 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
             callee: reads.value.callees[k]
             if reads.value.sizes[callee].value.load() <= ir_opt_inline_reach(reads.value.sites, callee, once, reads.value.options.level, reads.value.options.inline, reads.value.marked[callee]) -> callees[callee].push(ir_opt_cell_copy(reads.value.cells[callee]))
         }
-        body := ir_opt_cell_take(reads.value.cells[id])
-        optimized := ir_opt_function(reads.value.views[0], callees, reads.value.keys, body, reads.value.recursive, reads.value.sites, reads.value.options, reads.value.lint, report)
+        body: ir_opt_cell_take(reads.value.cells[id])
+        optimized: ir_opt_function(reads.value.views[0], callees, reads.value.keys, body, reads.value.recursive, reads.value.sites, reads.value.options, reads.value.lint, report)
         size: ir_opt_inline_cost(reads.value.views[0], optimized)
         ir_opt_cell_put(reads.value.cells[id], optimized)
         loop k in first..<last -> callees[reads.value.callees[k]] = [IRFunction]{}
         reads.value.sizes[id].value.store(size)
         loop k in reads.value.caller_start[id]..<reads.value.caller_start[id + 1] {
             caller: reads.value.callers[k]
-            if reads.value.pending[caller].value.add(-1) == 1 -> reads.value.ring[reads.value.tail.add(1)].value.store(caller)
+            if reads.value.pending[caller].value.add(-1) == 1 -> ready.push(caller)
         }
+        ir_opt_ready(reads.value.queue, reads.value.changed, reads.value.ranks, ready)
     }
     report
 }
 
-// The function published at ring position `rank`, once one is; -1 when
-// none was published anywhere for IR_OPT_STALL_CHECKS checks in a row.
-ir_opt_ready: fn(graph: IROptGraph, rank: Int) -> Int {
-    seen := graph.tail.load()
-    idle := 0
-    loop {
-        id: graph.ring[rank].value.load()
-        if id >= 0 -> return id
-        now: graph.tail.load()
-        if now != seen {
-            seen = now
-            idle = 0
-        } else {
-            idle += 1
-            if idle >= IR_OPT_STALL_CHECKS -> return -1
-        }
+// The ready function of the highest rank, claimed; waits while none is
+// ready and some are unclaimed. -1 once every function is claimed or a
+// thread stopped.
+ir_opt_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int]) -> Int {
+    held := queue.guard_edit()
+    held.wait(changed, fn(value) { value.heap.len() > 0 || value.claimed == value.count || value.failed }) ?? return -1
+    if held.value.failed || held.value.heap.len() == 0 -> return -1
+    id: ir_opt_heap_pop(held.value.heap, ranks)
+    held.value.claimed += 1
+    // The threads still waiting have nothing left to claim.
+    if held.value.claimed == held.value.count -> changed.notify_all()
+    id
+}
+
+// Puts the functions in `ready` on the queue (emptying it) and wakes a
+// waiting thread for each.
+ir_opt_ready: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int], ready: &[Int]) {
+    if ready.len() == 0 -> return
+    held := queue.guard_edit()
+    loop id in ready -> ir_opt_heap_push(held.value.heap, ranks, id)
+    if ready.len() == 1 -> changed.notify_one() else -> changed.notify_all()
+    ready.clear()
+}
+
+// A thread's exit: when functions remain unclaimed it stopped early, so the
+// queue fails and every waiting thread wakes to stop too.
+ir_opt_abandon: fn(queue: Shared<IROptQueue>, changed: Condition) -> Bool {
+    held := queue.guard_edit()
+    if held.value.claimed < held.value.count -> held.value.failed = true
+    changed.notify_all()
+    true
+}
+
+// Whether ready function `a` is claimed before `b`: the higher rank first,
+// then the lower function.
+ir_opt_heap_before: fn(ranks: [Int], a: Int, b: Int) -> Bool Never! {
+    ranks[a] > ranks[b] || (ranks[a] == ranks[b] && a < b)
+}
+
+ir_opt_heap_push: fn(heap: &[Int], ranks: [Int], id: Int) Never! {
+    heap.push(id)
+    at := heap.len() - 1
+    loop at > 0 {
+        parent: (at - 1) /% 2
+        if !ir_opt_heap_before(ranks, heap[at], heap[parent]) -> break
+        moved: heap[parent]
+        heap[parent] = heap[at]
+        heap[at] = moved
+        at = parent
     }
+}
+
+ir_opt_heap_pop: fn(heap: &[Int], ranks: [Int]) -> Int Never! {
+    top: heap[0]
+    last: heap.pop() ?? panic("the IR optimizer claimed from an empty queue")
+    if heap.len() == 0 -> return top
+    heap[0] = last
+    at := 0
+    loop {
+        left: 2 * at + 1
+        if left >= heap.len() -> break
+        best := left
+        if left + 1 < heap.len() && ir_opt_heap_before(ranks, heap[left + 1], heap[left]) -> best = left + 1
+        if !ir_opt_heap_before(ranks, heap[best], heap[at]) -> break
+        moved: heap[best]
+        heap[best] = heap[at]
+        heap[at] = moved
+        at = best
+    }
+    top
 }
 
 ir_opt_cell_take: fn(cell: Shared<IROptCell>) -> IRFunction {
