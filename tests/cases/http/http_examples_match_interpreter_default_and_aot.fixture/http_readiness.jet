@@ -13,7 +13,7 @@ run: fn() (Closed | NetError | RangeError | TaskFailure)! {
     // written value can't be shared across the task boundary.
     server: task {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-        sender.send(listener.local_addr() ?? panic("address"))
+        sender.send(listener.local_addr() ?? panic("address")) ?? panic("send")
         stream: listener.accept(deadline: budget) ?? panic("accept")
         _request: stream.read_text(8192, deadline: budget) ?? panic("request")
         response: [U8]{

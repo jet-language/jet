@@ -26,7 +26,7 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
     { sender: done_send, receiver: done }: channel<String>()
     t: task {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-        sender.send(listener.local_addr() ?? panic("address"))
+        sender.send(listener.local_addr() ?? panic("address")) ?? panic("send")
         answer(listener, "HTTP/1.1 200 OK\r\nContent-Length: 11", "hello world")
         answer(listener, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked", "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
         answer(listener, "HTTP/1.1 200 OK\r\nConnection: close", "to the end")
@@ -61,7 +61,7 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
     loop piece in half.body().chunks(5) {
         raw: piece ?? panic("half piece")
         seen.push(String.from_bytes(raw) ?? "?")
-        if seen.len() == 1 -> go_send.send("go")
+        if seen.len() == 1 -> go_send.send("go") ?? panic("send")
     }
     print("half: {seen.join("|")}")
     stalled: http_client.request("GET", "http://{addr}/stalled").read_timeout(300).send() ?? panic("stalled")
@@ -74,6 +74,6 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
             }
         }
     }
-    done_send.send("done")
+    done_send.send("done") ?? panic("send")
     t.join() ?? panic("server")
 }

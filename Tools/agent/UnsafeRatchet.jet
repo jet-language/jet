@@ -789,7 +789,7 @@ blank_literals: fn(source: [U8]) -> [U8] {
 // past ASCII stands in as U+0001 so match offsets are byte offsets.
 raw_hits: fn(code: [U8]) -> [RawHit] {
     ascii := [U8]{}
-    loop byte in code -> ascii.push(if Int{byte} < 128 -> byte else -> U8{1})
+    loop byte in code -> ascii.push(if byte < 128 -> byte else -> U8{1})
     text: String.from_bytes_lossy(ascii)
     hits := [RawHit]{}
     if text.contains(".*") {

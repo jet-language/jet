@@ -1,6 +1,6 @@
 # A runtime binding only the running program can answer is run-time only
 # (RUNTIME_ONLY_READS), whatever its row: the SIMD width of the CPU, the UI
-# provider's state, the live registry cell, the running task's identity and
+# provider's state, the active World's store cells, the running task's identity and
 # the platform family. No build computes one in the compiler's own process. A
 # module value that reaches any of them is a build error (E0643) naming the
 # read; the same reads as local values run when the program does, on every
@@ -19,7 +19,7 @@ stderr: ~ "reads the UI host provider's live state" # and the run-time read it r
 step live: jet check live.jet
 exit: 1
 stderr: ~ "`STATS` can't be computed while building" # naming the value
-stderr: ~ "reads the live registry cell every request shares" # and the run-time read it reaches
+stderr: ~ "reads the active World's store cells" # and the run-time read it reaches
 step task: jet check task.jet
 exit: 1
 stderr: ~ "`ID` can't be computed while building" # naming the value

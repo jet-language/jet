@@ -28,7 +28,7 @@ run: fn() (Closed | NetError | TaskFailure)! {
     { sender, receiver: ch }: channel<String>()
     t: task {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-        sender.send(listener.local_addr() ?? panic("address"))
+        sender.send(listener.local_addr() ?? panic("address")) ?? panic("send")
         first: listener.accept() ?? panic("accept")
         _: first.read_text(8192) ?? panic("request")
         net.tcp_reply(first, "200 OK", "inside") ?? panic("reply")
