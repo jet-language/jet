@@ -2,7 +2,7 @@
 use {
     jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
     jet_cli.[
-        JetCLIFix, JetCLIFixSkip, JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes,
+        JetCLIFix, JetCLIFixFile, JetCLIFixSkip, JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes,
         jet_cli_fix_checked, jet_cli_fix_errors, jet_cli_fix_log, jet_cli_fix_rewrite,
         jet_cli_transaction_relative, jet_cli_undo_source_changes,
     ]
@@ -68,17 +68,18 @@ JetCLITransactionFixtureRoot: struct {
     file: "{root}/run.jet"
     source: "run: fn() {{\n    value: 1\n    print(value)\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
-    baseline: jet_cli_fix_errors(file, source)
+    baseline: jet_cli_fix_errors(file, source, [JetCLIFixFile]{}, [String?]{})
     assert(baseline.len() == 0)
     literal: "run: fn() {{\n    value: ".len()
     use_site: "run: fn() {{\n    value: 1\n    print(".len()
     keep: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
     breaks: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
     rejected := [JetCLIFixSkip]{}
-    checked: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, rejected)
+    refused := [JetCLIFixSkip]{}
+    checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{keep, breaks}, baseline, rejected, refused)
     assert(checked.source == "run: fn() {{\n    value: 2\n    print(value)\n}}\n")
     assert(checked.applied == 1)
-    assert(rejected.len() == 1)
+    assert(rejected.len() == 1 && refused.len() == 0)
     assert(rejected[0].title == "rename the use" && rejected[0].reason.starts_with("the edited file no longer checks: "))
     changes: [JetCLISourceChange]{{path: file, before: source.bytes(), after: checked.source.bytes()}}
     log: String.from_bytes(jet_cli_fix_log(root, "recheck", changes, [JetCLISemOp]{}, rejected)) ?? panic("fix log is UTF-8")

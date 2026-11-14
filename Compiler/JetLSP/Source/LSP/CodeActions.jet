@@ -19,9 +19,12 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
         if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
     }
     actions := [String]{}
-    loop fix in lsp_fixes_from_diagnostics(diagnostics) {
+    fixes := lsp_fixes_from_diagnostics(diagnostics.move())
+    loop fix in fixes.move() {
         preferred: fix.applicability == DiagnosticFixApplicability.Safe
-        actions.push(lsp_action_json(view, fix.title, "quickfix", [TextEdit]{fix.edit}, preferred: preferred))
+        whole := [TextEdit]{fix.edit.move()}
+        whole.extend(fix.edits.move())
+        actions.push(lsp_action_json(view, fix.title, "quickfix", whole, preferred: preferred))
     }
     if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
     if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, preferred: false))

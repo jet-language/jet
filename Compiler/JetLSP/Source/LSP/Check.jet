@@ -62,19 +62,29 @@ LSPChecker: trait {
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.
+// `edits` are the primary fix's other edits, applied with it.
 LSPFix: struct {
     title: String
     edit: TextEdit
     applicability: DiagnosticFixApplicability
     safety: DiagnosticFixSafety
+    edits: [TextEdit]{[TextEdit]{}}
 }
 
-lsp_fixes_from_diagnostics: fn(diagnostics: [Diagnostic]) -> [LSPFix] Never! {
+// A fix whose edits reach another file than the diagnostic's own, or that
+// sema left pending, is no code action: an action edits the one document.
+lsp_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic]) -> [LSPFix] Never! {
     fixes := [LSPFix]{}
-    loop diagnostic in diagnostics {
+    loop diagnostic in diagnostics.move() {
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
-        if diagnostic.edit == .Val(edit) -> fixes.push(LSPFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
+        if diagnostic.fix_calls == None && lsp_fix_in_document(diagnostic) {
+            if diagnostic.edit.move() == .Val(edit) {
+                own := [TextEdit]{}
+                loop other in diagnostic.fix_edits.move() -> own.push(lsp_fix_unnamed(other.move()))
+                fixes.push(LSPFix{title: diagnostic.fix, edit: lsp_fix_unnamed(edit.move()), applicability: applicability, safety: safety, edits: own.move()})
+            }
+        }
         if diagnostic.structured == .Val(structured) {
             if structured == .SuggestedEdits(alternatives) {
                 loop edit in alternatives -> fixes.push(LSPFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
@@ -82,6 +92,28 @@ lsp_fixes_from_diagnostics: fn(diagnostics: [Diagnostic]) -> [LSPFix] Never! {
         }
     }
     fixes
+}
+
+// Whether every edit of the diagnostic's fix is of its own file.
+lsp_fix_in_document: fn(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.edit == .Val(edit) {
+        if !lsp_fix_names_origin(diagnostic, edit) -> return false
+    }
+    loop other in diagnostic.fix_edits {
+        if !lsp_fix_names_origin(diagnostic, other) -> return false
+    }
+    true
+}
+
+lsp_fix_names_origin: fn(diagnostic: Diagnostic, edit: TextEdit) -> Bool Never! {
+    named: edit.path ?? return true
+    origin: diagnostic.origin ?? return false
+    named == origin.path
+}
+
+// `edit` as an edit of the document, without the path it names.
+lsp_fix_unnamed: fn(edit: &&TextEdit) -> TextEdit Never! {
+    TextEdit{span: edit.span, new_text: edit.new_text.move()}
 }
 
 // The checked module at `path` (a file path), when exactly one matches.

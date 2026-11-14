@@ -1,20 +1,52 @@
 // The Rust original fix projections shared by CLI fixes and code actions.
-use {
-    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
-    jet_driver.[jet_driver_apply_edits]
-}
+use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
 
+// `edits` are the fix's other edits, applied with `edit` all together or
+// not at all. An edit names the file it changes by TextEdit.path until
+// jet_cli_fix_resolve takes the path into `jet fix`'s file table; then
+// `file` is the row of the file `edit` changes and `files` the row of each of
+// `edits`, -1 being the fixed file.
 JetCLIFix: struct {
     title: String
     edit: TextEdit
     applicability: DiagnosticFixApplicability
     safety: DiagnosticFixSafety
+    edits: [TextEdit]{[TextEdit]{}}
+    file: Int{-1}
+    files: [Int]{[Int]{}}
 }
 
+// A row of `jet fix`'s file table, a file other than the fixed one that
+// fixes change: its text before `jet fix`, None when it can't be read, and
+// its text with the fixes so far, None while they leave it unchanged.
+JetCLIFixFile: struct {
+    path: String
+    before: String?
+    source: String?
+}
+
+// `texts`: by row of the file table, a file's text with the applied fixes,
+// None where they change nothing. `refused`: the fixes none of whose edits
+// apply, and why.
 JetCLIFixApply: struct {
     source: String
     applied: Int
     deferred: Int
+    texts: [String?]{[String?]{}}
+    refused: [JetCLIFixRefusal]{[JetCLIFixRefusal]{}}
+}
+
+// Fix `fix` of the applied fixes, refused whole for `reason`.
+JetCLIFixRefusal: struct {
+    fix: Int
+    reason: String
+}
+
+// One edit of fix `fix` in a list of fixes: its `edit` when `at` is -1, else
+// its `edits[at]`.
+JetCLIFixEditRef: struct {
+    fix: Int
+    at: Int
 }
 
 // A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
@@ -26,22 +58,18 @@ JetCLIFixSkip: struct {
     reason: String
 }
 
-// `jet fix` applies a diagnostic's primary edit; its alternative edits are
-// the other choices an editor offers as code actions.
-jet_cli_fixes_from_diagnostics: fn(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
+// `jet fix` applies a diagnostic's primary edit with the edits beside it;
+// its alternative edits are the other choices an editor offers as code
+// actions. A fix sema left pending is no fix.
+jet_cli_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic]) -> [JetCLIFix] Never! {
     fixes := [JetCLIFix]{}
-    loop diagnostic in diagnostics {
+    loop diagnostic in diagnostics.move() {
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
-        if diagnostic.edit == .Val(edit) {
-            fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
-        }
+        if diagnostic.fix_calls != None -> next
+        edit := diagnostic.edit.move() ?? next
+        fixes.push(JetCLIFix{title: diagnostic.fix.move(), edit: edit.move(), applicability: applicability, safety: safety, edits: diagnostic.fix_edits.move()})
     }
-    fixes
-}
-
-jet_cli_collect_fixes_from_diagnostics: fn(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] Never! {
-    fixes := jet_cli_fixes_from_diagnostics(diagnostics)
     fixes
 }
 
@@ -55,9 +83,22 @@ jet_cli_safe_fixes: fn(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
     selected
 }
 
-jet_cli_fix_apply_non_overlapping: fn(source: String, fixes: [JetCLIFix]) -> JetCLIFixApply Never! {
+// Every fix of `fixes`, by index.
+jet_cli_fix_all: fn(fixes: [JetCLIFix]) -> [Int] Never! {
+    all := [Int]{}
+    loop index in 0..<fixes.len() -> all.push(index)
+    all
+}
+
+// Applies the fixes of `fixes` at `chosen` to `source`, the fixed file, and
+// to `files`, the file table, in order of their first edit, each fix whole
+// or not at all: one with an edit that overlaps an edit kept so far waits
+// for the next round (`deferred`), and one whose own edits overlap each
+// other, or that edits a file that can't be read, is refused. An edit equal
+// to a kept one applies once.
+jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], chosen: [Int]) -> JetCLIFixApply Never! {
     order := [Int]{}
-    loop index in 0..<fixes.len() -> order.push(index)
+    loop index in chosen -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -87,27 +128,166 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, fixes: [JetCLIFix]) -> Jet
         order = merged
         width *= 2
     }
-    kept := [TextEdit]{}
+    kept := [JetCLIFixEditRef]{}
+    applied := 0
     deferred := 0
-    previous := TextEdit?{None}
+    refused := [JetCLIFixRefusal]{}
     loop index in order {
-        edit: fixes[index].edit
-        if previous == .Val(last) {
-            if last.span.start == edit.span.start && last.span.end == edit.span.end && last.new_text == edit.new_text {
-                next
-            }
+        unusable := jet_cli_fix_unusable(fixes, index, files)
+        if unusable.move() == .Val(why) {
+            refused.push(JetCLIFixRefusal{fix: index, reason: why.move()})
+            next
         }
-        previous = Val(edit)
-        if kept.len() > 0 && edit.span.start < kept[kept.len() - 1].span.end {
+        fresh := [JetCLIFixEditRef]{}
+        clash := false
+        loop at in -1..<fixes[index].edits.len() {
+            edit := JetCLIFixEditRef{fix: index, at: at}
+            if jet_cli_fix_edit_kept(fixes, kept, edit) -> next
+            loop other in kept {
+                if jet_cli_fix_edits_overlap(fixes, other, edit) -> clash = true
+            }
+            fresh.push(edit.move())
+        }
+        if clash {
             deferred += 1
             next
         }
-        kept.push(edit.copy())
+        if fresh.len() == 0 -> next
+        kept.extend(fresh.move())
+        applied += 1
     }
-    applied: kept.len()
-    updated: if jet_driver_apply_edits(source, kept) == {
-        .Ok(text) -> text
-        .Err(_) -> source
+    texts := [String?]{}
+    loop row in 0..<files.len() {
+        if files[row].source == .Val(current) {
+            texts.push(jet_cli_fix_edited_file(current, fixes, kept, row))
+        } else if files[row].before == .Val(original) {
+            texts.push(jet_cli_fix_edited_file(original, fixes, kept, row))
+        } else { texts.push(None) }
     }
-    JetCLIFixApply{source: updated, applied: applied, deferred: deferred}
+    JetCLIFixApply{source: jet_cli_fix_edited(source, fixes, kept, -1), applied: applied, deferred: deferred, texts: texts.move(), refused: refused.move()}
+}
+
+// Why the edits of fix `index` can't apply at all: two of them overlap, or
+// one edits a file of `files` that can't be read.
+jet_cli_fix_unusable: fn(fixes: [JetCLIFix], index: Int, files: [JetCLIFixFile]) -> String? Never! {
+    count: fixes[index].edits.len()
+    loop first in -1..<count {
+        edit: JetCLIFixEditRef{fix: index, at: first}
+        row: jet_cli_fix_edit_row(fixes, edit)
+        if row >= 0 && files[row].before == None {
+            return Val("it edits `{files[row].path}`, which `jet fix` can't read")
+        }
+        loop second in (first + 1)..<count {
+            if jet_cli_fix_edits_overlap(fixes, edit, JetCLIFixEditRef{fix: index, at: second}) {
+                return Val("its edits overlap each other")
+            }
+        }
+    }
+    None
+}
+
+// The text of the file at `row` of the file table with its kept edits
+// applied, None when none edits it.
+jet_cli_fix_edited_file: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef], row: Int) -> String? Never! {
+    loop edit in kept {
+        if jet_cli_fix_edit_row(fixes, edit) == row {
+            return Val(jet_cli_fix_edited(text, fixes, kept, row))
+        }
+    }
+    None
+}
+
+// `text` with the kept edits of the file at `row` applied as
+// jet_driver_apply_edits does: original UTF-8 spans, insertions at one point
+// in the order kept.
+jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef], row: Int) -> String Never! {
+    mine := [JetCLIFixEditRef]{}
+    loop edit in kept {
+        if jet_cli_fix_edit_row(fixes, edit) != row -> next
+        at := mine.len()
+        mine.push(JetCLIFixEditRef{fix: edit.fix, at: edit.at})
+        loop at > 0 && jet_cli_fix_edit_before(fixes, mine[at], mine[at - 1]) {
+            later := JetCLIFixEditRef{fix: mine[at - 1].fix, at: mine[at - 1].at}
+            mine[at - 1] = JetCLIFixEditRef{fix: mine[at].fix, at: mine[at].at}
+            mine[at] = later.move()
+            at -= 1
+        }
+    }
+    bytes: text.bytes()
+    out := [U8]{}
+    cursor := 0
+    loop edit in mine {
+        span: jet_cli_fix_edit_span(fixes, edit)
+        start: if span.start < bytes.len() -> span.start else -> bytes.len()
+        bounded_end: if span.end < bytes.len() -> span.end else -> bytes.len()
+        end: if bounded_end > start -> bounded_end else -> start
+        if start < bytes.len() && (Int{bytes[start]}.bit_and(192)) == 128 {
+            panic("edit spans must be UTF-8 character boundaries")
+        }
+        if end < bytes.len() && (Int{bytes[end]}.bit_and(192)) == 128 {
+            panic("edit spans must be UTF-8 character boundaries")
+        }
+        loop position in cursor..<start -> out.push(bytes[position])
+        if edit.at < 0 {
+            loop byte in fixes[edit.fix].edit.new_text.bytes() -> out.push(byte)
+        } else {
+            loop byte in fixes[edit.fix].edits[edit.at].new_text.bytes() -> out.push(byte)
+        }
+        cursor = end
+    }
+    loop position in cursor..<bytes.len() -> out.push(bytes[position])
+    String.from_bytes(out) ?? panic("edit spans must be UTF-8 character boundaries")
+}
+
+// The row of the file `edit` changes; -1 for the fixed file.
+jet_cli_fix_edit_row: fn(fixes: [JetCLIFix], edit: JetCLIFixEditRef) -> Int Never! {
+    if edit.at < 0 -> return fixes[edit.fix].file
+    if edit.at < fixes[edit.fix].files.len() -> fixes[edit.fix].files[edit.at] else -> -1
+}
+
+jet_cli_fix_edit_span: fn(fixes: [JetCLIFix], edit: JetCLIFixEditRef) -> Span Never! {
+    if edit.at < 0 {
+        return Span{start: fixes[edit.fix].edit.span.start, end: fixes[edit.fix].edit.span.end}
+    }
+    Span{start: fixes[edit.fix].edits[edit.at].span.start, end: fixes[edit.fix].edits[edit.at].span.end}
+}
+
+// Whether `a` applies before `b` in one file: it starts first, or ends first
+// at one start.
+jet_cli_fix_edit_before: fn(fixes: [JetCLIFix], a: JetCLIFixEditRef, b: JetCLIFixEditRef) -> Bool Never! {
+    first: jet_cli_fix_edit_span(fixes, a)
+    second: jet_cli_fix_edit_span(fixes, b)
+    first.start < second.start || (first.start == second.start && first.end < second.end)
+}
+
+jet_cli_fix_edit_kept: fn(fixes: [JetCLIFix], kept: [JetCLIFixEditRef], edit: JetCLIFixEditRef) -> Bool Never! {
+    loop other in kept {
+        if jet_cli_fix_edits_equal(fixes, other, edit) -> return true
+    }
+    false
+}
+
+jet_cli_fix_edits_equal: fn(fixes: [JetCLIFix], a: JetCLIFixEditRef, b: JetCLIFixEditRef) -> Bool Never! {
+    if jet_cli_fix_edit_row(fixes, a) != jet_cli_fix_edit_row(fixes, b) || jet_cli_fix_edit_span(fixes, a) != jet_cli_fix_edit_span(fixes, b) {
+        return false
+    }
+    if a.at < 0 {
+        if b.at < 0 -> return fixes[a.fix].edit.new_text == fixes[b.fix].edit.new_text
+        return fixes[a.fix].edit.new_text == fixes[b.fix].edits[b.at].new_text
+    }
+    if b.at < 0 -> return fixes[a.fix].edits[a.at].new_text == fixes[b.fix].edit.new_text
+    fixes[a.fix].edits[a.at].new_text == fixes[b.fix].edits[b.at].new_text
+}
+
+// Whether `a` and `b` edit the same file where one would change the other's
+// text: taken in order of start, the wider first at one start, the second
+// starts before the first ends. Insertions at one point don't overlap.
+jet_cli_fix_edits_overlap: fn(fixes: [JetCLIFix], a: JetCLIFixEditRef, b: JetCLIFixEditRef) -> Bool Never! {
+    if jet_cli_fix_edit_row(fixes, a) != jet_cli_fix_edit_row(fixes, b) -> return false
+    first: jet_cli_fix_edit_span(fixes, a)
+    second: jet_cli_fix_edit_span(fixes, b)
+    if first.start < second.start || (first.start == second.start && first.end >= second.end) {
+        return second.start < first.end
+    }
+    first.start < second.end
 }

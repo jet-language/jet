@@ -355,7 +355,9 @@ jet_cli_fix_name: fn(stem: String) -> String Never! {
     sanitized
 }
 
-jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?, skipped: [JetCLIFixSkip]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
+// `others`: the other files the fix changes, committed with `file` in the
+// one transaction.
+jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?, skipped: [JetCLIFixSkip], others: &&[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
     path: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()
@@ -394,7 +396,11 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [
     }
     operations := if semantic_ops == .Val(provided) -> provided else -> jet_cli_fix_semantic_ops(path, before, staged)
     if operations.len() == 0 -> operations = jet_cli_fix_rewrite(before, staged)
-    changes: [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
+    changes := [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
+    loop other in others.move() {
+        other_path: cli_files.realpath(other.path) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{other.path}`: {jet_cli_io_error_text(err)}"))
+        changes.push(JetCLISourceChange{path: other_path, before: other.before.move(), after: other.after.move()})
+    }
     log: jet_cli_fix_log(root, name, changes, operations, skipped)
     jet_cli_transaction_commit_locked(project, journal, changes, "{name}.log.json", log)
 }

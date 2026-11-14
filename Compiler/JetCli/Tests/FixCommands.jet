@@ -2,7 +2,7 @@
 use {
     jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
     jet_cli.[
-        JetCLIFix, jet_cli_fix_apply_non_overlapping,
+        JetCLIFix, JetCLIFixFile, jet_cli_fix_all, jet_cli_fix_apply_non_overlapping,
         jet_cli_safe_fixes, jet_cli_semantic_rename_ops,
     ]
     jet_semindex.[SemDefinitionFact]
@@ -22,16 +22,57 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
     changing: cli_fix_fixture_edit(2, 3, "A", .Safe, .APIChanging)
     selected: jet_cli_safe_fixes([JetCLIFix]{safe, suggested, changing})
     if selected.len() != 1 || selected[0].edit.new_text != "S" -> panic("unattended edits require both safe applicability and safe class")
-    edited: jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{safe, safe, suggested})
+    none: [JetCLIFixFile]{}
+    duplicated: [JetCLIFix]{safe, safe, suggested}
+    edited: jet_cli_fix_apply_non_overlapping("abc", none, duplicated, jet_cli_fix_all(duplicated))
     if edited.source != "SRc" || edited.applied != 2 || edited.deferred != 0 -> panic("duplicate exact edits apply once")
     outer: cli_fix_fixture_edit(0, 3, "X", .Safe, .BehaviorPreserving)
-    nested: jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{safe, outer})
+    wide: [JetCLIFix]{safe, outer}
+    nested: jet_cli_fix_apply_non_overlapping("abc", none, wide, jet_cli_fix_all(wide))
     if nested.source != "X" || nested.applied != 1 || nested.deferred != 1 -> panic("widest same-start edit wins; nested edit is deferred")
     insert_a: cli_fix_fixture_edit(1, 1, "A", .Safe, .Formatting)
     insert_b: cli_fix_fixture_edit(1, 1, "B", .Safe, .Formatting)
-    inserted: jet_cli_fix_apply_non_overlapping("π", [JetCLIFix]{cli_fix_fixture_edit(0, 0, "A", .Safe, .Formatting), cli_fix_fixture_edit(0, 0, "B", .Safe, .Formatting)})
+    points: [JetCLIFix]{cli_fix_fixture_edit(0, 0, "A", .Safe, .Formatting), cli_fix_fixture_edit(0, 0, "B", .Safe, .Formatting)}
+    inserted: jet_cli_fix_apply_non_overlapping("π", none, points, jet_cli_fix_all(points))
     if inserted.source != "ABπ" || inserted.applied != 2 -> panic("same-point insertions are stable and UTF-8 exact")
-    if jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{insert_a, insert_b}).source != "aABbc" -> panic("insertion order")
+    inserts: [JetCLIFix]{insert_a, insert_b}
+    if jet_cli_fix_apply_non_overlapping("abc", none, inserts, jet_cli_fix_all(inserts)).source != "aABbc" -> panic("insertion order")
+    // Only the chosen fixes apply.
+    if jet_cli_fix_apply_non_overlapping("abc", none, inserts, [Int]{1}).source != "aBbc" -> panic("chosen fixes alone apply")
+
+    // One fix's edits across two files apply together. Row 0 of the file
+    // table is a file read before, row 1 one that can't be read.
+    other: [JetCLIFixFile]{JetCLIFixFile{path: "/fixture/other.jet", before: Val("xyz"), source: None}, JetCLIFixFile{path: "/fixture/missing.jet", before: None, source: None}}
+    both := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    both.edits = [TextEdit]{TextEdit{span: Span{start: 2, end: 3}, new_text: "Q"}, TextEdit{span: Span{start: 1, end: 2}, new_text: "W"}}
+    both.files = [Int]{-1, 0}
+    spread_fixes: [JetCLIFix]{both}
+    spread: jet_cli_fix_apply_non_overlapping("abc", other, spread_fixes, jet_cli_fix_all(spread_fixes))
+    if spread.source != "SbQ" || spread.texts[0] != Val("xWz") || spread.texts[1] != None || spread.applied != 1 || spread.refused.len() != 0 -> panic("a fix's edits in two files apply together")
+    // A file the fixes so far changed is edited from that text.
+    moved: [JetCLIFixFile]{JetCLIFixFile{path: "/fixture/other.jet", before: Val("xyz"), source: Val("xyzw")}}
+    if jet_cli_fix_apply_non_overlapping("abc", moved, spread_fixes, jet_cli_fix_all(spread_fixes)).texts[0] != Val("xWzw") -> panic("edits apply to the text with the fixes so far")
+    // A fix whose own edits overlap is refused whole: no edit of it applies.
+    tangled := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    tangled.edits = [TextEdit]{TextEdit{span: Span{start: 1, end: 2}, new_text: "W"}, TextEdit{span: Span{start: 0, end: 3}, new_text: "V"}}
+    tangled.files = [Int]{0, 0}
+    tangled_fixes: [JetCLIFix]{tangled, cli_fix_fixture_edit(2, 3, "C", .Safe, .Formatting)}
+    refused: jet_cli_fix_apply_non_overlapping("abc", other, tangled_fixes, jet_cli_fix_all(tangled_fixes))
+    if refused.source != "abC" || refused.texts[0] != None || refused.applied != 1 || refused.refused.len() != 1 || refused.refused[0].fix != 0 || refused.refused[0].reason != "its edits overlap each other" -> panic("overlapping edits refuse the whole fix")
+    // A fix editing a file `jet fix` can't read is refused whole.
+    unread := cli_fix_fixture_edit(0, 1, "S", .Safe, .BehaviorPreserving)
+    unread.edits = [TextEdit]{TextEdit{span: Span{start: 0, end: 1}, new_text: "W"}}
+    unread.files = [Int]{1}
+    unread_fixes: [JetCLIFix]{unread}
+    missing: jet_cli_fix_apply_non_overlapping("abc", other, unread_fixes, jet_cli_fix_all(unread_fixes))
+    if missing.source != "abc" || missing.applied != 0 || missing.refused.len() != 1 || missing.refused[0].reason != "it edits `/fixture/missing.jet`, which `jet fix` can't read" -> panic("an unread file refuses the whole fix")
+    // A fix with one edit overlapping a kept fix's edit in the other file waits whole.
+    later := cli_fix_fixture_edit(3, 3, "C", .Safe, .Formatting)
+    later.edits = [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "K"}}
+    later.files = [Int]{0}
+    waiting: [JetCLIFix]{both, later}
+    waits: jet_cli_fix_apply_non_overlapping("abc", other, waiting, jet_cli_fix_all(waiting))
+    if waits.source != "SbQ" || waits.texts[0] != Val("xWz") || waits.applied != 1 || waits.deferred != 1 -> panic("a fix overlapping a kept edit in another file is deferred whole")
 
     old: cli_fix_fixture_fact("report", "sig1", "run.jet")
     renamed: cli_fix_fixture_fact("summarize", "sig1", "run.jet")
