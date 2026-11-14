@@ -4854,6 +4854,15 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
     loop member in members {
         runs: if frames.depth[member] > 0 -> depths else -> depths + 1
         walk.bytes[member] = sema_effect_stack_saturate(sema_effect_stack_times(runs, widest) + outside)
+        // The cycle's repeated calls, not the callee after them, make the
+        // bound: a member that calls a `#MaxDepth` function of the cycle
+        // shows that call as its next step, so the path names the depth.
+        loop target in frames.edges[member] {
+            if walk.part[target] == root && frames.depth[target] > 0 {
+                walk.next[member] = target
+                break
+            }
+        }
     }
 }
 

@@ -21,7 +21,7 @@ stdout: ~ "entry run" # the program entry
 stdout: ~ "stack: unbounded, recursion via run -> depth -> depth (add #MaxDepth(n))" # the cycle closes on depth
 step default: jet inspect memory recursive.jet
 exit: 0
-stdout: ~ "unbounded, recursion via " # the build's own level keeps the non-tail self call
+stdout: ~ "stack bound: unbounded, recursion through recursive.depth with no `#MaxDepth(n)` on its cycle" # sema's bound holds at every level; the optimizer may turn the self call into a loop
 step value: jet inspect memory --optimize=none through_value.jet
 exit: 0
 stdout: ~ "stack: unbounded, a call through a function value via run -> apply (seal its targets)" # apply calls the value it is given
