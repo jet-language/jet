@@ -856,8 +856,11 @@ sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: 
         return None
     }
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    // `__context_allocator` cannot fail (`Allocator Never!`): the read is its
+    // success value.
     returned: sema_call_signature_return(target.signature) ?? return None
-    read: sema_tree_node(returned, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    allocator: if returned == .Result(ok, _) -> ok.copy() else -> returned
+    read: sema_tree_node(allocator, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
     sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 
