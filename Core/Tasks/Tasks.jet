@@ -143,6 +143,47 @@ Semaphore: struct {
         true
     }
 
+    /// Takes a unit, waiting at most `limit` for one (sem_timedwait); false
+    /// when none came in time or the task is cancelled. A timer task marks
+    /// the wait expired under the count's guard, so the waiter can't miss it.
+    acquire_within: fn(self, limit: time.Duration) -[Time.Wait]> Bool Never! {
+        if self.try_acquire() -> return true
+        expired: Shared{false}
+        alarm: task self.expire(expired, limit)
+        taken: self.take_unless(expired)
+        alarm.cancel()
+        // A cancelled timer joins as a failure; either end is fine here.
+        if alarm.join() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        taken
+    }
+
+    // After `limit`, marks `expired` and wakes every waiter.
+    priv expire: fn(self, expired: Shared<Bool>, limit: time.Duration) Never! -[Time.Wait]> {
+        timeout(limit)
+        guard := self.count.guard_edit()
+        flag := expired.guard_edit()
+        flag.value = true
+        self.changed.notify_all()
+    }
+
+    // Takes a unit, waiting until one is free or `expired` is set.
+    priv take_unless: fn(self, expired: Shared<Bool>) -[Time.Wait]> Bool Never! {
+        guard := self.count.guard_edit()
+        guard.wait(self.changed, fn(units) { units > 0 || Semaphore.is_set(expired) }) ?? return false
+        if guard.value <= 0 -> return false
+        guard.value -= 1
+        true
+    }
+
+    // Whether the flag `expired` holds true.
+    priv is_set: fn(expired: Shared<Bool>) -> Bool Never! {
+        flag: expired.guard_read()
+        flag.value
+    }
+
     /// Returns a unit and wakes one waiting `acquire`.
     release: fn(self) Never! {
         guard := self.count.guard_edit()
@@ -355,6 +396,22 @@ spawn_name: fn(name: String) -> String Never! {
     units.release()
     assert_eq(units.value(), 2)
     assert_eq(Semaphore.new(-3).value(), 0)
+}
+
+#Test("a Semaphore's timed acquire gives up in time and takes a unit that comes") {
+    units: Semaphore.new(0)
+    assert(!units.acquire_within(20ms))
+    task.group helpers {
+        helper: task {
+            sleep(10)
+            units.release()
+        }
+        assert(units.acquire_within(10s))
+        helper.join() ?? panic("the releasing task failed")
+    }
+    assert_eq(units.value(), 0)
+    units.release()
+    assert(units.acquire_within(20ms))
 }
 
 #Test("a task's identity is stable and differs from another running task's") {

@@ -1387,6 +1387,17 @@ Fd: struct {
     // A second descriptor for the same open file, owned on its own.
     duplicate: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
 
+    // The foreground process group of the terminal the descriptor is open
+    // on. A descriptor that is no terminal fails (ENOTTY).
+    process_group: fn(self) -[Env]> Int IOError! { core.sys.__fd_process_group_raw(self.token) }
+
+    // Makes `group`, a process group of this terminal's session, the
+    // terminal's foreground group (job control: a shell hands it the
+    // terminal, then takes it back).
+    set_process_group: fn(self, group: Int(1..2147483647)) -[Env]> IOError! {
+        core.sys.__fd_set_process_group_raw(self.token, wrapping(group + 0))
+    }
+
     // At most `max` bytes, 1 B to 16 MiB, read from a pipe or socket once
     // it has some, waiting at most `timeout_ns` nanoseconds (negative: no
     // limit). Empty means the writer closed its end; a wait that runs out

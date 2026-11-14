@@ -2623,6 +2623,7 @@ handling its failure; only the end of an access is checked when it runs.
 | `open_pseudoterminal()` | `PseudoTerminal IOError! -[Env]>` | A new pseudoterminal, unlocked and with its secondary already open (`posix_openpt`, `unlockpt`, then the secondary). `PseudoTerminal` has `primary: Fd` (the end a terminal emulator or supervisor holds), `secondary: Fd` (the end a program sees as its terminal) and `path: String` (the secondary's `/dev/pts/N`, as `ptsname` names it). Neither end becomes the controlling terminal. |
 | `Fd.read(max: Int(1..16777216), timeout_ns)` | `[U8] IOError! -[Env]>` | At most `max` bytes from a pipe or socket once it has some, waiting at most `timeout_ns` nanoseconds (negative: no limit). Empty means the writer closed its end; a wait that runs out is `.TimedOut`. |
 | `Fd.write(bytes, timeout_ns)` | `Int IOError! -[Env]>` | Writes the first of `bytes`, at most 4096 (`PIPE_BUF`, which a pipe that polls writable takes whole), once there is room, waiting at most `timeout_ns`; gives the count written. A wait that runs out is `.TimedOut`, a closed reader `.Closed`. |
+| `Fd.process_group()` / `.set_process_group(group: Int(1..2147483647))` | `Int IOError! -[Env]>` / `IOError! -[Env]>` | The foreground process group of the terminal the descriptor is open on (`tcgetpgrp`; 0 when it has none), or make `group`, one of this session's process groups, that terminal's foreground group (`tcsetpgrp`). Both fail for a descriptor that is no terminal; reading a secondary, or setting either end, fails unless that terminal is this process's controlling terminal. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -4722,6 +4723,7 @@ sendability rules. The implementation is in
 | `Semaphore.new(count: Int) -> Semaphore` | semaphore | A counting semaphore holding `count` units (none when negative). |
 | `semaphore.acquire() -[Time.Wait]> Bool` | taken | Take a unit, waiting until one is free; `false` when the wait ends without one, as when the task is cancelled. |
 | `semaphore.try_acquire() -> Bool` | taken | Take a unit only when one is free. |
+| `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is cancelled. |
 | `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
 | `semaphore.value() -> Int` | units | The free units at the moment of the read. |
 
@@ -6013,6 +6015,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -[Env, FS.Read]> String` | text | Read the local host name: `$HOSTNAME`, else `/etc/hostname`. |
+| `interfaces() -[FS.Read]> [NetInterface]` | interfaces | The host's network interfaces (`name`, `index`) in index order, from `/sys/class/net`; empty where it is absent. |
 | `ip_addr(text: String) -> IPAddr NetError!` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
 | `socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetError!` | addresses | Every address the host names, in resolver order. |

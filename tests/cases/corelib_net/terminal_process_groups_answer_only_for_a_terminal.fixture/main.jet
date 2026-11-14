@@ -1,0 +1,25 @@
+// A fresh pseudoterminal's primary reports no foreground process group (0).
+// Its secondary is not this process's controlling terminal, a socket is no
+// terminal at all, and a terminal this process doesn't control refuses a
+// new foreground group: each of those fails.
+use sys: core.sys
+
+answer: fn(fd: sys.Fd) -> String {
+    if fd.process_group() == {
+        .Ok(group) -> "group {group}"
+        .Err(_) -> "refused"
+    }
+}
+
+run: fn() {
+    terminal: sys.open_pseudoterminal() ?? panic("pseudoterminal: {err}")
+    print(answer(terminal.primary))
+    print(answer(terminal.secondary))
+    ends: sys.open_socket_pair() ?? panic("socket pair: {err}")
+    print(answer(ends[0]))
+    own: Int(1..2147483647).from_int(sys.getpgrp()) ?? panic("process group out of range")
+    if terminal.primary.set_process_group(own) == {
+        .Ok(_) -> print("handed over")
+        .Err(_) -> print("refused")
+    }
+}

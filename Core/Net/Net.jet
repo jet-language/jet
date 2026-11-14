@@ -135,6 +135,37 @@ gethostname: fn() -[Env, FS.Read]> String Never! {
     core.text.trim(contents)
 }
 
+/// One network interface: its name and kernel index.
+NetInterface: struct {
+    name: String
+    index: Int
+}
+
+/// The host's network interfaces in index order (if_nameindex), read from
+/// /sys/class/net. A name's index, or an index's name, is a lookup in it.
+/// Empty where the host exposes no such directory.
+interfaces: fn() -[FS.Read]> [NetInterface] Never! {
+    entries: core.files.list_dir("/sys/class/net") ?? return [NetInterface]{}
+    found := [NetInterface]{}
+    loop entry in entries {
+        contents: core.files.read("{entry.path}/ifindex") ?? next
+        index: Int.parse(core.text.trim(contents)) ?? next
+        found.push(NetInterface{name: entry.name, index: index})
+    }
+    found.sort_by(fn(left: NetInterface, right: NetInterface) { left.index <=> right.index })
+    found
+}
+
+#Test("the host's interfaces come in index order and name the loopback") {
+    found: interfaces()
+    loop i in 1..<found.len() {
+        assert(found[i - 1].index < found[i].index)
+    }
+    if core.files.exists("/sys/class/net/lo") {
+        assert(found.any(fn(item: NetInterface) { item.name == "lo" && item.index > 0 }))
+    }
+}
+
 ip_addr: fn(text: String) -> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     bytes: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
