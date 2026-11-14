@@ -1255,15 +1255,24 @@ sema_type_resolve_declared: fn(graph: SemaRegistrationGraph, ty: Type, caller_mo
 }
 
 // Whether `name` is `<alias>.Ptr` for an import of core.mem in the caller
-// module of row `caller`: `mem.Ptr<T>` names the raw pointer `*T`.
+// module of row `caller`: `mem.Ptr<T>` names the raw pointer `*T`, whether
+// the import is `use mem: core.mem` or `use core.mem`.
 sema_type_core_pointer_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Bool Never! {
     if caller < 0 -> return false
     qualified: name.split_once(".") ?? return false
     if qualified.after != "Ptr" -> return false
     loop import in graph.modules[caller].imports {
-        if import.declaration.alias != qualified.before || sema_registration_file_import_taken_over(graph.modules[caller], import) -> next
-        target: sema_registration_module_index(graph, import.target_module_identity) ?? return false
-        return graph.modules[target].module_name == "core.mem"
+        if sema_registration_file_import_taken_over(graph.modules[caller], import) -> next
+        if import.declaration.alias == qualified.before {
+            target: sema_registration_module_index(graph, import.target_module_identity) ?? return false
+            return graph.modules[target].module_name == "core.mem"
+        }
+        // `use core.mem` binds the submodule by its last segment, `mem`.
+        loop binding in import.bindings {
+            if binding.local != qualified.before || binding.symbol.kind != SymbolKind.Import -> next
+            target: binding.target_module_index ?? return false
+            return graph.modules[target].module_name == "core.mem"
+        }
     }
     false
 }
