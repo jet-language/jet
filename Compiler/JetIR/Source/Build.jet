@@ -3870,19 +3870,20 @@ ir_checked_element: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, ind
         stride: ir_list_stride(m, row)
         return ir_element_address(m, b, data, native, stride)
     }
-    ir_checked_address(m, b, list, native, row)
+    ir_checked_address(m, p, b, list, native, row, span)
 }
 
 // The address of element `native` (a native word) of the list at `list`,
 // after the bounds check the builder's mode keeps (IRBuilder.bounds): Fatal
-// stops at a failed check, Report reports it and goes on, Off has none.
-ir_checked_address: fn(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: Int) -> Int Never! {
+// stops at a failed check (the stop's caret under `span`), Report reports it
+// and goes on, Off has none.
+ir_checked_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, native: Int, row: Int, span: Span) -> Int Never! {
     if b.bounds != .Off {
         length: ir_list_length(m, b, list)
         bad: ir_index_order(m, b, IROp.Ge, native, length)
         ir_open_if(b.f, bad, b.line)
         if b.bounds == .Report -> ir_list_bounds_report(m, b, length, native) else {
-            ir_list_bounds_stop(m, b, length, native)
+            ir_list_bounds_stop(m, p, b, length, native, span)
         }
         ir_end(b.f, b.line)
     }

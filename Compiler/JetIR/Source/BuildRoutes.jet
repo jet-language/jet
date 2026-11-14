@@ -86,22 +86,102 @@ ir_list_counted: fn(m: &IRModule, b: &IRBuilder, list: Int, length: Int) Never! 
 }
 
 // The List bounds stop for `index` outside 0..<length (0...length when
-// `inclusive`).
-ir_list_bounds: fn(m: &IRModule, b: &IRBuilder, index: Int, length: Int, inclusive: Bool) Never! {
+// `inclusive`), its caret under `span`.
+ir_list_bounds: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, index: Int, length: Int, inclusive: Bool, span: Span) Never! {
     bad: ir_index_order(m, b, if inclusive -> IROp.Gt else -> IROp.Ge, index, length)
     ir_open_if(b.f, bad, b.line)
-    ir_list_bounds_stop(m, b, length, index)
+    ir_list_bounds_stop(m, p, b, length, index, span)
     ir_end(b.f, b.line)
 }
 
-// The List bounds stop itself, reported at the builder's current line:
-// jet_rt_list_bounds_stop(length, native index, path, path length, line).
-ir_list_bounds_stop: fn(m: &IRModule, b: &IRBuilder, length: Int, index: Int) Never! {
+// The List bounds stop itself, reported as a `panic` is: at the builder's
+// current line in its function, with the site's source under a caret at
+// `span` and the frame's safe locals (ir_frame_stop_locals). Its one call
+// passes everything in registers, so the checked loop keeps its registers
+// and frame: jet_rt_list_bounds_stop(length, native index, site, words…).
+// `site` is the static descriptor ir_bounds_site writes. With at most
+// IR_BOUNDS_REGISTER_WORDS locals and no Float among them, the locals'
+// words are the call's last arguments, read from wherever the allocator
+// keeps them; otherwise one argument points at a frame area holding them.
+// The words a site has no use for are 0: every call passes the runtime
+// function's every parameter, as a WebAssembly call must.
+ir_list_bounds_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, length: Int, index: Int, span: Span) Never! {
+    words := [Int]{}
+    labels := ""
+    floats := false
+    loop row in ir_frame_stop_locals(m, b) {
+        binding: ir_lookup_binding(b, b.bindings[row].name) ?? next
+        value: ir_read_binding(m, b, binding)
+        ty: m.types[b.f.slot_type[value]].ty
+        kind: if {
+            ty == Type.Float -> "f"
+            ty == Type.Bool -> "b"
+            else -> "i"
+        }
+        if kind == "f" -> floats = true
+        labels = "{labels}{kind}{if words.len() > 0 -> ", " else -> ""}{binding.name} = \n"
+        words.push(value)
+    }
+    in_registers: words.len() <= IR_BOUNDS_REGISTER_WORDS && !floats
     args := [Int]{length, index}
-    site: b.line
-    loop arg in ir_location(m, b, site) -> args.push(arg)
+    pointer_row: ir_pointer_row(m)
+    site: ir_temp(m, b, pointer_row)
+    register_words: if in_registers -> words.len() else -> 0
+    descriptor: ir_bounds_site(b.f.source_file, b.line, ir_site_context(p, b, span), labels, register_words)
+    ir_emit(b.f, IROp.DataAddress, site, ir_intern_bytes(m, descriptor), -1, -1, b.line)
+    args.push(site)
+    if {
+        in_registers -> loop word in words -> args.push(word)
+        else -> args.push(ir_bounds_area(m, b, words))
+    }
+    loop args.len() < 3 + IR_BOUNDS_REGISTER_WORDS -> args.push(ir_word_const(m, b, 0))
     _: ir_runtime(m, b, "jet_rt_list_bounds_stop", args, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// A frame area holding a bounds stop's local `words` in order, for a stop
+// whose call cannot pass them in registers (ir_list_bounds_stop).
+ir_bounds_area: fn(m: &IRModule, b: &IRBuilder, words: [Int]) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    values: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, values, words.len() * 8, 8, -1, b.line)
+    loop (slot, word) in words {
+        // A Bool fills one byte of its word.
+        if m.types[b.f.slot_type[word]].ty == Type.Bool {
+            zero: ir_word_const(m, b, 0)
+            ir_emit(b.f, IROp.Store, -1, values, slot * 8, zero, b.line)
+        }
+        ir_emit(b.f, IROp.Store, -1, values, slot * 8, word, b.line)
+    }
+    values
+}
+
+// The most local words a bounds stop passes in registers: the System V
+// integer argument registers after the length, the index and the site.
+IR_BOUNDS_REGISTER_WORDS: 3
+
+// A bounds stop's static site descriptor (JetRuntime Trap.jet
+// jet_rt_list_bounds_stop): five little-endian 32-bit fields (the line,
+// the lengths of the path, the context and the labels, and how many local
+// words are the call's own arguments, 0 when a frame area holds them),
+// then the path, the report context and the labels. `labels` holds one row
+// per word: its kind (`i` Int, `f` Float, `b` Bool), then the text before
+// it, up to a newline.
+ir_bounds_site: fn(path: String, line: Int, context: String, labels: String, register_words: Int) -> [U8] Never! {
+    out := [U8]{}
+    fields: [Int]{line, path.bytes().len(), context.bytes().len(), labels.bytes().len(), register_words}
+    loop field in fields {
+        rest := field
+        loop _ in 0..<4 {
+            out.push(U8{rest % 256})
+            rest = rest /% 256
+        }
+    }
+    texts: [String]{path, context, labels}
+    loop text in texts {
+        loop byte in text.bytes() -> out.push(byte)
+    }
+    out
 }
 
 // The `bounds: report` line of a failed check, at the builder's current
@@ -153,7 +233,7 @@ ir_list_insert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     stored: ir_adapt(m, p, b, value, row, span)
     if ir_failed(b) -> return
     length: ir_load_word(m, b, list, 0)
-    ir_list_bounds(m, b, index, length, true)
+    ir_list_bounds(m, p, b, index, length, true, span)
     // The value lands at the end (growing the buffer), then rotates down to
     // `index` past the elements that move up.
     ir_list_push(m, p, b, list, row, stored)
@@ -201,13 +281,13 @@ ir_list_swap_bytes: fn(m: &IRModule, b: &IRBuilder, left: Int, right: Int, held:
 // `xs.__swap(i, j)`: both positions in 0..<len, else the List bounds stop;
 // the elements' complete layouts trade places, with no clone, drop or
 // allocation.
-ir_list_swap: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, second: Int, span: Span) Never! {
+ir_list_swap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, first: Int, second: Int, span: Span) Never! {
     left_index: ir_native_index(m, b, first, span)
     right_index: ir_native_index(m, b, second, span)
     if ir_failed(b) -> return
     length: ir_load_word(m, b, list, 0)
-    ir_list_bounds(m, b, left_index, length, false)
-    ir_list_bounds(m, b, right_index, length, false)
+    ir_list_bounds(m, p, b, left_index, length, false, span)
+    ir_list_bounds(m, p, b, right_index, length, false, span)
     stride: ir_list_stride(m, row)
     if stride == 0 -> return
     width: ir_word_const(m, b, stride)
@@ -248,7 +328,7 @@ ir_list_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
         zero: ir_word_const(m, b, 0)
         empty: ir_bool_op(m, b, IROp.Eq, period, zero)
         ir_open_if(b.f, empty, b.line)
-        ir_list_bounds_stop(m, b, period, zero)
+        ir_list_bounds_stop(m, p, b, period, zero, span)
         ir_end(b.f, b.line)
         source: ir_load_word(m, b, pattern, 16)
         ir_list_fill_span(m, p, b, list, row, bounds[0], count, source, period, false)
@@ -934,13 +1014,13 @@ ir_list_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     length: ir_load_word(m, b, list, 0)
     found: ir_word_const(m, b, -1)
     if mode == {
-        .Slot -> ir_list_remove_slot(m, b, operand, length, found, span)
+        .Slot -> ir_list_remove_slot(m, p, b, operand, length, found, span)
         .Value -> ir_list_remove_value(m, p, b, list, row, operand, found, span)
         .Dynamic -> {
             slot_tag: ir_word_const(m, b, 1)
             positional: ir_bool_op(m, b, IROp.Eq, selector, slot_tag)
             ir_open_if(b.f, positional, b.line)
-            ir_list_remove_slot(m, b, operand, length, found, span)
+            ir_list_remove_slot(m, p, b, operand, length, found, span)
             ir_else(b.f, b.line)
             ir_list_remove_value(m, p, b, list, row, operand, found, span)
             ir_end(b.f, b.line)
@@ -980,10 +1060,10 @@ ir_list_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
 }
 
 // `found` = the checked position `operand` (the List bounds stop past the end).
-ir_list_remove_slot: fn(m: &IRModule, b: &IRBuilder, operand: Int, length: Int, found: Int, span: Span) Never! {
+ir_list_remove_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: Int, length: Int, found: Int, span: Span) Never! {
     index: ir_native_index(m, b, operand, span)
     if ir_failed(b) -> return
-    ir_list_bounds(m, b, index, length, false)
+    ir_list_bounds(m, p, b, index, length, false, span)
     ir_emit(b.f, IROp.Copy, found, index, -1, -1, b.line)
 }
 
@@ -1134,7 +1214,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             }
             .SwapList -> {
                 if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return ir_fail_slot(b, span, "swap without two positions")
-                ir_list_swap(m, b, subject, element, operands[1], operands[2], span)
+                ir_list_swap(m, p, b, subject, element, operands[1], operands[2], span)
                 return -1
             }
             .ListFill | .ListFillRepeat -> {

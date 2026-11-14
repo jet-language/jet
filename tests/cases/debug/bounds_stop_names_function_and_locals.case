@@ -1,0 +1,31 @@
+# A list bounds stop (E3010) names the faulting function, shows the source
+# line under a caret and lists the frame's Int, Float and Bool locals, as a
+# `panic` report does, on every tier and in the built binary, whether the
+# locals reach the runtime in a frame area or in registers.
+fixture: bounds_stop_names_function_and_locals.fixture
+env: NO_COLOR=1
+step index_o0: jet run -O0 main.jet
+exit: 70
+stdout: = "past the end\n"
+stderr: ~ "Stop [E3010]: `the list has 3 items, so position 7 doesn't exist`\n  --> main.jet:8 in pick\n    |\n8 |     xs[at] + total\n    |       ^^^^\nlocals: at = 7, late = true, scale = 1.5, total = 10\n Why:" # the function, the caret under the index and the locals
+step index_o1: jet run -O1 main.jet
+exit: 70
+stderr: ~ "  --> main.jet:8 in pick\n    |\n8 |     xs[at] + total\n    |       ^^^^\nlocals: at = 7, late = true, scale = 1.5, total = 10\n" # the same report on O1
+step index_o2: jet run -O2 main.jet
+exit: 70
+stderr: ~ "  --> main.jet:8 in pick\n    |\n8 |     xs[at] + total\n    |       ^^^^\nlocals: at = 7, late = true, scale = 1.5, total = 10\n" # the same report on O2, where `pick` is inlined
+step: jet build main.jet
+exit: 0
+step index_aot: {work}/.jet/build/main
+exit: 70
+stderr: ~ "  --> main.jet:8 in pick\n" # the built binary names the function too
+stderr: ~ "locals: at = 7, late = true, scale = 1.5, total = 10\n" # and lists its locals
+step insert_o0: jet run -O0 insert.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `the list has 2 items, so position 5 doesn't exist`\n  --> insert.jet:4 in grow\n    |\n4 |     out.insert(at, 0)\n    |         ^^^^^^\nlocals: at = 5\n" # a list method's stop: the caret under the method, list locals left out
+step registers_o0: jet run -O0 registers.jet
+exit: 70
+stderr: ~ "Stop [E3010]: `the list has 3 items, so position 4 doesn't exist`\n  --> registers.jet:8 in walk\n    |\n8 |         total += xs[i * 2]\n    |                    ^^^^^^^\nlocals: i = 2, total = 4, wrapped = true\n" # three Int and Bool locals, passed in registers
+step registers_o2: jet run -O2 registers.jet
+exit: 70
+stderr: ~ "locals: i = 2, total = 4, wrapped = true\n" # the same words on O2, read from where the loop keeps them

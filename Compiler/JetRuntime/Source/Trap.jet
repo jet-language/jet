@@ -309,8 +309,8 @@ trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, me
 }
 
 // trap_simple after its routine already passed the stop door with its own
-// kind (jet_rt_fixed_shift_stop, jet_rt_list_bounds_stop, Scheduler.jet
-// scheduler_fatal), so the stop handler runs once per stop.
+// kind (jet_rt_fixed_shift_stop, Scheduler.jet scheduler_fatal), so the
+// stop handler runs once per stop.
 trap_simple_report: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // jet_runtime_stop_unwind carries the raw message into the task runner, not
     // this process report (jet_scheduler_panic_message).
@@ -508,12 +508,76 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 }
 
 // The list-index stop of compiled code (jet_runtime_stop): the IR's native word
-// index, reported at the indexing file and line.
-#Export(c) jet_rt_list_bounds_stop: fn(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
+// index, reported as a `panic` is (JetIR ir_list_bounds_stop): at the
+// indexing file and line, then the report context (the `--> file:line in
+// function` heading and the source under its caret) and the frame's locals
+// line (trap_bounds_locals). `site` is the static descriptor JetIR
+// ir_bounds_site writes: five little-endian 32-bit fields (the line, the
+// lengths of the path, the context and the labels, and how many local words
+// are this call's own arguments), then the path, the context and the
+// labels. Those words are `first`, `second` and `third`; with none, while
+// the labels have rows, they are in the frame area `first` points at.
+#Export(c) jet_rt_list_bounds_stop: fn(len: I64, index: I64, site: I64, first: I64, second: I64, third: I64) {
     trap_stop(I64{3}, len, index, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, index)
-    trap_simple_report(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    // A task carries the raw reason, not the rendered report.
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) {
+        jet_rt_string_drop(message)
+        return
+    }
+    file_len: trap_u32(wrapping(site + I64{4}))
+    context_len: trap_u32(wrapping(site + I64{8}))
+    labels_len: trap_u32(wrapping(site + I64{12}))
+    file: wrapping(site + I64{20})
+    context: wrapping(file + file_len)
+    production_receipt_write(I64{1}, file, file_len, trap_line(trap_u32(site)), I64{0}, I64{0})
+    trap_header(I64{1})
+    trap_write(rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
+    trap_msg_message_end()
+    trap_write(context, context_len)
+    area: if (trap_u32(wrapping(site + I64{16})) != I64{0}) -> I64{0} else -> first
+    trap_bounds_locals(area, first, second, third, wrapping(context + context_len), labels_len)
+    trap_footer(I64{1})
+}
+
+// The little-endian 32-bit field at `address` of a static descriptor.
+trap_u32: fn(address: I64) -> I64 {
+    trap_byte(address).bit_or(trap_byte(wrapping(address + I64{1})) << I64{8}).bit_or(trap_byte(wrapping(address + I64{2})) << I64{16}).bit_or(trap_byte(wrapping(address + I64{3})) << I64{24})
+}
+
+// A list bounds stop's `locals:` line. `labels` holds a row per local word:
+// its kind byte (`i` Int, `f` Float, `b` Bool), then the text written before
+// it, up to a newline. The words are in the frame `area`, or else, when it
+// is 0, `first`, `second` and `third`.
+trap_bounds_locals: fn(area: I64, first: I64, second: I64, third: I64, labels: I64, labels_len: I64) {
+    if (labels_len == I64{0}) -> return
+    trap_msg_locals()
+    at := I64{0}
+    slot := I64{0}
+    loop at < labels_len {
+        kind: trap_byte(wrapping(labels + at))
+        start: wrapping(at + I64{1})
+        end := start
+        loop trap_byte(wrapping(labels + end)) != (I64{10}) -> end = wrapping(end + I64{1})
+        trap_write(wrapping(labels + start), wrapping(end - start))
+        word: if {
+            area != (I64{0}) -> trap_word(wrapping(area + slot * I64{8}))
+            slot == (I64{0}) -> first
+            slot == (I64{1}) -> second
+            else -> third
+        }
+        text: if {
+            kind == (I64{102}) -> jet_rt_float_debug(rt_f64_from_bits(word))
+            kind == (I64{98}) -> jet_rt_bool_to_string(if (word.bit_and(I64{255}) != I64{0}) -> U8{1} else -> U8{0})
+            else -> jet_rt_int_to_string(word)
+        }
+        trap_write_handle(text)
+        jet_rt_string_drop(text)
+        slot = wrapping(slot + I64{1})
+        at = wrapping(end + I64{1})
+    }
+    trap_msg_newline()
 }
 
 // `bounds: report` (JetIR ir_list_bounds_report): a failed list bounds check

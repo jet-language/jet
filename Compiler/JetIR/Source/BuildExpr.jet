@@ -1559,7 +1559,7 @@ ir_list_destructure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, co
     loop (index, local) in elements {
         if index >= count -> break
         position: ir_word_const(m, b, index)
-        address: ir_checked_address(m, b, list, position, row)
+        address: ir_checked_address(m, p, b, list, position, row, span)
         value: ir_load_at(m, b, address, 0, row)
         if value >= 0 -> ir_bind_local(m, p, b, local, value, span)
     }
@@ -9190,11 +9190,72 @@ ir_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ordinal: Int, message: In
     ir_emit(b.f, IROp.Store, -1, descriptor, 56, column, b.line)
     caret: ir_word_const(m, b, location.caret)
     ir_emit(b.f, IROp.Store, -1, descriptor, 64, caret, b.line)
-    context: ir_stop_context(location.file, location, function_name)
+    context: ir_stop_context(location.file, location.line, location.source_line, location.column, location.caret, function_name)
     ir_store_text(m, b, descriptor, 72, context)
     stop_ordinal: ir_word_const(m, b, ordinal)
     _: ir_runtime(m, b, "jet_rt_require_stop", [Int]{stop_ordinal, descriptor, message, left, right, locals}, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// The binding rows of the locals a stop the builder raises itself reports
+// (a list bounds stop), chosen as sema_expression_panic_locals chooses a
+// `panic`'s: the visible Int, Float and Bool variables, the latest of each
+// name, sorted by name. `_` and the compiler's `__` names are not the
+// program's locals.
+ir_frame_stop_locals: fn(m: &IRModule, b: IRBuilder) -> [Int] Never! {
+    rows := [Int]{}
+    // The latest bindings of the names that are not reported, sorted by
+    // name too: they hide the earlier bindings of their names.
+    hidden := [Int]{}
+    index := b.bindings.len() - 1
+    loop index >= 0 {
+        row: index
+        index -= 1
+        name: b.bindings[row].name
+        if name == "_" || name.starts_with("__") -> next
+        at: ir_frame_name_at(b, rows, name)
+        hidden_at: ir_frame_name_at(b, hidden, name)
+        if at < 0 || hidden_at < 0 -> next
+        // A write parameter's slot holds its address; `indirect` is the value's row.
+        value_row: if b.bindings[row].indirect >= 0 -> b.bindings[row].indirect else -> b.f.slot_type[b.bindings[row].slot]
+        ty: m.types[value_row].ty
+        if ty != Type.Int && ty != Type.Float && ty != Type.Bool {
+            hidden.insert(hidden_at, row)
+            next
+        }
+        rows.insert(at, row)
+    }
+    rows
+}
+
+// Where a binding named `name` goes in `rows` (binding rows sorted by
+// name), or -1 when one of them has that name.
+ir_frame_name_at: fn(b: IRBuilder, rows: [Int], name: String) -> Int Never! {
+    at := rows.len()
+    loop at > 0 && b.bindings[rows[at - 1]].name >= name {
+        if b.bindings[rows[at - 1]].name == name -> return -1
+        at -= 1
+    }
+    at
+}
+
+// The report context (ir_stop_context) of a stop the builder raises itself
+// at `span`: the builder's current line in its function, then the line's
+// source with a caret under `span` when the span starts on that line of a
+// checked source.
+ir_site_context: fn(p: IRProgram, b: IRBuilder, span: Span) -> String Never! {
+    file: b.f.source_file
+    if (ir_source_line_of(p, file, span.start) ?? -1) == b.line {
+        source: (ir_source_line_text(p, file, b.line) ?? "").trim_end()
+        column: ir_source_column(p, file, span.start) ?? 0
+        if source != "" && column > 0 {
+            // A span that runs past its first line is underlined to the line's end.
+            rest: source.bytes().len() - (column - 1)
+            caret: if span.end - span.start > rest -> rest else -> span.end - span.start
+            return ir_stop_context(file, b.line, source, column, caret, b.f.name)
+        }
+    }
+    ir_stop_context(file, b.line, "", 0, 0, b.f.name)
 }
 
 // A static text's (address, length) pair at `offset` of the storage at `base`.
@@ -9204,22 +9265,24 @@ ir_store_text: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, text: Str
     ir_emit(b.f, IROp.Store, -1, base, offset + 8, pair[1], b.line)
 }
 
-// The report's static context, with the runtime's exact spacing.
-ir_stop_context: fn(path: String, location: TPanicLoc, function: String) -> String Never! {
+// The report's static context, with the runtime's exact spacing: the
+// heading `path:line in function`, then `source_line` with `caret` carets
+// from `column` (1-based) when there is a source line.
+ir_stop_context: fn(path: String, line: Int, source_line: String, column: Int, caret: Int, function: String) -> String Never! {
     out := [U8]{}
     if path != "" {
-        heading: if function == "" -> "  --> {path}:{location.line}\n" else -> "  --> {path}:{location.line} in {function}\n"
+        heading: if function == "" -> "  --> {path}:{line}\n" else -> "  --> {path}:{line} in {function}\n"
         loop byte in heading.bytes() -> out.push(byte)
     }
-    if location.source_line != "" {
-        digits: "{location.line}".bytes().len()
+    if source_line != "" {
+        digits: "{line}".bytes().len()
         loop _ in 0..<(digits + 3) -> out.push(U8{32})
-        loop byte in "|\n{location.line} | {location.source_line}\n".bytes() -> out.push(byte)
+        loop byte in "|\n{line} | {source_line}\n".bytes() -> out.push(byte)
         loop _ in 0..<(digits + 3) -> out.push(U8{32})
         out.push(U8{124})
         out.push(U8{32})
-        loop _ in 0..<(if location.column > 0 -> location.column - 1 else -> 0) -> out.push(U8{32})
-        loop _ in 0..<(if location.caret > 0 -> location.caret else -> 1) -> out.push(U8{94})
+        loop _ in 0..<(if column > 0 -> column - 1 else -> 0) -> out.push(U8{32})
+        loop _ in 0..<(if caret > 0 -> caret else -> 1) -> out.push(U8{94})
         out.push(U8{10})
     }
     String.from_bytes(out) ?? ""
