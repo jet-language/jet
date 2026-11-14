@@ -925,7 +925,8 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     assert.equal(entry.name, row.name);
     assert.equal(entry.languages.includes("jet"), true);
     for (const cell of entry.cells) cellOwners.set(cell, (cellOwners.get(cell) ?? 0) + 1);
-    assert.equal(row.python !== null, entry.languages.includes("python"));
+    // A language the entry declares not applicable has no program to pair.
+    assert.equal(row.python !== null, entry.languages.includes("python") && !entry.non_applicable?.python, row.name);
     assert.equal(await exists(sourcePath(entryDir, row.jet)), true, `${row.name}: missing Jet source`);
 
     const pythonDefault = path.join(entryDir, "python", "main.py");

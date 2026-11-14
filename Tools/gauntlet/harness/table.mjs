@@ -44,6 +44,36 @@ export async function writeTable(table, file = tablePath()) {
   await fs.rename(temporary, file);
 }
 
+// Applies `change` to the table as it is on disk now, under a lock file, and
+// writes it back: runs in other checkouts write the same table, and a run
+// that wrote the copy it read at its start would erase every row they added
+// since. A lock older than ten minutes is from a run that died holding it.
+// Returns the table as written.
+export async function updateTable(change, file = tablePath()) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const lock = `${file}.lock`;
+  for (let waited = 0; ; waited += 50) {
+    try {
+      await (await fs.open(lock, "wx")).close();
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const stat = await fs.stat(lock).catch(() => null);
+      if (stat && Date.now() - stat.mtimeMs > 10 * 60_000) await fs.rm(lock, { force: true });
+      else if (waited > 120_000) throw new Error(`${lock} is held for over two minutes`);
+      else await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  try {
+    const table = await readTable(file);
+    change(table);
+    await writeTable(table, file);
+    return table;
+  } finally {
+    await fs.rm(lock, { force: true });
+  }
+}
+
 // What a row was measured against: the toolchain's version line, or the Jet
 // binary's digest for Jet.
 export function toolchainKey(language, toolchains, jetBinarySha256) {
@@ -112,9 +142,10 @@ async function main(args) {
     console.error("usage: node Tools/gauntlet/harness/table.mjs import RESULTS.json...");
     return 2;
   }
-  const table = await readTable();
-  for (const file of args.slice(1)) importReport(table, JSON.parse(await fs.readFile(file, "utf8")));
-  await writeTable(table);
+  const reports = await Promise.all(args.slice(1).map(async (file) => JSON.parse(await fs.readFile(file, "utf8"))));
+  const table = await updateTable((fresh) => {
+    for (const file of reports) importReport(fresh, file);
+  });
   const count = Object.values(table.rows).reduce((sum, rows) => sum + Object.keys(rows).length, 0);
   console.log(`table\t${tablePath()}\t${Object.keys(table.rows).length} entries\t${count} rows`);
   return 0;

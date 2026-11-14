@@ -14,7 +14,7 @@ import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-sy
 import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
 import { buildStandings, ceilingMeasurements as standingsCeilingMeasurements, entryStandings, planCells, planEntry, PEER_KINDS, standingsLines, standingsPolicy } from "./standings.mjs";
 import { stateRoot } from "../../agent/roots.mjs";
-import { currentRow, readTable, recordEntry, toolchainKey, writeTable } from "./table.mjs";
+import { currentRow, readTable, recordEntry, toolchainKey, updateTable } from "./table.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
@@ -4792,7 +4792,7 @@ async function main() {
   // reused, not measured again (unless --remeasure); each entry's measured
   // rows go into it as soon as the entry finishes, so the page fills in as
   // the run goes.
-  const table = axisOnly ? null : await readTable();
+  let table = axisOnly ? null : await readTable();
   if (table) {
     Object.assign(table.runtimes, runtimes);
     Object.assign(table.toolchains, toolchains);
@@ -4832,8 +4832,8 @@ async function main() {
       const result = mergeSource ? mergeEarlierResult(staged, mergeSource.entries.get(item.entry.name) ?? null, mergeSource) : staged;
       results.push(result);
       if (table) {
-        recordEntry(table, { ...result, rows: Object.fromEntries(Object.entries(result.rows ?? {}).filter(([language]) => !reused[language])), standings_rows: Object.fromEntries(Object.entries(result.standings_rows ?? {}).filter(([language]) => !reused[language])) }, { runId, generated: new Date().toISOString(), commit, toolchains, jetBinarySha256, programs });
-        await writeTable(table);
+        const measured = { ...result, rows: Object.fromEntries(Object.entries(result.rows ?? {}).filter(([language]) => !reused[language])), standings_rows: Object.fromEntries(Object.entries(result.standings_rows ?? {}).filter(([language]) => !reused[language])) };
+        table = await updateTable((fresh) => recordEntry(fresh, measured, { runId, generated: new Date().toISOString(), commit, toolchains, jetBinarySha256, programs }));
       }
     } catch (error) {
       console.error(`gauntlet: entry ${item.entry.name} CRASHED: ${error.message}`);

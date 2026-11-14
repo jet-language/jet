@@ -146,7 +146,8 @@ test("every comparison entry in the corpus plans a row for every peer and its ce
   assert.equal(byName.sieve.peers.bun.plan, "measure");
   assert.equal(byName["web-widget"].peers.vite.plan, "measure");
   assert.equal(byName.wordfreq.peers.vite.plan, "not_applicable");
-  assert.equal(byName["http-service"].peers.asm.plan, "uncovered");
+  assert.equal(byName["http-service"].peers.asm.plan, "measure");
+  assert.equal(byName["http-service"].peers.asm.reference, "httpservice");
 });
 
 test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.00, and nothing measured is dropped", () => {
