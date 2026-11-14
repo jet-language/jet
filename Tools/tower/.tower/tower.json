@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102230,
+    "rev": 102239,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89271,6 +89271,87 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T16:22:11.035Z"
+        },
+        {
+          "n": 7,
+          "text": "One shared IR pass makes exact-Int spills, fixed-width traps and the stop protocol explicit for every writer: the IR has explicit operations for the inline-Int test and the big-integer spill (jet_int_add, jet_int_sub, jet_int_mul, jet_int_compare, jet_rt_int_clone), for fixed-width traps with their stop texts, and for the stop protocol, proved by an IR dump test. X64Select.jet and Web/Select.jet consume those operations and no longer decide them; `! git grep -n ir_x64_ Compiler/JetWeb/Source/Web/Select.jet`, and the golden and web suites pass. c3 and c4 build on it. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:17.786Z"
+        },
+        {
+          "n": 8,
+          "text": "The public program view has a version. A target library built against another version gets a registered error naming both versions before the target runs (code, what/why/fix text, ui snapshot). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:18.823Z"
+        },
+        {
+          "n": 9,
+          "text": "An idiom hook may not hand copying, string encoding, Float text or map iteration order to the host unless conformance covers the hosted form. `jet test --to <target>` runs each target with its hooks and again with only the defaults, and both match `jet run`. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:19.851Z"
+        },
+        {
+          "n": 10,
+          "text": "A target implements a closed host-leaf table that replaces the runtime`s numbered system calls (168 os_syscall_* sites in 30 runtime files on dev 9623399213). The spec names the table; the code holds it. Builds on #6151. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:20.835Z"
+        },
+        {
+          "n": 11,
+          "text": "The program view exposes value ranges the compiler proved (Int ranges, loop bounds, proven-inline operands), so a hook may spell host arithmetic where no spill is possible; conformance covers it. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:21.818Z"
+        },
+        {
+          "n": 12,
+          "text": "A transpile target declares Core/Target MachineFacts, and its capability errors are the existing machine denial rows, with no second capability list. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:22.727Z"
+        },
+        {
+          "n": 13,
+          "text": "The target trait carries Jet source locations: C output writes #line, other targets write source maps where the language has them, and a fault in transpiled code names the Jet file and line. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:23.637Z"
+        },
+        {
+          "n": 14,
+          "text": "A target library runs in the build sandbox and can write only its output directory (ties to #3520 c22). (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:24.583Z"
+        },
+        {
+          "n": 15,
+          "text": "The interop question the review found (X5) is decided by an owner ballot, D-EXPORT-INTEROP1, drafted at $JET_SCRATCH_ROOT/lanes/G6Meta/c3/ballot-D-EXPORT-INTEROP1.json, after its review pass. (gap from the D-EXPORT-TARGET1 adversarial review, Docs/audits/2026-11-14-d-export-target1-review.md)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T06:31:25.494Z"
         }
       ],
       "refs": [
@@ -89286,9 +89367,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-13T02:06:00.152Z",
+      "updated": "2026-11-14T06:31:25.494Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 15
     },
     {
       "id": "c09z2sp5",
@@ -204951,6 +205032,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:31:25.494Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#15 The interop question the review found (X5) is decided by an "
+    },
+    {
+      "at": "2026-11-14T06:31:24.583Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#14 A target library runs in the build sandbox and can write onl"
+    },
+    {
+      "at": "2026-11-14T06:31:23.637Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#13 The target trait carries Jet source locations: C output writ"
+    },
+    {
+      "at": "2026-11-14T06:31:22.727Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#12 A transpile target declares Core/Target MachineFacts, and it"
+    },
+    {
+      "at": "2026-11-14T06:31:21.818Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#11 The program view exposes value ranges the compiler proved (I"
+    },
+    {
+      "at": "2026-11-14T06:31:20.835Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#10 A target implements a closed host-leaf table that replaces t"
+    },
+    {
+      "at": "2026-11-14T06:31:19.851Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#9 An idiom hook may not hand copying, string encoding, Float t"
+    },
+    {
+      "at": "2026-11-14T06:31:18.823Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#8 The public program view has a version. A target library buil"
+    },
+    {
+      "at": "2026-11-14T06:31:17.787Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#7 One shared IR pass makes exact-Int spills, fixed-width traps"
+    },
     {
       "at": "2026-11-14T06:29:36.154Z",
       "by": "Main",
