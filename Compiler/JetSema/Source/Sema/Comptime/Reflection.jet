@@ -1324,10 +1324,15 @@ sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> T
 
 // `name` qualified by the module that declares it, as TypeInfo.identity
 // spells it; a name no declared type answers (a builtin, a type parameter)
-// stays as written.
+// stays as written. A type the compiler's own prelude declares (the default
+// `Err` and its records) is in scope in every module under its bare name, so
+// that name is its identity: the prelude's internal module name never reaches
+// tooling, and the default `Err!` route stays implicit, as hover prints it.
 sema_comptime_reflection_qualified_name: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> String {
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return name
-    "{graph.modules[row.module_index].module_name}.{graph.modules[row.module_index].nominals[row.row].symbol.name}"
+    declaring: graph.modules[row.module_index]
+    if declaring.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> return name.copy()
+    "{declaring.module_name}.{declaring.nominals[row.row].symbol.name}"
 }
 
 // `ty` with every declared type it names qualified by its module
