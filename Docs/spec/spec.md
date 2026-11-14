@@ -3791,7 +3791,7 @@ next iteration, so `task.race` returns once its winner does. A cancelled
 unfinished child of each `task.group` it has open outside `#Shield`, and
 through their own groups every unfinished descendant, even when the cancel
 arrives while the task waits at a group's closing brace (D-GROUP-CANCEL1=A).
-A deadline (`#Context(deadline:)`, `task.timeout`) that passes is delivered
+A deadline (`#Deadline(limit)`, `task.timeout`) that passes is delivered
 the same way: at the next wait point or check, as E3003, so a handler busy in
 a loop stops at its deadline. A task or root that has set a deadline reads
 the clock at each check.

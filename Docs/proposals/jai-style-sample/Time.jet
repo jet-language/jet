@@ -1892,13 +1892,13 @@ impl Instant {
 
 #Test("Nonpositive sleeps and elapsed deadlines still check the task deadline") {
     .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep(duration_ns(0)) }
+        #Deadline(0s) { sleep(duration_ns(0)) }
     }
     .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep(duration_ns(-1)) }
+        #Deadline(0s) { sleep(duration_ns(-1)) }
     }
     .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep_until(Instant{start_ns: time_int_min()}) }
+        #Deadline(0s) { sleep_until(Instant{start_ns: time_int_min()}) }
     }
 }
 

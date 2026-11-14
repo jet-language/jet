@@ -7083,12 +7083,9 @@ UnknownContextField: struct {
         code: "E0761"
         safety_class: .Soundness
         safety_reason: "`#Context` carries only its declared fields and the package's `#ContextKey` constants, so an unknown name has no slot to fill."
-        expert_path: "none: `#Context` takes `allocator`, `logger`, `deadline` and the package's `#ContextKey` constants"
-        stage: [.Parse, .Sema]
+        expert_path: "none: `#Context` takes `allocator`, `logger` and the package's `#ContextKey` constants"
+        stage: [.Sema]
         meaning: "A `#Context` field name or context key that is neither a context field nor a `#ContextKey` constant"
-        structured_fix: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable" }
         why: fn(self) -> String { "The context bundle holds `allocator` and `logger`, plus the values a package declares with `#ContextKey`" }
         fix: fn(self) -> String { "Use a context field or declare the key: `#ContextKey frame_index: 0`, then `#Context(frame_index: 3)` and `context.get(frame_index)`." }

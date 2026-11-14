@@ -30,7 +30,6 @@ use {
         StrPart,
         SwitchArm,
         TaskGroupArgs,
-        TextEdit,
         TupleField,
         Type,
         TypedLitBody,
@@ -2160,15 +2159,6 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         parser_sync_stmt(state)
         return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
-    // `deadline` is no context field: its rewrite is the block's own marker
-    // (parser_context_deadline_block).
-    if word == "Context" {
-        loop (index, label) in labels {
-            if label == .Val(field) {
-                if field.name == "deadline" -> return parser_context_deadline_block(state, hash.span, marker_span, args, index)
-            }
-        }
-    }
     // A switch attribute (`#Off`, `#Off(.Release)` or `#On(.Deep)`) governs
     // a block or the one statement after it; two on one statement is E0344.
     if word == MARKER_OFF || word == MARKER_ON {
@@ -2269,8 +2259,8 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         }
         // Rust `at_context_stmt`, `at_live_stmt`, `at_nondeterministic_stmt`.
         // A `#Deadline(limit)` block is the context block whose one field is
-        // `deadline`, a label no `#Context` block keeps
-        // (parser_context_deadline_block) and no `#ContextKey` takes.
+        // `deadline`; `#Context` binds no `deadline` label (the marker
+        // binding, E0930) and no `#ContextKey` takes it.
         "Context" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args, [String]{"allocator", "logger"}, None), body: body.statements, span: span}
         "Deadline" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args, [String]{"limit"}, Val("deadline")), body: body.statements, span: span}
         "Live" -> Stmt.Live{body: body.statements, span: span}
@@ -2314,71 +2304,6 @@ parser_context_fields: fn(state: &JetParserState, marker: Marker, args: [CallArg
         }
     }
     fields
-}
-
-// `deadline` is no context field: a block's wait bound is its own
-// `#Deadline(limit)` marker. The E0761 report on a `deadline: limit` context
-// field carries the edit to `#Deadline(limit) { … }`; beside other fields,
-// the `#Deadline` block wraps a `#Context` block that keeps them.
-parser_context_deadline_block: fn(state: &JetParserState, hash: Span, head: Span, args: [CallArg], at: Int) -> Stmt {
-    unit: Stmt.Expr{expr: Expr.Unit{span: hash, id: parser_node_id(state)}}
-    field: args[at].label ?? return unit
-    what: "`deadline` isn't a context field"
-    why: "`#Context` sets `allocator`, `logger` and `on_stop`, and the constants a package declares with `#ContextKey`"
-    fix: "write `#Deadline(…) {{ … }}`"
-    if parser_current_kind(state) != TOKEN_LBRACE {
-        parser_add_error_code(state, "E0761", field.span, what, why, fix)
-        parser_sync_stmt(state)
-        return unit
-    }
-    body: parser_parse_body_block(state, false)
-    source: state.sources[0]
-    limit_span: expr_span(args[at].expr)
-    limit: String.from_bytes(source.slice(limit_span.start, limit_span.end)) ?? return unit
-    kept := [String]{}
-    loop (index, arg) in args {
-        if index == at -> next
-        value_span: expr_span(arg.expr)
-        start := value_span.start
-        if arg.label == .Val(label) -> start = label.span.start
-        kept.push(String.from_bytes(source.slice(start, value_span.end)) ?? return unit)
-    }
-    if kept.len() == 0 {
-        parser_add_error_code_edit(state, "E0761", field.span, what, why, fix, TextEdit{span: head, new_text: "#Deadline({limit})"})
-        return unit
-    }
-    line := hash.start
-    loop line > 0 && (source[line - 1] == U8{32} || source[line - 1] == U8{9}) -> line -= 1
-    indent: String.from_bytes(source.slice(line, hash.start)) ?? return unit
-    block: parser_indented_source(state, body.span) ?? return unit
-    parser_add_error_code_edit(state, "E0761", field.span, what, why, fix, TextEdit{span: parser_cover(hash, body.span), new_text: "#Deadline({limit}) {{\n{indent}    #Context({kept.join(", ")}) {block}\n{indent}}}"})
-    unit
-}
-
-// The source of `span` with each line after its first indented four more
-// spaces. A newline inside a string literal stays as written, and a blank
-// line gets no indent.
-parser_indented_source: fn(state: JetParserState, span: Span) -> String? {
-    source: state.sources[0]
-    strings := [Span]{}
-    loop token in state.tokens {
-        if (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING) && token.span.end > span.start && token.span.start < span.end -> strings.push(token.span)
-    }
-    out := ""
-    from := span.start
-    loop at in span.start..<span.end {
-        if source[at] != (U8{10}) || at + 1 == span.end || source[at + 1] == (U8{10}) -> next
-        quoted := false
-        loop quote in strings {
-            if quote.start < at && at < quote.end -> quoted = true
-        }
-        if quoted -> next
-        piece: String.from_bytes(source.slice(from, at + 1)) ?? return None
-        out = "{out}{piece}    "
-        from = at + 1
-    }
-    rest: String.from_bytes(source.slice(from, span.end)) ?? return None
-    Val("{out}{rest}")
 }
 
 parser_expr_literal_string: fn(expr: Expr) -> String? {
