@@ -124,6 +124,29 @@ use {
     files.remove_all(root) ?? panic("remove template free-port scratch")
 }
 
+#Test("a free-port probe past the step limit is TIMEOUT with its reason and a failed probe is ERROR with its exit") {
+    root: cases_test_root("host-slow-ports")
+    loop name in ["slow", "failing"] -> cases_test_source(root, name, "step: printf \"%s\" {{free-port:app}}\nstdout: is-u32 # a port\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.root = files.cwd() ?? panic("free-port probe source root")
+    context.env.timeout = 1s
+    slow: files.join(root, "slow-jet")
+    kit_exec_write(slow, "#!/bin/sh\nexec sleep 30\n")
+    files.chmod(slow, 493) ?? panic("chmod slow probe: {err}")
+    context.env.jet = slow
+    timed: kit_cases_run(cases_test_entry("slow"), context)[0].verdict
+    assert_eq(timed.status, "TIMEOUT")
+    assert_eq(timed.detail, "free-port probe ran past the step limit of 1000ms")
+    failing: files.join(root, "failing-jet")
+    kit_exec_write(failing, "#!/bin/sh\necho no ports >&2\nexit 3\n")
+    files.chmod(failing, 493) ?? panic("chmod failing probe: {err}")
+    context.env.jet = failing
+    failed: kit_cases_run(cases_test_entry("failing"), context)[0].verdict
+    assert_eq(failed.status, "ERROR")
+    assert(failed.detail.starts_with("free-port probe failed (exit 3)"))
+    files.remove_all(root) ?? panic("remove slow free-port scratch")
+}
+
 #Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
     plan: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
     assert_eq(plan.error, "")

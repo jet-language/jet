@@ -516,7 +516,9 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     }
     port_names: kit_steps_case_port_names(context)
     if port_names.len() > 0 {
-        ports: kit_steps_free_ports(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        probe: kit_steps_free_port_probe(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        if kit_steps_free_port_failure(probe, context.env.timeout) == .Val(failure) -> return kit_steps_finish(state, failure)
+        ports: kit_steps_free_port_list(probe, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
         loop index in 0..<port_names.len() -> state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
     }
     // A case that binds a fixed host port holds its lock until the case ends,
