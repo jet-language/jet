@@ -1,6 +1,6 @@
 use {
     core: core
-    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, __DecodeSource, __Decoding]
     json: core.encoding.json
     base64: core.encoding.base64
     stream: __core_encoding_stream
@@ -46,8 +46,10 @@ unsupported_error: fn(format: EncodingFormat, offset: Int, reason: String) -> En
 // lift those rows into `Dyn` arrays so CSV participates in the shared
 // tree without a second table type.
 //
-// Typed `decode<T>` owns native header-to-record and row-error policy here;
-// its parser has a typed failure carrier and maps diagnostic text to FieldError.
+// Typed `decode<T>` owns native header-to-record and row-error policy here:
+// its byte scanner (`TypedCSV`) streams each record into `T` as a
+// `__DecodeSource`, keeps a syntax error as its typed failure carrier, and
+// maps diagnostic text to FieldError.
 // Streaming reads distinguish optional EOF from typed IO failures, and writes
 // borrow bounded byte windows over existing registered file leaves.
 // `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
@@ -76,23 +78,25 @@ rows: fn(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: 
 /// Cells decode inside the runtime's text-cell scope (Rust
 /// `jet_decode_text_cells`): a Text cell parses as an Int, Float or Bool
 /// target, and the previous scope is restored before returning.
+// Each record streams into its row through the scanner's `__DecodeSource`:
+// no record tree is built, and its cells are read from the input's bytes.
 decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
-    rows: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
-    if rows.len() == 0 -> return Ok([T]{})
-    header: rows[0]
+    csv := TypedCSV.new(text)
+    if csv.next() {
+        csv.header = csv.fields()
+    }
     values := [T]{}
     errors := [FieldError]{}
     previous: rt.text_cells_enter()
-    loop index in 1..<rows.len() {
-        row: rows[index]
-        if row.len() != header.len() {
-            errors.push(FieldError{path: "row {index}", reason: ragged_reason(index, row.len(), header.len())})
+    index := 0
+    loop csv.next() {
+        index += 1
+        if csv.count() != csv.header.len() {
+            errors.push(FieldError{path: "row {index}", reason: ragged_reason(index, csv.count(), csv.header.len())})
             next
         }
-        entries := [(key: String, value: Dyn)]{}
-        loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(row[column])))
-        tree: stream.object_from_entries(entries)
-        if tree.decode<T>() == {
+        csv.cursor = TYPED_CSV_RECORD
+        if __Decoding.read<T, TypedCSV>(csv) == {
             .Ok(value) -> values.push(value)
             .Err(failures) -> {
                 loop failure in failures {
@@ -104,6 +108,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
         }
     }
     rt.text_cells_leave(previous)
+    if csv.failure == .Val(error) -> return Err([FieldError]{FieldError{path: "", reason: error.reason}})
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 
@@ -127,172 +132,299 @@ ragged_reason: fn(record: Int, cells: Int, columns: Int) -> String Never! {
     "CSV row {record} has {cells} fields; the header has {columns}"
 }
 
-// Whole-value typed CSV uses the same native CsvKernel state transitions but
-// no streaming EncodingLimits: the shipped whole-value decoder is unbounded.
+// Whole-value typed CSV keeps the streaming reader's record and error
+// contract but no streaming EncodingLimits: the shipped whole-value decoder
+// is unbounded.
 #Error
 TypedCSVError: struct { reason: String }
 
+// `TypedCSV.cursor` while the record itself is at the cursor; -1 once its
+// object is open and before its first member.
+TYPED_CSV_RECORD: -2
+
+// The typed scanner over a String's bytes. `next` reads one record as the
+// byte spans of its fields in `raw`: an unquoted field is the bytes up to its
+// comma or line ending, a quoted one the bytes between its quotes, in which
+// every `""` pair stands for one quote when the field is in `escapes`. A
+// record ends at LF or CRLF (a bare CR is malformed), or at the end of the
+// input.
+//
+// As a `__DecodeSource` the current record is one object whose members are
+// the header's names, in order, each a text cell of its field, as the tree
+// `{header[i]: Dyn.Text(field i)}` reads: a cell is built only when it is
+// read, and an Int, Float or Bool cell in plain decimal form is parsed in
+// place, to what the cell's text-cell decode gives.
 TypedCSV: struct {
-    field: [U8]
-    fields: [String]
-    rows: [[String]]
-    quoted: Bool
-    after_quote: Bool
-    pending_cr: Bool
-    pending_line: Int
-    pending_column: Int
-    record: Int
+    raw: [U8]
+    // The next byte to scan, and the line it is on and that line's first byte.
+    at: Int
     line: Int
-    column: Int
-    ended_record: Bool
-    saw_input: Bool
+    line_start: Int
+    // The one-based number of the record being scanned.
+    record: Int
+    // Each field's start and end in `raw`, and the fields with `""` escapes.
+    spans: [Int]
+    escapes: [Int]
+    // The syntax error that ended the scan.
+    failure: TypedCSVError?
+    header: [String]
+    // TYPED_CSV_RECORD, or the open record's member at the cursor:
+    // header.len() once it is closed.
+    cursor: Int
 
-    error: fn(self, line: Int, column: Int, reason: String) -> TypedCSVError Never! {
-        TypedCSVError{reason: "E2701: CSV row {self.record}, line {line}, column {column} — {reason}"}
+    new: fn(text: String) -> TypedCSV Never! {
+        TypedCSV{raw: text.bytes(), at: 0, line: 1, line_start: 0, record: 1, spans: [Int]{}, escapes: [Int]{}, failure: None, header: [String]{}, cursor: TYPED_CSV_RECORD}
     }
 
-    close_field: fn(&self) Never! {
-        text := ""
-        #Unsafe("input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field") {
-            text = rt.bytes_into_text(self.field)
+    // Fails the scan at byte `at` of the current line: the column counts
+    // scalars.
+    fail: fn(&self, at: Int, reason: String) Never! {
+        column := 1
+        loop index in self.line_start..<at {
+            byte: Int{self.raw[index]}
+            if byte < 128 || byte >= 192 -> column += 1
         }
-        self.field = [U8]{}
-        self.fields.push(text)
+        self.failure = Val(TypedCSVError{reason: "E2701: CSV row {self.record}, line {self.line}, column {column} — {reason}"})
     }
 
-    close_record: fn(&self) Never! {
-        self.close_field()
-        self.rows.push(self.fields.move())
-        self.fields = [String]{}
-        self.record += 1
-        self.ended_record = true
-    }
-
-    push: fn(&self, bytes: [U8]) TypedCSVError! {
-        self.saw_input = true
-        byte: Int{bytes[0]}
-        if self.pending_cr {
-            if byte != 10 -> return Err(self.error(self.pending_line, self.pending_column, "bare CR is not a record ending"))
-            self.pending_cr = false
-            self.line += 1
-            self.column = 0
-            if self.quoted {
-                self.field.push(U8{13})
-                self.field.push(U8{10})
-            } else {
-                self.close_record()
+    // After a field, at its comma, line ending or the end of the input: true
+    // when the record goes on to another field. Any other byte fails the scan.
+    delimit: fn(&self, quoted: Bool) -> Bool Never! {
+        if self.at >= self.raw.len() -> return false
+        byte: Int{self.raw[self.at]}
+        if byte == 44 {
+            self.at += 1
+            return true
+        }
+        if byte == 13 {
+            if self.at + 1 >= self.raw.len() || self.raw[self.at + 1] != (U8{10}) {
+                self.fail(self.at, "bare CR is not a record ending")
+                return false
             }
-            return
+            self.at += 1
+        } else if byte != 10 {
+            self.fail(self.at, if quoted -> "only quote, comma, CRLF, LF, or EOF may follow a closing quote" else -> "quote inside an unquoted field")
+            return false
         }
-        self.ended_record = false
-        self.column += 1
-        if self.quoted {
-            if self.after_quote {
-                if byte == 34 {
-                    self.field.push(U8{34})
-                    self.after_quote = false
-                    return
-                }
-                if byte == 44 {
-                    self.close_field()
-                    self.quoted = false
-                    self.after_quote = false
-                    return
-                }
-                if byte != 13 && byte != 10 -> return Err(self.error(self.line, self.column, "only quote, comma, CRLF, LF, or EOF may follow a closing quote"))
-                self.quoted = false
-                self.after_quote = false
-            } else {
-                if byte == 34 {
-                    self.after_quote = true
-                } else {
-                    loop item in bytes -> self.field.push(item)
+        self.at += 1
+        self.line += 1
+        self.line_start = self.at
+        false
+    }
+
+    // Scans the next record's fields; false, with none scanned, at the end of
+    // the input or on a syntax error, which `failure` keeps.
+    next: fn(&self) -> Bool Never! {
+        self.spans.clear()
+        self.escapes.clear()
+        length: self.raw.len()
+        if self.failure != None || self.at >= length -> return false
+        loop {
+            quoted: self.at < length && self.raw[self.at] == (U8{34})
+            if quoted {
+                self.at += 1
+                start: self.at
+                escaped := false
+                loop {
+                    if self.at >= length {
+                        self.fail(length, "quoted field ended before its closing quote")
+                        return false
+                    }
+                    byte: Int{self.raw[self.at]}
+                    if byte == 34 {
+                        if self.at + 1 >= length || self.raw[self.at + 1] != (U8{34}) -> break
+                        escaped = true
+                        self.at += 2
+                        next
+                    }
+                    self.at += 1
                     if byte == 10 {
                         self.line += 1
-                        self.column = 0
+                        self.line_start = self.at
                     }
                 }
-                return
+                if escaped -> self.escapes.push(self.spans.len() /% 2)
+                self.spans.push(start)
+                self.spans.push(self.at)
+                self.at += 1
+            } else {
+                start: self.at
+                at := start
+                loop at < length {
+                    byte: self.raw[at]
+                    if byte == (U8{34}) || byte == (U8{44}) || byte == (U8{13}) || byte == (U8{10}) -> break
+                    at += 1
+                }
+                self.at = at
+                self.spans.push(start)
+                self.spans.push(at)
             }
+            if !self.delimit(quoted) -> break
         }
-        if byte == 34 {
-            if self.field.len() != 0 -> return Err(self.error(self.line, self.column, "quote inside an unquoted field"))
-            self.quoted = true
-        } else if byte == 44 {
-            self.close_field()
-        } else if byte == 13 {
-            self.pending_cr = true
-            self.pending_line = self.line
-            self.pending_column = self.column
-        } else if byte == 10 {
-            self.line += 1
-            self.column = 0
-            self.close_record()
-        } else {
-            loop item in bytes -> self.field.push(item)
-        }
+        if self.failure != None -> return false
+        self.record += 1
+        true
     }
 
-    finish: fn(&self) TypedCSVError! {
-        if self.pending_cr -> return Err(self.error(self.pending_line, self.pending_column, "bare CR is not a record ending"))
-        if self.quoted && !self.after_quote -> return Err(self.error(self.line, self.column + 1, "quoted field ended before its closing quote"))
-        if self.ended_record || !self.saw_input -> return
-        self.quoted = false
-        self.after_quote = false
-        self.close_record()
+    count: fn(self) -> Int Never! { self.spans.len() /% 2 }
+
+    // Field `column` of the scanned record as text.
+    text: fn(self, column: Int) -> String Never! {
+        start: self.spans[2 * column]
+        end: self.spans[2 * column + 1]
+        escaped := false
+        loop index in self.escapes {
+            if index == column -> escaped = true
+        }
+        if !escaped -> return field_text(self.raw.slice(start, end))
+        bytes := [U8]{}
+        at := start
+        loop at < end {
+            bytes.push(self.raw[at])
+            at += if self.raw[at] == (U8{34}) -> 2 else -> 1
+        }
+        field_text(bytes)
+    }
+
+    fields: fn(self) -> [String] Never! {
+        loop column in 0..<self.count() -> self.text(column)
+    }
+
+    member: fn(self) -> Bool Never! { self.cursor >= 0 && self.cursor < self.header.len() }
+
+    // The plain decimal Int of field `column`: an optional minus and 1 to 18
+    // digits. None for any other text, which decodes as its cell.
+    plain_int: fn(self, column: Int) -> Int? Never! {
+        at := self.spans[2 * column]
+        end: self.spans[2 * column + 1]
+        negative: at < end && self.raw[at] == (U8{45})
+        if negative -> at += 1
+        if at == end || end - at > 18 -> return None
+        value := 0
+        loop at < end {
+            digit: Int{self.raw[at]} - 48
+            if digit < 0 || digit > 9 -> return None
+            value = value * 10 + digit
+            at += 1
+        }
+        Val(if negative -> 0 - value else -> value)
+    }
+
+    // The plain decimal Float of field `column`: an optional minus, digits
+    // and an optional dot with digits after it, 15 digits at most. Their
+    // integer and its power of ten are exact binary64 values, so the quotient
+    // is the correctly rounded value the cell's parse gives. None for any
+    // other text, which decodes as its cell.
+    plain_float: fn(self, column: Int) -> Float? Never! {
+        at := self.spans[2 * column]
+        end: self.spans[2 * column + 1]
+        negative: at < end && self.raw[at] == (U8{45})
+        if negative -> at += 1
+        whole := 0
+        digits := 0
+        fraction := -1
+        loop at < end {
+            byte: Int{self.raw[at]}
+            at += 1
+            if byte == 46 && fraction < 0 && digits > 0 {
+                fraction = 0
+                next
+            }
+            if byte < 48 || byte > 57 || digits == 15 -> return None
+            whole = whole * 10 + (byte - 48)
+            digits += 1
+            if fraction >= 0 -> fraction += 1
+        }
+        if digits == 0 || fraction == 0 -> return None
+        scale := 1.0
+        places := fraction
+        loop places > 0 {
+            scale = scale * 10.0
+            places -= 1
+        }
+        value: Float{whole} / scale
+        Val(if negative -> -value else -> value)
+    }
+
+    // The cell at the cursor as its tree, for a read it does not take in place.
+    cell: fn(self) -> Dyn Never! { Dyn.Text(self.text(self.cursor)) }
+
+    impl __DecodeSource {
+        begin_object: fn(&self) -> Bool Never! {
+            if self.cursor != TYPED_CSV_RECORD -> return false
+            self.cursor = -1
+            true
+        }
+
+        next_key: fn(&self) -> Bool Never! {
+            if self.cursor < -1 || self.cursor >= self.header.len() -> return false
+            self.cursor += 1
+            self.cursor < self.header.len()
+        }
+
+        key_is: fn(self, name: String) -> Bool Never! { self.member() && self.header[self.cursor] == name }
+
+        key_text: fn(self) -> String Never! { if self.member() -> self.header[self.cursor].copy() else -> "" }
+
+        begin_array: fn(&self) -> Bool Never! { false }
+
+        next_item: fn(&self) -> Bool Never! { false }
+
+        take_null: fn(&self) -> Bool Never! { false }
+
+        skip: fn(&self) Never! {}
+
+        capture: fn(&self) -> Dyn Never! {
+            if self.member() -> return self.cell()
+            if self.cursor != TYPED_CSV_RECORD -> return Dyn.Null
+            entries := [(key: String, value: Dyn)]{}
+            loop column in 0..<self.header.len() -> entries.push((key: self.header[column].copy(), value: Dyn.Text(self.text(column))))
+            stream.object_from_entries(entries)
+        }
+
+        read_int: fn(&self) -> Int [FieldError]! {
+            if self.member() {
+                if self.plain_int(self.cursor) == .Val(value) -> return Ok(value)
+            }
+            value: self.capture().decode<Int>() ?? return Err(err)
+            Ok(value)
+        }
+
+        // An escaped field holds a quote, so it is never one of these.
+        read_bool: fn(&self) -> Bool [FieldError]! {
+            if self.member() {
+                start: self.spans[2 * self.cursor]
+                size: self.spans[2 * self.cursor + 1] - start
+                if size == 4 && self.raw[start] == (U8{116}) && self.raw[start + 1] == (U8{114}) && self.raw[start + 2] == (U8{117}) && self.raw[start + 3] == (U8{101}) -> return Ok(true)
+                if size == 5 && self.raw[start] == (U8{102}) && self.raw[start + 1] == (U8{97}) && self.raw[start + 2] == (U8{108}) && self.raw[start + 3] == (U8{115}) && self.raw[start + 4] == (U8{101}) -> return Ok(false)
+            }
+            value: self.capture().decode<Bool>() ?? return Err(err)
+            Ok(value)
+        }
+
+        read_float: fn(&self) -> Float [FieldError]! {
+            if self.member() {
+                if self.plain_float(self.cursor) == .Val(value) -> return Ok(value)
+            }
+            value: self.capture().decode<Float>() ?? return Err(err)
+            Ok(value)
+        }
+
+        read_string: fn(&self) -> String [FieldError]! {
+            if self.member() -> return Ok(self.text(self.cursor))
+            value: self.capture().decode<String>() ?? return Err(err)
+            Ok(value)
+        }
     }
 }
 
+// Every record of `text` as its fields' text.
 typed_records: fn(text: String) -> [[String]] TypedCSVError! {
-    parser := TypedCSV{field: [U8]{}, fields: [String]{}, rows: [[String]]{}, quoted: false, after_quote: false, pending_cr: false, pending_line: 1, pending_column: 1, record: 1, line: 1, column: 0, ended_record: false, saw_input: false}
-    raw: text.bytes()
-    index := 0
-    loop index < raw.len() {
-        lead: Int{raw[index]}
-        // The plain bytes that open an unquoted field (no quote, comma, CR or
-        // LF; every UTF-8 lead and continuation byte is >= 128) enter it as
-        // one slice, with the column one past each scalar as push counts.
-        if !parser.quoted && !parser.pending_cr && parser.field.len() == 0 && lead != 34 && lead != 44 && lead != 13 && lead != 10 {
-            run := index
-            scalars := 0
-            loop run < raw.len() {
-                byte: Int{raw[run]}
-                if byte == 34 || byte == 44 || byte == 13 || byte == 10 -> break
-                if byte < 128 || byte >= 192 -> scalars += 1
-                run += 1
-            }
-            parser.saw_input = true
-            parser.ended_record = false
-            parser.column += scalars
-            parser.field = raw.slice(index, run)
-            index = run
-            next
-        }
-        // A comma or LF outside quotes and after no CR ends the field or the
-        // record, with the column and line counts push keeps, without
-        // building the one-byte scalar push takes.
-        if !parser.quoted && !parser.pending_cr && (lead == 44 || lead == 10) {
-            parser.saw_input = true
-            parser.ended_record = false
-            if lead == 44 {
-                parser.column += 1
-                parser.close_field()
-            } else {
-                parser.line += 1
-                parser.column = 0
-                parser.close_record()
-            }
-            index += 1
-            next
-        }
-        width: if lead < 128 -> 1 else if lead < 224 -> 2 else if lead < 240 -> 3 else -> 4
-        scalar := [U8#4]{0, 0, 0, 0}
-        loop position in 0..<width -> scalar[position] = raw[index + position]
-        parser.push(scalar[0..<width]) ?? return Err(err)
-        index += width
-    }
-    parser.finish() ?? return Err(err)
-    Ok(parser.rows.move())
+    csv := TypedCSV.new(text)
+    records := [[String]]{}
+    loop csv.next() -> records.push(csv.fields())
+    if csv.failure == .Val(error) -> return Err(error)
+    Ok(records)
 }
 
 /// `rows` lifted into `Dyn`: one array of text cells per record, under the
