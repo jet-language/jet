@@ -548,6 +548,9 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     }
     loop view in closed_list_subset_problems(findings, subset_rows, texts, problems) -> copies.push(view)
     closed_list_home_problems(findings, copies, problems)
+    // CORE_LEVELS is a checked copy of the `optimize` build option's values
+    // (the core-levels test holds it to them), so its pairs are that row's.
+    copies.push(closed_list_key(CLOSED_LIST_CORE_LEVELS_PATH, "CORE_LEVELS"))
     closed_list_duplicate_problems(findings, copies, problems)
     assert_eq(problems.join("\n"), "")
 }
