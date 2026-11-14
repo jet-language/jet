@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102291,
+    "rev": 102298,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35,7 +35,7 @@
         "radar:e14"
       ]
     },
-    "completionCursor": "2026-11-14T03:03:27.446Z"
+    "completionCursor": "2026-11-14T08:35:57.890Z"
   },
   "epochs": [
     {
@@ -71162,11 +71162,12 @@
         {
           "n": 139,
           "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) `r: F32 = approx(x)` and `F32{float_expr}` follow one rule: either approx accepts Float and narrows, or the narrowing without approx is refused. Today approx refuses Floats (E0109) and F32{} narrows with no approx step.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T03:51:45.320Z"
+          "evidence": "Decided by ratified rules (Main, 2026-11-14), so no ballot is needed. D-NUMWIDEN-CROSS1=E (Docs/spec/syntax-decisions.md, approx section; core-library.md) scopes approx(value) to the one integer-to-float crossing, so E0109 on a Float is the rule. The D-DOTCTOR3 amendment makes F32{value} on a Float an explicit destination-head conversion that stops out of range (F32.from_float returns Err). The two follow their separate ratified rules; the golden Examples/Types/FloatToF32 proves the F32{} and from_float behavior.",
+          "at": "2026-11-14T08:38:57.567Z",
+          "closure": "decision"
         },
         {
           "n": 140,
@@ -71577,20 +71578,20 @@
         {
           "n": 190,
           "text": "(was #3484 c1) Release/AOT anonymous-union enum constants use canonical construction and checked payload typing [precut audit: failing on 9c7ddf1359: probe pu4_union_constant o0=101 o1=101 o2=101] (moved from #4741 c41)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:54:14.049Z"
+          "evidence": "dev 5b6155adf3 (G6Meta-pu4unionconst: the pu4 union-constant probe no longer fails on dev; the new case tests/cases/constant_identity/anonymous_union_constants_construct_check_and_dispatch_on_every_tier builds, checks (E0108 on a wrong payload) and dispatches anonymous-union constants with one output at O0, O1, O2 and --release). Lander5, gate-p62 jet: cases --filter anonymous_union_constants_construct_check_and_dispatch_on_every_tier 1/0, 0 known-failing.",
+          "at": "2026-11-14T08:41:51.863Z"
         },
         {
           "n": 191,
           "text": "(was #3485 c1) Release/AOT structural anonymous-union constants dispatch through checked type identity and compile [precut audit: failing on 9c7ddf1359: probe pu4_union_constant o0=101 o1=101 o2=101] (moved from #4741 c42)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:54:15.761Z"
+          "evidence": "dev 5b6155adf3 (G6Meta-pu4unionconst: the pu4 union-constant probe no longer fails on dev; the new case tests/cases/constant_identity/anonymous_union_constants_construct_check_and_dispatch_on_every_tier builds, checks (E0108 on a wrong payload) and dispatches anonymous-union constants with one output at O0, O1, O2 and --release). Lander5, gate-p62 jet: cases --filter anonymous_union_constants_construct_check_and_dispatch_on_every_tier 1/0, 0 known-failing.",
+          "at": "2026-11-14T08:41:53.618Z"
         }
       ],
       "refs": [],
@@ -71601,7 +71602,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-14T04:00:13.023Z",
+      "updated": "2026-11-14T08:41:53.618Z",
       "updatedBy": "Main",
       "criteriaLastN": 191
     },
@@ -78730,6 +78731,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-13, within D-WEBAPP-SHAPE1=A): a screen gets its app.Remote<S> from one Core constructor, app.remote(service). The ratified example takes `crew: app.Remote<Crew>` as a parameter but names no constructor; this is the smallest one, a Core struct API with no new syntax. Only methods marked for remote calls are callable on it (E2812 jet.ServerOnlyMethod otherwise). The client transport is a separate c3 item."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Owner question on D-HTTP-HANDLER-ENTRY1: rework to the best greenfield design versus all ecosystems, with downsides engineered away (G3Core-2)."
@@ -78822,6 +78828,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T18:17:43.299Z"
+        },
+        {
+          "n": 9,
+          "text": "A web client reaches a mounted service through app.Remote<S>: the web host gains a network leg that fetches through the same suspension mechanism web tasks already use to wait, never a synchronous XHR on the page's main thread. Proof: a case builds a client for web and native, calls one #App method of a running server on each, and prints the same result and the same app.CallError for a refused call.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T08:17:45.659Z"
         }
       ],
       "refs": [],
@@ -78832,9 +78847,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-14T03:27:15.728Z",
+      "updated": "2026-11-14T08:17:45.659Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0isxyo3",
@@ -90688,8 +90703,8 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-14T06:29:36.154Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-14T08:35:50.154Z",
+      "updatedBy": "owner",
       "criteriaLastN": 2
     },
     {
@@ -201690,8 +201705,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-14T06:29:35.173Z"
+      "status": "ratified",
+      "created": "2026-11-14T06:29:35.173Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-14"
     }
   ],
   "questions": [
@@ -205138,6 +205155,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T08:41:53.618Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#191"
+    },
+    {
+      "at": "2026-11-14T08:41:51.863Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#190"
+    },
+    {
+      "at": "2026-11-14T08:38:57.568Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#139"
+    },
+    {
+      "at": "2026-11-14T08:35:57.890Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-14T08:35:57.890Z"
+    },
+    {
+      "at": "2026-11-14T08:35:50.154Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIBC-OMIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-14T08:17:45.659Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#9 A web client reaches a mounted service through app.Remote<S>"
+    },
+    {
+      "at": "2026-11-14T08:16:06.075Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y7zq8s",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T08:14:14.820Z",
       "by": "Main",
