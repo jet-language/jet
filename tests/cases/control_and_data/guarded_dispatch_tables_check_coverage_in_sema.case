@@ -1,0 +1,32 @@
+# A guarded arm (`.Rect(w, h) && w == h ->`) parses in a value table and in a
+# statement table without an `else`, on O0, O1 and O2. Coverage is the
+# checker's: a guarded arm covers no case, so unguarded arms that cover every
+# case make the table complete, an `else` beside them is E0641 whose fix is to
+# delete it (which gives back the complete table), and a case covered only by
+# a guard is E0307. No step reports the parse error E0003.
+fixture: guarded_dispatch_tables_check_coverage_in_sema.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = guarded_dispatch_tables_check_coverage_in_sema.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = guarded_dispatch_tables_check_coverage_in_sema.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = guarded_dispatch_tables_check_coverage_in_sema.stdout.expected
+stderr: empty
+step dead_else: jet check dead_else.jet
+exit: 1
+stderr: ~ "This `else` can never run; every case of `Shape` is already handled" # the E0641 headline for the complete table plus an else
+stderr: ~ "Fix: Delete the `else` arm" # its fix gives back the complete table the o0 step runs
+stderr: ~ "E0641" # the closed-set else code
+stderr: !~ "E0003" # the table parses
+step missing: jet check missing.jet
+exit: 1
+stderr: ~ "This `if` doesn't cover every case — missing: Rect" # the guarded arm covers no case, so Rect is missing
+stderr: ~ "E0307" # the non-exhaustive dispatch code
+stderr: !~ "E0003" # the table parses
