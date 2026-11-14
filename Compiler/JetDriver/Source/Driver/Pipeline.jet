@@ -1305,6 +1305,13 @@ jet_driver_comptime_function_closure: fn(
         // The visit settles the function's node when it is the same in
         // every closure (JetDriverComptimeClosureNode).
         node: jet_driver_comptime_node_id(index, current.module_identity, current.function_key)
+        // A settled foreign function's check reads only the graph: its row
+        // stands for a fresh one (an asm body's check reads its module's text).
+        if index.nodes[node].settled && index.nodes[node].foreign == .Val(settled_foreign) {
+            if settled_foreign.foreign == .Val(row) -> foreign.push(row.copy())
+            sema_comptime_failure_closure_add(graph, failure_closure, settled_foreign)
+            next
+        }
         successors := [Int]{}
         obligation_mark: failure_closure.obligations.len()
         reused_row := -1
