@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102208,
+    "rev": 102210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49213,6 +49213,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decisions (Main, 2026-11-14) on the build writer gaps G5DevX-2 found on tree 18334dc55f. G1 approved: a `jet build` entry that collects web.image sources makes a BuildPlanExecution (one asset-bundle target, one action per source) and runs it through jet_cli_build_run_graph. G2: no new `jet self` command (owner-gated); the asset action runs a toolchain-shipped Jet program through b.jet(), using core.image plus `__`-named core.web helpers. G3 approved: planning needs the app.images settings known at compile time; a non-literal setting is a check-time error with a registered code and ui snapshot, never a silent fallback to runtime encoding. G4 OWNER GATE: c1`s clause \"variants cached ... so only new or changed images encode\" needs the build action store, which BuildOptions.jet:810 keeps closed (BUILD_REUSE_SAVED_WORK = false) until a ballot ratifies how a run opts in. Until then every build re-encodes. G5: actions run only in the native sandbox (bubblewrap, Linux x86-64; BuildExecute.jet:124-175), so a web build with images inherits that limit; accepted under the existing sandbox contract and recorded as a gap. G6: the built app must find its variants without runtime encoding. Preferred: link the asset bundle`s variant bytes into the executable (no new API); G5DevX-2 checks the asset-bundle contract first."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-14): c1`s \"`jet dev` serves the same variant bytes as `jet build`\" means the files `jet build` writes, per D-WEB-IMAGE1 option A (\"Convert at build; dev on demand\": web.image registers an asset node with b.add_asset_bundle, and variants are cached by source hash, width, format, quality and encoder version in the project cache). A built program converting on first request would be option B, which was not chosen. Staged so far: core.image items 1–6 (batches 43 and 44) and web.image items 1–5 (variants, settings, the AppImages example; batch 46). Still to build: the WebGraph collection plus the asset node, the build writer with its cache key, and the dev==build hash case."
         },
         {
@@ -49235,6 +49240,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:15:45.090Z"
+        },
+        {
+          "n": 3,
+          "text": "The build action store opt-in for web image variants (D-WEB-IMAGE1 caching clause) is decided by an owner ballot on how a build run opts into reusing saved action work (BUILD_REUSE_SAVED_WORK, BuildOptions.jet:810), and the variant cache is built to it: a second `jet build` with unchanged sources encodes nothing (trace count 0).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T05:51:14.069Z"
         }
       ],
       "refs": [],
@@ -49247,12 +49261,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-14T05:34:58.539Z",
+      "updated": "2026-11-14T05:51:14.069Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c044vq6e",
@@ -204762,6 +204776,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:51:14.069Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q6gm05",
+      "note": "#3 The build action store opt-in for web image variants (D-WEB-"
+    },
+    {
+      "at": "2026-11-14T05:51:12.998Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q6gm05",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T05:39:16.637Z",
       "by": "Main",
