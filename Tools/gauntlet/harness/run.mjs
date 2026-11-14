@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
@@ -365,6 +365,32 @@ function timeoutFromEnv(name, fallback) {
 }
 
 const DEFAULT_TIMEOUT_MS = timeoutFromEnv("JET_GAUNTLET_TIMEOUT_MS", 300_000);
+// The dev shells' environments, each read once per run through JetEnv.jet
+// (`env -0` in that shell): starting every measured command through
+// JetEnv.jet would compile and run a Jet program before each one. A command
+// gets its shell's environment with the variables this run has set or
+// changed since laid over it, and `jet` as the command is the admitted
+// compiler JetEnv.jet names $JET.
+const devEnvs = new Map();
+function devEnv(full) {
+  const shell = full ? "full" : "default";
+  if (!devEnvs.has(shell)) {
+    const result = spawnSync(envRunner, [...(full ? ["full"] : []), "env", "-0"], { encoding: "utf8", maxBuffer: 1 << 26 });
+    if (result.status !== 0) throw new Error(`cannot read the ${shell} dev shell's environment: ${String(result.stderr ?? result.error).trim().slice(0, 300)}`);
+    const vars = Object.fromEntries(result.stdout.split("\0").filter(Boolean).map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+    devEnvs.set(shell, { vars, caller: { ...process.env } });
+  }
+  const { vars, caller } = devEnvs.get(shell);
+  const changed = Object.entries(process.env).filter(([name, value]) => caller[name] !== value);
+  return { ...vars, ...Object.fromEntries(changed) };
+}
+
+// Spawns `args` in its dev shell (see devEnv) with `env` laid over it.
+function spawnInShell(args, { full = false, env = undefined, ...options }) {
+  const shellEnv = { ...devEnv(full), ...(env ?? {}) };
+  const command = args[0] === "jet" && shellEnv.JET ? shellEnv.JET : args[0];
+  return spawn(command, args.slice(1), { ...options, env: shellEnv });
+}
 
 async function runProcess(cwd, args, {
   input = undefined,
@@ -374,9 +400,10 @@ async function runProcess(cwd, args, {
   env = undefined,
 } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(envRunner, [...(full ? ["full"] : []), ...args], {
+    const child = spawnInShell(args, {
+      full,
+      env,
       cwd,
-      env: env === undefined ? process.env : { ...process.env, ...env },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: true,
     });
@@ -420,7 +447,7 @@ async function runProcess(cwd, args, {
       clearTimeout(deadline);
       if (resourceTimer) clearInterval(resourceTimer);
       resolve({
-        code: resourceExceeded ? 137 : (timedOut ? 124 : (code ?? 128)),
+        code: resourceExceeded ? 137 : (timedOut ? 124 : (code ?? 128 + (os.constants.signals[signal] ?? 0))),
         signal,
         stdout: Buffer.concat(stdout),
         stderr: resourceExceeded
@@ -483,9 +510,10 @@ async function buildLauncher(runDir) {
 // command's exec, the end line, with its peak memory, once it has exited.
 function startProcess(cwd, args, { full = false, env = undefined, report = null } = {}) {
   const launched = report === null ? args : [process.env.JET_GAUNTLET_LAUNCHER, report, ...args];
-  const child = spawn(envRunner, [...(full ? ["full"] : []), ...launched], {
+  const child = spawnInShell(launched, {
+    full,
+    env,
     cwd,
-    env: env === undefined ? process.env : { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
     detached: true,
   });
