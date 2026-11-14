@@ -224,15 +224,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1519,
+  "total": 1521,
   "counts": {
-    "Compiler": 783,
-    "Core": 185,
+    "Compiler": 784,
+    "Core": 181,
     "Docs": 10,
     "Examples": 42,
-    "Jetpack": 9,
+    "Jetpack": 8,
     "Tools": 6,
-    "tests": 484
+    "tests": 490
   },
   "regions": [
     {
@@ -259,371 +259,371 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 370,
+      "line": 379,
       "column": 9,
       "reason": "a private read-only view of the memfd aliases nothing writable"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 456,
+      "line": 462,
       "column": 5,
       "reason": "MAP_FIXED_NOREPLACE never replaces an existing mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 496,
+      "line": 503,
       "column": 5,
       "reason": "MAP_FIXED replaces only the image's own reserved pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 501,
+      "line": 508,
       "column": 9,
       "reason": "the bytes lie in the segment's last file page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 514,
+      "line": 521,
       "column": 13,
       "reason": "the caller mapped [from, to) + delta private and writable"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 530,
+      "line": 537,
       "column": 5,
       "reason": "MAP_FIXED replaces only the view's own fresh pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 534,
+      "line": 541,
       "column": 5,
       "reason": "the bytes lie in the view's last image page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 539,
+      "line": 546,
       "column": 9,
       "reason": "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 784,
+      "line": 868,
       "column": 5,
       "reason": "openat reads the NUL-terminated path at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 808,
+      "line": 892,
       "column": 5,
       "reason": "the timespec lies in the fresh zeroed page; nanosleep only reads it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 819,
+      "line": 903,
       "column": 5,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 829,
+      "line": 913,
       "column": 5,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 936,
+      "line": 1020,
       "column": 5,
       "reason": "brk(0) only reports the current break"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 940,
+      "line": 1024,
       "column": 5,
       "reason": "the map's 104 bytes lie in the data page's auxiliary-vector room, read already"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 951,
+      "line": 1035,
       "column": 5,
       "reason": "prlimit64 writes one rlimit (two words) at `scratch`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1016,
+      "line": 1100,
       "column": 5,
       "reason": "the caller's executor page is its own fresh mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1032,
+      "line": 1116,
       "column": 5,
       "reason": "the data page is this plan's own fresh mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1066,
+      "line": 1150,
       "column": 13,
       "reason": "F_GETFD only reads the descriptor's flags"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1076,
+      "line": 1160,
       "column": 9,
       "reason": "rt_sigaction with no new action writes the old one (32 bytes) to the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1090,
+      "line": 1174,
       "column": 5,
       "reason": "a fresh anonymous reservation aliases nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1100,
+      "line": 1184,
       "column": 5,
       "reason": "getrandom fills the 16 stack bytes at `random`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1139,
+      "line": 1223,
       "column": 5,
       "reason": "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1155,
+      "line": 1239,
       "column": 9,
       "reason": "the pair lies inside the bytes read into the data page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1182,
+      "line": 1266,
       "column": 5,
       "reason": "the words lie in the stack mapping, above its guard page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1204,
+      "line": 1288,
       "column": 5,
       "reason": "the block is this plan's own fresh mapping of plan_size bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1226,
+      "line": 1310,
       "column": 5,
       "reason": "the executor's records only reset process state; it then enters the loaded image on its own stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1245,
+      "line": 1329,
       "column": 5,
       "reason": "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1271,
+      "line": 1355,
       "column": 5,
       "reason": "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1284,
+      "line": 1368,
       "column": 5,
       "reason": "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1304,
+      "line": 1388,
       "column": 5,
       "reason": "openat reads the NUL-terminated path at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1314,
+      "line": 1398,
       "column": 5,
       "reason": "landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1329,
+      "line": 1413,
       "column": 5,
       "reason": "wait4 writes one int status to the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1339,
+      "line": 1423,
       "column": 5,
       "reason": "SIGKILL to a child this process started and has not reaped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1350,
+      "line": 1434,
       "column": 9,
       "reason": "a kernel sigaction with handler SIG_IGN on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1368,
+      "line": 1452,
       "column": 9,
       "reason": "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1405,
+      "line": 1489,
       "column": 5,
       "reason": "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 111,
+      "line": 114,
       "column": 9,
       "reason": "getrandom fills the first word of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 118,
+      "line": 121,
       "column": 9,
       "reason": "getrandom wrote the scratch page's first word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 152,
+      "line": 155,
       "column": 5,
       "reason": "pipe2 writes two descriptors into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 157,
+      "line": 160,
       "column": 5,
       "reason": "pipe2 wrote the scratch page's first word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 163,
+      "line": 166,
       "column": 9,
       "reason": "fcntl duplicates our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 175,
+      "line": 178,
       "column": 5,
       "reason": "closes our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 222,
+      "line": 225,
       "column": 9,
       "reason": "the poll set is our scratch page's first three entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 229,
+      "line": 232,
       "column": 9,
       "reason": "poll reads and writes the three entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 248,
+      "line": 251,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 277,
+      "line": 280,
       "column": 9,
       "reason": "the poll set is our scratch page's first two entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 282,
+      "line": 285,
       "column": 9,
       "reason": "poll reads and writes the two entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 288,
+      "line": 291,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 324,
+      "line": 327,
       "column": 5,
       "reason": "the bytes lie in our scratch mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 332,
+      "line": 335,
       "column": 5,
       "reason": "clock_gettime writes two words at scratch + 64, past the poll set"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 344,
+      "line": 347,
       "column": 9,
       "reason": "kills our own child"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 351,
+      "line": 354,
       "column": 9,
       "reason": "wait4 writes the status word into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 356,
+      "line": 359,
       "column": 5,
       "reason": "wait4 wrote the status word"
     },
@@ -1106,63 +1106,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2005,
-      "column": 1,
-      "reason": "source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2026,
+      "line": 2003,
       "column": 1,
       "reason": "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2049,
+      "line": 2026,
       "column": 1,
       "reason": "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2138,
+      "line": 2115,
       "column": 1,
       "reason": "the audited caller lends the stat scalar row and valid syscall object"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2140,
+      "line": 2117,
       "column": 5,
       "reason": "packed Linux 32-bit fields become independent portable machine words without any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2151,
+      "line": 2128,
       "column": 1,
       "reason": "calls a checked System V void(void) process entry that remains executable for the entire call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2161,
+      "line": 2138,
       "column": 1,
       "reason": "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 2263,
+      "line": 2240,
       "column": 1,
       "reason": "calls machine code; the caller vouches for its three-word System V signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1809,
+      "line": 1976,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -1932,14 +1925,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerFS.jet",
-      "line": 190,
+      "line": 236,
       "column": 9,
       "reason": "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerFS.jet",
-      "line": 211,
+      "line": 257,
       "column": 5,
       "reason": "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes"
     },
@@ -2103,6 +2096,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 189,
       "column": 5,
       "reason": "the serve entry runs once, on the image's only thread, before it serves"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Context.jet",
+      "line": 287,
+      "column": 5,
+      "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
@@ -2632,49 +2632,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 273,
+      "line": 326,
       "column": 9,
       "reason": "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 300,
+      "line": 353,
       "column": 9,
       "reason": "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 335,
+      "line": 388,
       "column": 9,
       "reason": "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 367,
+      "line": 420,
       "column": 9,
       "reason": "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 381,
+      "line": 434,
       "column": 9,
       "reason": "the mapping made above was never filed, so this is its only owner"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 446,
+      "line": 499,
       "column": 9,
       "reason": "host_shared_span proved end bytes from base lie inside the live mapping and end <= length bounds data's packed bytes; start + span <= end"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 501,
+      "line": 554,
       "column": 5,
       "reason": "host_shared_span proved count * 4 bytes from base lie inside the live mapping"
     },
@@ -2779,49 +2779,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 511,
-      "column": 5,
-      "reason": "both duplicated descriptors and the terminated name live through the held-inode linkat syscall"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 533,
+      "line": 507,
       "column": 9,
       "reason": "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 544,
+      "line": 518,
       "column": 5,
       "reason": "the terminated source-approved path and three writable birth-time output words stay live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 598,
+      "line": 572,
       "column": 5,
       "reason": "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 628,
+      "line": 602,
       "column": 9,
       "reason": "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 654,
+      "line": 628,
       "column": 5,
       "reason": "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 674,
+      "line": 648,
       "column": 9,
       "reason": "the held fd and stack-local source-validated winsize word live only through ioctl"
     },
@@ -2849,42 +2842,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 466,
+      "line": 439,
       "column": 5,
       "reason": "the terminated borrowed path and the 256-byte statx buffer are live for the syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 572,
+      "line": 545,
       "column": 13,
       "reason": "the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 580,
+      "line": 553,
       "column": 17,
       "reason": "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 587,
+      "line": 560,
       "column": 21,
       "reason": "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 664,
+      "line": 637,
       "column": 5,
       "reason": "both walk directories and terminated final parts live through renameat/renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 678,
+      "line": 651,
       "column": 9,
       "reason": "both walk directories and terminated final parts live through linkat"
     },
@@ -4200,14 +4193,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 95,
+      "line": 93,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 403,
+      "line": 401,
       "column": 5,
       "reason": "the terminated raw path and the 128-byte stat fact row are live for the syscall"
     },
@@ -4452,42 +4445,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 974,
+      "line": 778,
+      "column": 9,
+      "reason": "an idempotent install: every writer stores the same code address"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Scheduler.jet",
+      "line": 1001,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1226,
+      "line": 1253,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1259,
+      "line": 1286,
       "column": 5,
       "reason": "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1488,
+      "line": 1515,
       "column": 5,
       "reason": "gettid takes no arguments and retains nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1739,
+      "line": 1766,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1781,
+      "line": 1808,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -5090,6 +5090,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
       "line": 154,
+      "column": 9,
+      "reason": "jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Trap.jet",
+      "line": 159,
       "column": 5,
       "reason": "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words"
     },
@@ -5684,14 +5691,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 521,
+      "line": 528,
       "column": 5,
       "reason": "the testkit stops its own step child at a resource guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 766,
+      "line": 773,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -6167,35 +6174,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 156,
-      "column": 9,
-      "reason": "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Csv.jet",
-      "line": 421,
+      "line": 555,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 441,
-      "column": 5,
-      "reason": "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Csv.jet",
-      "line": 936,
+      "line": 1071,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1094,
+      "line": 1229,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -6209,21 +6202,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 117,
-      "column": 5,
-      "reason": "preserve the shipped decoder's hidden stderr effect at its existing host boundary"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Json.jet",
-      "line": 1307,
+      "line": 1257,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1312,
+      "line": 1262,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -6349,7 +6335,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Yaml.jet",
-      "line": 440,
+      "line": 457,
       "column": 5,
       "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
     },
@@ -6358,19 +6344,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "Core/Files/Files.jet",
       "line": 684,
       "column": 1,
-      "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Files/Files.jet",
-      "line": 690,
-      "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 758,
+      "line": 752,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6811,182 +6790,182 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 947,
+      "line": 948,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1115,
+      "line": 1116,
       "column": 1,
       "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1237,
+      "line": 1238,
       "column": 1,
       "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1313,
+      "line": 1314,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1319,
+      "line": 1320,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1324,
+      "line": 1325,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1331,
+      "line": 1332,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1335,
+      "line": 1336,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1342,
+      "line": 1343,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1352,
+      "line": 1353,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1358,
+      "line": 1359,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1523,
+      "line": 1595,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1537,
+      "line": 1609,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1551,
+      "line": 1623,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1555,
+      "line": 1627,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1559,
+      "line": 1631,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1565,
+      "line": 1637,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1571,
+      "line": 1643,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1575,
+      "line": 1647,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1600,
+      "line": 1672,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1607,
+      "line": 1679,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1785,
+      "line": 1857,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1789,
+      "line": 1861,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1793,
+      "line": 1865,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1800,
+      "line": 1872,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1804,
+      "line": 1876,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -7384,13 +7363,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Jetpack",
-      "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 691,
-      "column": 5,
-      "reason": "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here"
-    },
-    {
-      "package": "Jetpack",
       "file": "Jetpack/Provider/Batteries/embedded/embedded.jet",
       "line": 183,
       "column": 5,
@@ -7755,6 +7727,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/corelib_net/shared_memory_words_order_across_processes.fixture/main.jet",
+      "line": 25,
+      "column": 5,
+      "reason": "fork a peer that shares the mapping, and reap it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/cross/web_build_refuses_inline_c_before_codegen.fixture/main.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the scalar ABI contract matches the C definition"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/cross/web_build_refuses_inline_c_before_codegen.fixture/main.jet",
+      "line": 7,
+      "column": 5,
+      "reason": "call the audited inline C contract"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet",
       "line": 6,
       "column": 5,
@@ -8029,7 +8022,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "tests",
       "file": "tests/cases/module_storage/module_globals_start_laid_out_unless_they_hold_a_handle.fixture/main.jet",
-      "line": 120,
+      "line": 118,
       "column": 5,
       "reason": "one task writes the globals"
     },
@@ -8109,6 +8102,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 95,
       "column": 9,
       "reason": "kill -0 only asks whether the killed descendant still exists"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop.fixture/main.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "the test runs one task"
     },
     {
       "package": "tests",
@@ -10009,6 +10009,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/crypto/vault/guard_errors.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "vault key import: fixed guard vectors that never hold key material"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/crypto/vault/prepare_import_signing.jet",
       "line": 5,
       "column": 5,
@@ -10716,6 +10723,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/ui/ffi_unknown_argument.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/ffi_unknown_language.jet",
       "line": 1,
       "column": 1,
@@ -10876,14 +10890,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 783 |
-| Core | 185 |
+| Compiler | 784 |
+| Core | 181 |
 | Docs | 10 |
 | Examples | 42 |
-| Jetpack | 9 |
+| Jetpack | 8 |
 | Tools | 6 |
-| tests | 484 |
-| **total** | **1519** |
+| tests | 490 |
+| **total** | **1521** |
 
 ### Regions
 
@@ -10892,59 +10906,59 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 181:5 | "memfd_create reads the NUL-terminated name at `name`" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 195:5 | "the caller owns `fd` and nothing uses it any more" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 205:9 | "the caller mapped `count` writable bytes at `address`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 370:9 | "a private read-only view of the memfd aliases nothing writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 456:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 496:5 | "MAP_FIXED replaces only the image's own reserved pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 501:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 514:13 | "the caller mapped [from, to) + delta private and writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 530:5 | "MAP_FIXED replaces only the view's own fresh pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 534:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 539:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 784:5 | "openat reads the NUL-terminated path at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 808:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 819:5 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 829:5 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 936:5 | "brk(0) only reports the current break" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 940:5 | "the map's 104 bytes lie in the data page's auxiliary-vector room, read already" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 951:5 | "prlimit64 writes one rlimit (two words) at `scratch`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1016:5 | "the caller's executor page is its own fresh mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1032:5 | "the data page is this plan's own fresh mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1066:13 | "F_GETFD only reads the descriptor's flags" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1076:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1090:5 | "a fresh anonymous reservation aliases nothing" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1100:5 | "getrandom fills the 16 stack bytes at `random`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1139:5 | "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1155:9 | "the pair lies inside the bytes read into the data page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1182:5 | "the words lie in the stack mapping, above its guard page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1204:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1226:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1245:5 | "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1271:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1284:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1304:5 | "openat reads the NUL-terminated path at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1314:5 | "landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1329:5 | "wait4 writes one int status to the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1339:5 | "SIGKILL to a child this process started and has not reaped" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1350:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1368:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1405:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 111:9 | "getrandom fills the first word of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 118:9 | "getrandom wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 152:5 | "pipe2 writes two descriptors into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 157:5 | "pipe2 wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 163:9 | "fcntl duplicates our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 175:5 | "closes our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 222:9 | "the poll set is our scratch page's first three entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 229:9 | "poll reads and writes the three entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 248:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 277:9 | "the poll set is our scratch page's first two entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 282:9 | "poll reads and writes the two entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 288:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 324:5 | "the bytes lie in our scratch mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 332:5 | "clock_gettime writes two words at scratch + 64, past the poll set" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 344:9 | "kills our own child" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 351:9 | "wait4 writes the status word into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 356:5 | "wait4 wrote the status word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 379:9 | "a private read-only view of the memfd aliases nothing writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 462:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 503:5 | "MAP_FIXED replaces only the image's own reserved pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 508:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 521:13 | "the caller mapped [from, to) + delta private and writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 537:5 | "MAP_FIXED replaces only the view's own fresh pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 541:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 546:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 868:5 | "openat reads the NUL-terminated path at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 892:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 903:5 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 913:5 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1020:5 | "brk(0) only reports the current break" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1024:5 | "the map's 104 bytes lie in the data page's auxiliary-vector room, read already" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1035:5 | "prlimit64 writes one rlimit (two words) at `scratch`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1100:5 | "the caller's executor page is its own fresh mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1116:5 | "the data page is this plan's own fresh mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1150:13 | "F_GETFD only reads the descriptor's flags" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1160:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1174:5 | "a fresh anonymous reservation aliases nothing" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1184:5 | "getrandom fills the 16 stack bytes at `random`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1223:5 | "the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1239:9 | "the pair lies inside the bytes read into the data page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1266:5 | "the words lie in the stack mapping, above its guard page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1288:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1310:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1329:5 | "the executor's first record forks; the child runs only the executor and enters the image, the parent returns here" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1355:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1368:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1388:5 | "openat reads the NUL-terminated path at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1398:5 | "landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1413:5 | "wait4 writes one int status to the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1423:5 | "SIGKILL to a child this process started and has not reaped" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1434:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1452:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1489:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 114:9 | "getrandom fills the first word of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 121:9 | "getrandom wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 155:5 | "pipe2 writes two descriptors into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 160:5 | "pipe2 wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 166:9 | "fcntl duplicates our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 178:5 | "closes our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 225:9 | "the poll set is our scratch page's first three entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 232:9 | "poll reads and writes the three entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 251:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 280:9 | "the poll set is our scratch page's first two entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 285:9 | "poll reads and writes the two entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 291:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 327:5 | "the bytes lie in our scratch mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 335:5 | "clock_gettime writes two words at scratch + 64, past the poll set" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 347:9 | "kills our own child" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 354:9 | "wait4 writes the status word into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 359:5 | "wait4 wrote the status word" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 82:1 | "a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 110:5 | "the caller owns `count` writable bytes at `address`" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 117:5 | "the caller owns `count` readable bytes at `address`" |
@@ -11013,15 +11027,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1946:1 | "calls a checked native runtime callback with three machine-word arguments" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1963:1 | "calls a checked native runtime callback with four machine-word arguments" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1982:1 | "calls a checked native runtime callback with five machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2005:1 | "source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2026:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2049:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2138:1 | "the audited caller lends the stat scalar row and valid syscall object" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2140:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2151:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2161:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2263:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1809:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2003:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2026:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2115:1 | "the audited caller lends the stat scalar row and valid syscall object" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2117:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2128:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2138:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2240:1 | "calls machine code; the caller vouches for its three-word System V signature" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1976:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 178:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -11131,8 +11144,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 267:5 | "checked binary closure adapter with live environment, inputs and output slots" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 273:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 279:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
-| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 190:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
-| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 211:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
+| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 236:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
+| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 257:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 128:5 | "startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 149:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
@@ -11156,6 +11169,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 127:13 | "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 174:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 189:5 | "the serve entry runs once, on the image's only thread, before it serves" |
+| Compiler | Compiler/JetRuntime/Source/Context.jet | 287:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 23:5 | "runtime-init runs before any other thread exists" |
@@ -11231,13 +11245,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 132:9 | "the retired entry owned this mapping of exactly `size` bytes and no token names it now" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 170:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 273:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 300:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 335:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 367:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 381:9 | "the mapping made above was never filed, so this is its only owner" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 446:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 501:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 326:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 353:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 388:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 420:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 434:9 | "the mapping made above was never filed, so this is its only owner" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 499:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 554:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 9:9 | "getdents supplies a live terminated name; openat describes the entry without following links" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 15:13 | "the owned descriptor and full Linux stat buffer live through fstat and close" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 46:9 | "an owned fresh directory descriptor and writable getdents64 buffer" |
@@ -11252,22 +11266,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 446:9 | "the held directory and terminated source-approved single name stay live through openat" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 469:9 | "the held directory and terminated final name live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat; no read access or link traversal" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 477:9 | "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 511:5 | "both duplicated descriptors and the terminated name live through the held-inode linkat syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 533:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 544:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 598:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 628:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 654:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 674:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 507:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 518:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 572:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 602:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 628:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 648:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 206:13 | "the owned walk descriptor and terminated part live through openat" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 271:13 | "the walk directory and terminated final part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 466:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 572:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 580:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 587:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 664:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 678:9 | "both walk directories and terminated final parts live through linkat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 439:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 545:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 553:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 560:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 637:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 651:9 | "both walk directories and terminated final parts live through linkat" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 21:5 | "value transfers one 56-byte error header and its nullable owned E4 text children" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 32:5 | "value borrows the complete error header; result exclusively owns 56 fresh bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 68:5 | "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot" |
@@ -11455,8 +11468,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 43:5 | "LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 70:9 | "count addresses the aligned prefix word of a live refcounted block whose only reference the caller holds" |
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 90:9 | "LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 95:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 403:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 93:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 401:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 31:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 488:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 494:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
@@ -11491,12 +11504,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 304:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 320:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 641:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 974:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1226:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1259:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1488:5 | "gettid takes no arguments and retains nothing" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1739:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1781:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 778:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1001:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1253:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1286:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1515:5 | "gettid takes no arguments and retains nothing" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1766:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1808:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -11582,7 +11596,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 26:5 | "address is one writable byte in the allocated debug-text buffer; value is a byte" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 90:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 154:5 | "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 154:9 | "jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 159:5 | "the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 59:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 71:5 | "only an attached web build records, on its one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 81:5 | "a web page's module runs on one thread" |
@@ -11667,8 +11682,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
 | Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 55:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 521:5 | "the testkit stops its own step child at a resource guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 766:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 528:5 | "the testkit stops its own step child at a resource guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 773:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 179:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 368:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
@@ -11736,15 +11751,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Cbor.jet | 165:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 235:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 337:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/Csv.jet | 156:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
-| Core | Core/Encoding/Csv.jet | 421:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Encoding/Csv.jet | 441:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
-| Core | Core/Encoding/Csv.jet | 936:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/Csv.jet | 1094:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/Csv.jet | 555:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Encoding/Csv.jet | 1071:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Csv.jet | 1229:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 551:9 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Json.jet | 117:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1307:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1312:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1257:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1262:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 25:5 | "the shared parser validated this exact numeric lexeme" |
 | Core | Core/Encoding/Stream.jet | 439:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
 | Core | Core/Encoding/Stream.jet | 579:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
@@ -11762,10 +11774,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/XmlEngine.jet | 139:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | Core | Core/Encoding/XmlEngine.jet | 177:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2678:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
-| Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 684:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/Files/Files.jet | 690:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 758:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
+| Core | Core/Files/Files.jet | 684:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 752:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 650:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 134:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 139:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11828,32 +11839,32 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Process/Process.jet | 231:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 307:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 947:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 1115:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1237:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
-| Core | Core/Sys/Sys.jet | 1313:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 1319:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 1324:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 1331:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1335:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 1342:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 1352:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 1358:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 1523:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 1537:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 1551:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 1555:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 1559:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 1565:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 1571:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1575:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1600:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1607:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1785:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1789:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1793:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 1800:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 1804:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 948:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 1116:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1238:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 1314:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 1320:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 1325:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 1332:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1336:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 1343:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 1353:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 1359:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 1595:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 1609:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 1623:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 1627:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 1631:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 1637:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 1643:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1647:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1672:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1679:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1857:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1861:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1865:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1872:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1876:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1389:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1410:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
@@ -11910,7 +11921,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 23:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 514:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 691:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
 | Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 183:5 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 67:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 122:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
@@ -11963,6 +11973,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet | 9:5 | "fixed Argon2id parallel-lane known-answer vector" |
 | tests | tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/main.jet | 16:5 | "the caller's block holds the bytes and stays unused while the adopted region and its blocks live" |
 | tests | tests/cases/corelib/core_mem_regions_hand_out_blocks_and_a_window_checks_its_index.fixture/window.jet | 6:5 | "the four Ints are fresh heap storage, every access stays inside them, and they are released once" |
+| tests | tests/cases/corelib_net/shared_memory_words_order_across_processes.fixture/main.jet | 25:5 | "fork a peer that shares the mapping, and reap it" |
+| tests | tests/cases/cross/web_build_refuses_inline_c_before_codegen.fixture/main.jet | 1:1 | "the scalar ABI contract matches the C definition" |
+| tests | tests/cases/cross/web_build_refuses_inline_c_before_codegen.fixture/main.jet | 7:5 | "call the audited inline C contract" |
 | tests | tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
 | tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet | 4:5 | "the tuple storage is live but this raw Int is misaligned" |
 | tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet | 11:5 | "the recursive address outlives its owning Jet frame" |
@@ -12002,7 +12015,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 8:5 | "probe" |
 | tests | tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet | 318:5 | "the exit callback only reads its captured List" |
 | tests | tests/cases/memory_semantics/unsafe_address_keeps_string_alive_to_block_end.fixture/main.jet | 9:5 | "label is live on this frame until this block ends" |
-| tests | tests/cases/module_storage/module_globals_start_laid_out_unless_they_hold_a_handle.fixture/main.jet | 120:5 | "one task writes the globals" |
+| tests | tests/cases/module_storage/module_globals_start_laid_out_unless_they_hold_a_handle.fixture/main.jet | 118:5 | "one task writes the globals" |
 | tests | tests/cases/observe/panic_context_uses_only_lexically_live_locals.fixture/unsafe/panic_lexical_unsafe.jet | 3:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
 | tests | tests/cases/os_native/credentials_change_on_every_thread.fixture/main.jet | 73:5 | "the process is root of a disposable user namespace; it drops to a mapped user" |
 | tests | tests/cases/os_native/fork_under_load_child_completes.fixture/main.jet | 45:9 | "the child only allocates, resolves and exits; the parent reaps it" |
@@ -12014,6 +12027,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/policy_scope/unsafe_obligations_are_checked_before_codegen.fixture/run.jet | 5:5 | "local pointer" |
 | tests | tests/cases/process_sessions/subjects/native/session_fixture.jet | 53:5 | "the fixture's descendant rejoins the process group of the tree that spawned it" |
 | tests | tests/cases/process_sessions/subjects/native/session_fixture.jet | 95:9 | "kill -0 only asks whether the killed descendant still exists" |
+| tests | tests/cases/resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop.fixture/main.jet | 19:5 | "the test runs one task" |
 | tests | tests/cases/run_entry/module_write_from_fn_is_e0111.fixture/ok.jet | 8:5 | "this program starts no task, so nothing else writes `raw`" |
 | tests | tests/cases/single_use/drop_erases_no_unsafe_in_codegen.fixture/source-1.jet | 14:5 | "gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_block_satisfies_single_use.fixture/source-1.jet | 15:5 | "the resource is already gone; nothing to release" |
@@ -12285,6 +12299,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/crypto/expert/xchacha20poly1305_seal.jet | 9:5 | "fixed CFRG XChaCha20-Poly1305 vector" |
 | tests | tests/conformance/corpus/core/crypto/vault/commit_import_signing.jet | 5:5 | "restore a fixed signing key into the vault" |
 | tests | tests/conformance/corpus/core/crypto/vault/commit_import_x25519.jet | 5:5 | "restore a fixed X25519 secret into the vault" |
+| tests | tests/conformance/corpus/core/crypto/vault/guard_errors.jet | 33:5 | "vault key import: fixed guard vectors that never hold key material" |
 | tests | tests/conformance/corpus/core/crypto/vault/prepare_import_signing.jet | 5:5 | "restore a fixed signing-key vector" |
 | tests | tests/conformance/corpus/core/crypto/vault/prepare_import_x25519.jet | 5:5 | "restore a fixed X25519 secret vector" |
 | tests | tests/conformance/corpus/core/crypto/x25519.jet | 11:5 | "inspect shared-secret length" |
@@ -12386,6 +12401,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/ffi_inline_c_mismatch.jet | 1:1 | "deliberate mismatch fixture" |
 | tests | tests/ui/ffi_inline_cpp_call_needs_unsafe_region.jet | 1:1 | "the scalar ABI contract matches the C++ definition" |
 | tests | tests/ui/ffi_inline_cpp_call_needs_unsafe_region.jet | 7:5 | "call the audited inline C++ contract" |
+| tests | tests/ui/ffi_unknown_argument.jet | 1:1 | "demo" |
 | tests | tests/ui/ffi_unknown_language.jet | 1:1 | "demo" |
 | tests | tests/ui/gates_load_package_ceiling/run.jet | 2:5 | "audited load-only gate" |
 | tests | tests/ui/lowlevel_e3102.jet | 2:5 | "addr is valid" |
@@ -12514,10 +12530,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/CborStream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 copies stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only that exact copy becomes the retained key; arbitrary wire bytes cannot reach this transfer."},
   {"file":"Core/Encoding/CborStream.jet","function":"next_inner","proof":"For a CBOR text item cbor_stream.jet:303 obtains the owned payload, :306 strictly validates that exact list's UTF-8 and returns Syntax on failure, then :308 immediately copies it through __bytes_into_text. No mutation intervenes, and binary items(:304) never use the text transfer. Host/wire callers cannot bypass the validator with malformed payload bytes."},
   {"file":"Core/Encoding/Eetf.jet","function":"term","proof":"A method of the private TermWriter (Eetf.jet:521), which is not among core.encoding.eetf's exports (Compiler/Prelude/Core.rows:103), and depth-bounded (:548). Its #Unsafe region (:549-603) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to encode them; every byte is written through the bounds-checked put, put_u32 and payload helpers after item() length limits, and object entries come from stream.object_entries, itself a recorded safe abstraction. No carrier is constructed or mutated and no memory is addressed."},
-  {"file":"Core/Encoding/Csv.jet","function":"close_field","proof":"__bytes_into_text at csv.jet:124 copies the whole-value parser's field. typed_records(:213-222) obtains complete scalar byte sequences from a valid String, and TypedCSV.push(:138-200) either appends the whole sequence or replaces/removes ASCII CSV syntax; doubled quotes and CRLF are ASCII. Thus field is empty or concatenated complete UTF-8 scalars at every close; it is copied and reset before reuse(:124-126), never exposed as arbitrary caller bytes."},
   {"file":"Core/Encoding/Csv.jet","function":"query_text","proof":"csv.jet:315-316 enforce the bounded read's size/list limits and :317 validates sample.bytes with the strict shared UTF-8 validator. The gate at :318-319 immediately copies that same owned list through __bytes_into_text; failures return FieldError before conversion. A caller's arbitrary file contents cannot produce an invalid String or retain a native read-buffer borrow."},
   {"file":"Core/Encoding/Csv.jet","function":"finish_field","proof":"CSVReader.character(:725-744) validates lead width, all continuation bytes, overlong/surrogate/out-of-range cases before next_inner(:880-882) calls push. push(:798-874) appends each entire validated scalar or only ASCII quote/CRLF escapes. Consequently finish_field's __bytes_into_text(:769) copies only complete UTF-8 storage, then resets field(:771). Partial/invalid wire scalars fail without reaching this gate."},
-  {"file":"Core/Encoding/Csv.jet","function":"field_text","proof":"Not a core.encoding.csv export (Compiler/Prelude/Core.rows:105-106); its callers are parse_rows_with's loop (Csv.jet:461, :470, :480, :486, :513, :515). raw is the input String's bytes (:411), and each argument is raw.slice(start, i) or a quoted field of such bytes plus ASCII 0x22 for doubled quotes, cut only at an ASCII quote, CR or LF, or at a whole match of the delimiter, which rows checks is one character of a String (:64-67) and delimiter_at matches in full (:385-391). A UTF-8 continuation byte never equals an ASCII or lead byte, so every cut is a scalar boundary and __bytes_into_text receives complete UTF-8."},
   {"file":"Core/Encoding/Csv.jet","function":"__take_plain","proof":"The gate at Csv.jet:1040-1042 copies buffer[start..<end] into a String. The scan at :1031 advances end only while stops[byte] == 0, and stops (a priv field, built once by reader at :1141 and never written again) is 1 for every byte from 128, so each byte of the slice is ASCII and the slice is whole UTF-8. start..<end lies inside buffer: end < start + room <= buffer.len() (:1033)."},
   {"file":"Core/Encoding/Json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
   {"file":"Core/Encoding/Stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
