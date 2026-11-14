@@ -4,8 +4,9 @@ fixture: pure.fixture
 env: NO_COLOR=1
 step build: jet build --json pure.jet
 exit: nonzero
-json: stderr doc $.reports[?code="E0927"] #>= 1
+json: stdout doc $.reports[?code="E0927"] #>= 1 # `jet build --json` prints its status on stdout
+stderr: empty
 step run: jet run --json pure.jet
 exit: nonzero
-json: stderr doc $.reports[*].code == build
-json: stderr doc $.reports #== build
+json: stderr doc $.reports[*].code == build.stdout # `jet run --json` keeps it on stderr, the program's stdout stays its own
+json: stderr doc $.reports #== build.stdout
