@@ -9,13 +9,13 @@ step: jet emit --ir main.jet --fn add3
 exit: 0
 stdout: !~ "jet_rt_alloc" # the result lives in frame storage, not on the heap
 stdout: !~ "jet_rt_free" # nothing is freed either
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = fixed_lists_are_inline_values_on_every_tier.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = fixed_lists_are_inline_values_on_every_tier.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = fixed_lists_are_inline_values_on_every_tier.out
 step: jet build main.jet

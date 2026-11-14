@@ -1,0 +1,42 @@
+# `-O0`, `-O1` and `-O2` are the flags of the `optimize` option, one per
+# level. A build at each traces its optimizer span under that level (the
+# `ir.opt` span is named `O0`, `O1` or `O2`), and the program prints the same
+# at every level. `--optimize` is no flag: with a value or without, it is
+# refused as any flag jet does not have is.
+write: main.jet = "add: fn(a: Int, b: Int) -> Int {\n    a + b\n}\n\nrun: fn() {\n    print(add(1, 2))\n}\n"
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build -O0 --trace=o0.json main.jet
+exit: 0
+file: o0.json ~ "{\"name\":\"O0\",\"cat\":\"ir.opt\",\"ph\":\"B\"" # -O0 optimizes at O0
+file: o0.json !~ "{\"name\":\"O2\",\"cat\":\"ir.opt\"" # and at no other level
+step: .jet/build/main
+exit: 0
+stdout: = "3\n"
+step: jet build -O1 --trace=o1.json main.jet
+exit: 0
+file: o1.json ~ "{\"name\":\"O1\",\"cat\":\"ir.opt\",\"ph\":\"B\"" # -O1 optimizes at O1
+file: o1.json !~ "{\"name\":\"O0\",\"cat\":\"ir.opt\"" # and at no other level
+step: .jet/build/main
+exit: 0
+stdout: = "3\n"
+step: jet build -O2 --trace=o2.json main.jet
+exit: 0
+file: o2.json ~ "{\"name\":\"O2\",\"cat\":\"ir.opt\",\"ph\":\"B\"" # -O2 optimizes at O2
+file: o2.json !~ "{\"name\":\"O1\",\"cat\":\"ir.opt\"" # and at no other level
+step: .jet/build/main
+exit: 0
+stdout: = "3\n"
+step: jet build --optimize=basic main.jet
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `--optimize` isn't a flag jet understands" # the old spelling is an unknown flag
+stderr: !~ "-O1" # no fix names the level it once meant
+step: jet build --optimize main.jet
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `--optimize` isn't a flag jet understands" # bare, too
+step: jet run --optimize=full main.jet
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `--optimize` isn't a flag jet understands" # and on every command
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "3\n" # `jet run` takes the level flags too

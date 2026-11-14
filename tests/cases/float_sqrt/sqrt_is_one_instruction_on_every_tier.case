@@ -8,13 +8,13 @@ step: jet emit --ir main.jet --fn sqrt
 exit: 0
 stdout: ~ ": sqrt s" # the Core sqrt body is the sqrt operation
 stdout: !~ "jet_std_math_sqrt" # no runtime route is called
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = sqrt_is_one_instruction_on_every_tier.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = sqrt_is_one_instruction_on_every_tier.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = sqrt_is_one_instruction_on_every_tier.out
 step: jet build main.jet

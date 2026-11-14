@@ -6,21 +6,21 @@ fixture: local_values_reaching_a_context_read_stay_run_time_code.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet run --optimize=none fold.jet
+step: jet run -O0 fold.jet
 exit: 0
 stdout: ~ "local true prepared 0" # the block's deadline, not the build root's
-step: jet run --optimize=basic fold.jet
+step: jet run -O1 fold.jet
 exit: 0
 stdout: ~ "local true prepared 0" # the block's deadline, not the build root's
-step: jet run --optimize=full fold.jet
+step: jet run -O2 fold.jet
 exit: 0
 stdout: ~ "local true prepared 0" # the block's deadline, not the build root's
-step: jet run --optimize=none thread2.jet
+step: jet run -O0 thread2.jet
 exit: 0
 stdout: ~ "task local 1" # the task's thread, not the build root's
-step: jet run --optimize=basic thread2.jet
+step: jet run -O1 thread2.jet
 exit: 0
 stdout: ~ "task local 1" # the task's thread, not the build root's
-step: jet run --optimize=full thread2.jet
+step: jet run -O2 thread2.jet
 exit: 0
 stdout: ~ "task local 1" # the task's thread, not the build root's

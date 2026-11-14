@@ -1384,8 +1384,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    // At O0 only the inline Int facts run (Opt.jet ir_opt_module_facts).
-    if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
+    // At O0 only the inline Int facts run (Opt.jet ir_opt_module_facts). The
+    // span is named by the level it optimizes at (`O2`).
+    if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O{level}", -1, -1)
     report: ir_optimize_module(built.program, jet_cli_opt_options(level, options), threads)
     // With `--opt-verify`, the lint of each body as the passes get it
     // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
@@ -1565,13 +1566,13 @@ jet_cli_native_report: fn(file: String, command: String, failure: JetCLINativeFa
     }
 }
 
-// AGENTS.md I9: the backend level of the `optimize` build option: `none` is
-// O0 (the stock value of run, dev and test, and the stock `debug` profile),
-// `basic` O1, `full` O2 (the stock value of build and the `release` profile).
+// AGENTS.md I9: the backend level of the `optimize` build option: O0 (the
+// stock value of run, dev and test, and the stock `debug` profile), O1, or
+// O2 (the stock value of build and the `release` profile).
 jet_cli_native_level: fn(options: BuildOptions) -> Int Never! {
     if build_options_value(options, "optimize") == {
-        "full" -> 2
-        "basic" -> 1
+        "O2" -> 2
+        "O1" -> 1
         else -> 0
     }
 }
@@ -1909,7 +1910,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
-// (`jet run [--profile=…] [--optimize=…] [--log=…] [--deep-checks=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// (`jet run [--profile=…] [-O0|-O1|-O2] [--log=…] [--deep-checks=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
 // A run confined by `FS.Read("<path>")` grants, its package's or this
 // invocation's (jet_cli_merged_read_scope), reads only the paths of
 // `read_scope`, and JET_READ_SCOPE names them, so the runtime's refusal of

@@ -9,7 +9,7 @@
 # Defaults: --jet target-rel4/release/jet, --runs 3 (best wall time kept),
 #           --out $JET_SCRATCH_ROOT/stdout-buffer.
 # Needs strace, script (util-linux) and python3. The Jet program is built
-# once with `jet build --optimize=full`; run the script in the heavy slot.
+# once with `jet build -O2`; run the script in the heavy slot.
 #
 # Programs, one row each per (N, target, mode):
 #   jet         the buffered stdout under test (after).
@@ -55,11 +55,11 @@ mkdir -p "$out"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-(cd "$here" && "$jet" build --quiet --optimize=full --output-dir="$out/bin" lines.jet) || { echo "jet build failed" >&2; exit 1; }
+(cd "$here" && "$jet" build --quiet -O2 --output-dir="$out/bin" lines.jet) || { echo "jet build failed" >&2; exit 1; }
 bin=$out/bin/lines
 programs=(jet jet-flush)
 if [ -n "$before_jet" ]; then
-  (cd "$here" && "$before_jet" build --quiet --optimize=full --output-dir="$out/before" lines.jet) || { echo "before jet build failed" >&2; exit 1; }
+  (cd "$here" && "$before_jet" build --quiet -O2 --output-dir="$out/before" lines.jet) || { echo "before jet build failed" >&2; exit 1; }
   programs+=(jet-before)
 fi
 programs+=(python3 python3-u)

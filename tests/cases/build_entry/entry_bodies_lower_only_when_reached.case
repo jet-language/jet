@@ -9,7 +9,7 @@ fixture: entry_bodies_lower_only_when_reached.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_TRACE_DETAIL=functions
-step: jet build --optimize=none --trace=trace.json main.jet
+step: jet build -O0 --trace=trace.json main.jet
 exit: 0
 file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached function is still checked
 file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # but not lowered
@@ -17,7 +17,7 @@ file: trace.json ~ "{\"name\":\"run\",\"cat\":\"ir.function\"" # the entry is lo
 file: trace.json ~ "{\"name\":\"tidy\",\"cat\":\"ir.function\"" # so is the job, which no call names
 file: trace.json ~ "{\"name\":\"greet\",\"cat\":\"ir.function\"" # and the function the entry calls
 file: trace.json ~ "{\"name\":\"double\",\"cat\":\"ir.function\"" # and the callback it passes as a value
-step: jet build --optimize=none --dead-code=keep --trace=keep.json main.jet
+step: jet build -O0 --dead-code=keep --trace=keep.json main.jet
 exit: 0
 file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # `dead_code: keep` lowers every function of the package
 step: jet run main.jet

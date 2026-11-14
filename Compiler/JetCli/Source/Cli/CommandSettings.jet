@@ -17,7 +17,8 @@ use {
     jet_driver.[JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[
         Diagnostic, JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, JetCLIFlagSpec, JetCLIFlagValue,
-        diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_cli_flag_typed_reason,
+        build_option_level_of_flag, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all,
+        jet_cli_flag_typed_reason,
     ]
 }
 
@@ -245,13 +246,16 @@ jet_cli_setting_text: fn(text: String, key: String, flag: String, source: String
 }
 
 // Is `spec` typed in `written`, as itself, `--flag=value` or a short form?
-// Words after `--` are the program's.
+// A level flag (`-O2`) is typed when any level flag is, since one level
+// replaces another. Words after `--` are the program's.
 jet_cli_setting_typed: fn(spec: JetCLIFlagSpec, written: [String]) -> Bool Never! {
     short: "Short form of {spec.long}"
+    level: build_option_level_of_flag(spec.long) != None
     loop word in written {
         if word == "--" -> return false
         head: word.split("=").to_list()[0]
         if head == spec.long -> return true
+        if level && build_option_level_of_flag(word) != None -> return true
         loop other in JET_CLI_FLAGS {
             if other.long == head && other.help == short -> return true
         }

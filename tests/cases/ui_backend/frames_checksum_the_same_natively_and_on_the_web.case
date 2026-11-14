@@ -8,16 +8,16 @@
 fixture: frames_checksum_the_same_natively_and_on_the_web.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 exit: 0
 stdout: ~ "frames 3\nframe 0: " # the three scripted frames are shown; the closing frame draws nothing
 stdout: ~ "corner: #0B0B0D, alpha 255\nred fill: #E8232A, alpha 255\nrepainted: #0B0B0D, alpha 255\n" # the hand-derived pixels
 stderr: empty
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 exit: 0
 stdout: == o0
 stderr: empty
-step build: jet build --optimize=full main.jet
+step build: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

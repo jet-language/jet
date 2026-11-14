@@ -5,21 +5,21 @@
 # The checked allocator traps a double free or a use after free.
 fixture: union_argument_is_lent_not_copied.fixture
 env: NO_COLOR=1
-step: jet run --checked-alloc --optimize=none main.jet
+step: jet run --checked-alloc -O0 main.jet
 exit: 0 # o0
 stdout: = union_argument_is_lent_not_copied.out # o0
-step: jet run --checked-alloc --optimize=basic main.jet
+step: jet run --checked-alloc -O1 main.jet
 exit: 0 # o1
 stdout: = union_argument_is_lent_not_copied.out # o1
-step: jet run --checked-alloc --optimize=full main.jet
+step: jet run --checked-alloc -O2 main.jet
 exit: 0 # o2
 stdout: = union_argument_is_lent_not_copied.out # o2
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = union_argument_is_lent_not_copied.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = union_argument_is_lent_not_copied.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = union_argument_is_lent_not_copied.out

@@ -9,13 +9,13 @@ step rangedev: jet run range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
-step rangenone: jet run --profile=hardened --optimize=none range.jet
+step rangenone: jet run --profile=hardened -O0 range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # O0: the step past the tuple stops
 stderr: ~ "range.jet:8:15, in #Unsafe gate" # the fault is located at the read past the tuple
 stderr: ~ "the access starts at offset 32 of the live range 0x" # the range's addresses vary with ASLR
-step rangebasic: jet run --profile=hardened --optimize=basic range.jet
+step rangebasic: jet run --profile=hardened -O1 range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # O1: the step past the tuple stops

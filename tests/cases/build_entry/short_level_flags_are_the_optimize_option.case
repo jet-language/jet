@@ -1,32 +1,32 @@
-# `-O0`, `-O1` and `-O2` are the short forms of `--optimize=none`, `basic`
-# and `full`: one option, so they share its layers, its duplicate check and
-# its pins, in either argument order. A short flag over a profile or
-# `build: fn` value says so in the long spelling, two levels that disagree
-# are E2104, and one against a pin is E2113. `jet run` stays at `none` and
-# `-O2` runs the same program at `full`.
+# `-O0`, `-O1` and `-O2` are the flags of the `optimize` option, one per
+# level: one option, so they share its layers, its duplicate check and
+# its pins, in either argument order. A level flag over a profile or
+# `build: fn` value says so in a note, two levels that disagree
+# are E2104, and one against a pin is E2113. `jet run` stays at `O0` and
+# `-O2` runs the same program at `O2`.
 fixture: fixtures/build_options
 artifact: app
 env: NO_COLOR=1
 step: jet build -O1
 cwd: set
 exit: 0
-stderr: ~ "note: --optimize=basic replaces b.optimize(.Full) at build.jet:3 for this run" # -O1 is --optimize=basic
-step: jet build -O1 --optimize=full
+stderr: ~ "note: -O1 replaces b.optimize(.O2) at build.jet:3 for this run" # the note names the level flag and the replaced call
+step: jet build -O1 -O2
 cwd: set
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--optimize=basic` and `--optimize=full` disagree" # the rest of the report is the registered E2104 row
-step: jet build --optimize=full -O1
+stderr: ~ "Error [jet.InvalidCommandInput]: `-O1` and `-O2` disagree" # the rest of the report is the registered E2104 row
+step: jet build -O2 -O1
 cwd: set
 exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]: `--optimize=full` and `--optimize=basic` disagree" # the other order
-step: jet build -O2 --optimize=full
+stderr: ~ "Error [jet.InvalidCommandInput]: `-O2` and `-O1` disagree" # the other order
+step: jet build -O2 -O2
 cwd: set
-exit: 0 # two spellings of one level agree
+exit: 0 # a repeated level agrees with itself
 step: jet run --profile=fast -O0 main.jet
 cwd: set
 exit: 0
 stdout: = "build options: ok\n"
-stderr: ~ "note: --optimize=none replaces optimize: full in profile `fast` of package.jet for this run" # -O0 over the profile value
+stderr: ~ "note: -O0 replaces optimize: O2 in profile `fast` of package.jet for this run" # -O0 over the profile value
 step: jet run -O2 main.jet
 cwd: set
 exit: 0
@@ -37,4 +37,4 @@ exit: 0 # the pinned value itself
 step: jet build -O0
 cwd: pinned
 exit: 2
-stderr: ~ "Error [jet.PinnedBuildOption]: `optimize` is pinned to `full` at build.jet:3, so `--optimize=none` can't change it" # -O0 against the pin
+stderr: ~ "Error [jet.PinnedBuildOption]: `optimize` is pinned to `O2` at build.jet:3, so `-O0` can't change it" # -O0 against the pin

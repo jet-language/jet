@@ -9,7 +9,7 @@ requires: os:unix
 fixture: sigterm_answers_the_request_in_flight.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet build --optimize=none --allow=Exec,Net,Time,FS.Read,IO main.jet
+step: jet build -O0 --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
 
 session o0 raw: built
@@ -22,7 +22,7 @@ close o0
 exit: 0
 stdout: = "in flight: HTTP/1.1 200 OK\nclient: cancelled\ndrained: accepted=1 completed=1 cancelled=0\n"
 
-step: jet build --optimize=basic --allow=Exec,Net,Time,FS.Read,IO main.jet
+step: jet build -O1 --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
 
 session o1 raw: built
@@ -35,7 +35,7 @@ close o1
 exit: 0
 stdout: = "in flight: HTTP/1.1 200 OK\nclient: cancelled\ndrained: accepted=1 completed=1 cancelled=0\n"
 
-step: jet build --optimize=full --allow=Exec,Net,Time,FS.Read,IO main.jet
+step: jet build -O2 --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
 
 session o2 raw: built

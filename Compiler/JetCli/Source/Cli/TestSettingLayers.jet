@@ -23,11 +23,14 @@ use {
         TEST_SETTINGS_PLAN_ENV,
         TestSetting,
         TestSettingError,
+        build_option_level_flag,
+        build_option_level_of_flag,
         test_settings_get,
         test_settings_levels,
         test_settings_lines,
         test_settings_on,
         test_setting_flag,
+        test_setting_flag_row,
         test_settings_parse_lines,
         test_settings_shard_count,
     ]
@@ -130,14 +133,11 @@ jet_cli_test_settings_notice: fn(settings: [TestSetting]) -> String Never! {
     "jet test: settings {shown}\n"
 }
 
-// Whether `argument` writes a setting the parent keeps (`--optimize=…`,
-// `--jobs=4`, `--diagnostic-coverage`, …), so a child's words leave it out.
+// Whether `argument` writes a setting the parent keeps (`-O2`, `--jobs=4`,
+// `--diagnostic-coverage`, …), so a child's words leave it out.
 jet_cli_test_parent_word: fn(argument: String) -> Bool Never! {
-    loop name in JET_CLI_TEST_PARENT_SETTINGS {
-        flag: test_setting_flag(name)
-        if argument == flag || argument.starts_with("{flag}=") -> return true
-    }
-    false
+    row: test_setting_flag_row(argument) ?? return false
+    JET_CLI_TEST_PARENT_SETTINGS.contains(row.name)
 }
 
 // `jet_argv`'s words for a child `jet test`, without the `--profile` choice
@@ -170,9 +170,9 @@ jet_cli_test_child_settings: fn(settings: [TestSetting]) -> [TestSetting] Never!
     kept
 }
 
-// `jet_argv` as the build options read it: the `--optimize` words, a test
-// setting here (several levels run once each), replaced by `level`'s
-// `--optimize=<level>` ("" adds none).
+// `jet_argv` as the build options read it: the level flags, a test setting
+// here (several levels run once each), replaced by `level`'s flag (`-O2`;
+// "" adds none).
 jet_cli_test_build_argv: fn(jet_argv: [String], level: String) -> [String] Never! {
     argv := [String]{}
     passthrough := false
@@ -180,19 +180,19 @@ jet_cli_test_build_argv: fn(jet_argv: [String], level: String) -> [String] Never
         if argument == "--" && !passthrough {
             passthrough = true
             // Before the `--`, so the build options read it.
-            if level != "" -> argv.push("--optimize={level}")
+            if level != "" -> argv.push(build_option_level_flag(level))
         }
-        if !passthrough && (argument == "--optimize" || argument.starts_with("--optimize=")) -> next
+        if !passthrough && build_option_level_of_flag(argument) != None -> next
         argv.push(argument.copy())
     }
-    if !passthrough && level != "" -> argv.push("--optimize={level}")
+    if !passthrough && level != "" -> argv.push(build_option_level_flag(level))
     argv
 }
 
 // `compiler` and more than one `optimize` level run the tests in children
 // (Host.jet jet_cli_test_workspace): one per level, each `jet test` of the
 // named compiler (else this jet) with the decided settings in
-// TEST_SETTINGS_ENV and its level as `--optimize`. The `results` document
+// TEST_SETTINGS_ENV and its level flag. The `results` document
 // is this run's: every child's rows, each level's at `tests at optimize
 // <level>`. None runs the tests in this process.
 jet_cli_test_settings_fan_out: fn(jet_argv: [String], settings: [TestSetting], quiet: Bool) -> JetCLIPlan? Never! {
@@ -208,7 +208,7 @@ jet_cli_test_settings_fan_out: fn(jet_argv: [String], settings: [TestSetting], q
     envs := [[String]]{}
     loop level in picked {
         args := words.copy() // copy: each level run starts from the same words.
-        if level != "" -> args.push("--optimize={level}")
+        if level != "" -> args.push(build_option_level_flag(level))
         names.push(if levels.len() > 1 -> "optimize {level}" else -> "compiler {compiler}")
         tiers.push(if levels.len() > 1 -> "{TEST_SUITE_TESTS} at optimize {level}" else -> TEST_SUITE_TESTS)
         member_args.push(args)
@@ -361,20 +361,20 @@ jet_cli_test_results_write: fn(path: String, results: [KitCaseResult], suites: [
 }
 
 #Test("child words drop the profile choice and the settings the parent keeps") {
-    argv: [String]{"test", "pkg", "--profile", "ui", "--optimize=none,full", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--jobs=4", "--diagnostic-coverage", "--", "--optimize=x"}
-    assert_eq(jet_cli_test_child_words(argv), [String]{"test", "pkg", "--shard=2/4", "--", "--optimize=x"})
-    assert_eq(jet_cli_test_build_argv(argv, "full"), [String]{"test", "pkg", "--profile", "ui", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--jobs=4", "--diagnostic-coverage", "--optimize=full", "--", "--optimize=x"})
+    argv: [String]{"test", "pkg", "--profile", "ui", "-O0", "-O2", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--jobs=4", "--diagnostic-coverage", "--", "-O1"}
+    assert_eq(jet_cli_test_child_words(argv), [String]{"test", "pkg", "--shard=2/4", "--", "-O1"})
+    assert_eq(jet_cli_test_build_argv(argv, "O2"), [String]{"test", "pkg", "--profile", "ui", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--jobs=4", "--diagnostic-coverage", "-O2", "--", "-O1"})
 }
 
 #Test("a run of several levels writes one results document and hands each child a report file") {
-    settings: [TestSetting]{TestSetting{name: "optimize", value: "none,full", source: "flag"}, TestSetting{name: "results", value: "r.json", source: "flag"}, TestSetting{name: "jobs", value: "4", source: "flag"}}
-    plan: jet_cli_test_settings_fan_out([String]{"test", "pkg", "--optimize=none,full", "--results=r.json"}, settings, true) ?? panic("two levels fan out")
+    settings: [TestSetting]{TestSetting{name: "optimize", value: "O0,O2", source: "flag"}, TestSetting{name: "results", value: "r.json", source: "flag"}, TestSetting{name: "jobs", value: "4", source: "flag"}}
+    plan: jet_cli_test_settings_fan_out([String]{"test", "pkg", "-O0", "-O2", "--results=r.json"}, settings, true) ?? panic("two levels fan out")
     if plan == {
         .TestWorkspace(names, member_args, envs, executable, heading, results, tiers, quiet) -> {
-            assert_eq(names, [String]{"optimize none", "optimize full"})
-            assert_eq(member_args[1], [String]{"test", "pkg", "--optimize=full"})
+            assert_eq(names, [String]{"optimize O0", "optimize O2"})
+            assert_eq(member_args[1], [String]{"test", "pkg", "-O2"})
             assert_eq(results, "r.json")
-            assert_eq(tiers, [String]{"tests at optimize none", "tests at optimize full"})
+            assert_eq(tiers, [String]{"tests at optimize O0", "tests at optimize O2"})
             assert(executable == "" && heading == "run" && quiet)
             // The children inherit neither `results` nor the corpus-pool settings.
             assert_eq(envs[0], [String]{TEST_SETTINGS_ENV, ""})

@@ -3,7 +3,7 @@
 use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extract_inline_package, pkg_parse_build]
 
 #Test("build profile rejects retired environment payload") {
-    hostile: "release: Build.{{ optimize: \"full\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
+    hostile: "release: Build.{{ optimize: \"O2\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
     if pkg_parse_build(hostile) == {
         .Ok(_) -> panic("retired build-profile environment data must not reach rustc")
         .Err(_) -> {}

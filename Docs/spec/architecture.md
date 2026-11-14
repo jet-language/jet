@@ -12,7 +12,7 @@ Jet source
   -> IR builder -> slot IR, optimized in place
   -> x86-64 selection and object emission (Compiler/JetIR, Compiler/JetBackend), one runtime
        O0: machine code in memory (`jet run`, `jet dev`, comptime)
-       O1: executable file (`--optimize=basic`, `-O1`)
+       O1: executable file (`-O1`)
        O2: executable file (`jet build` default, `--release`)
 ```
 

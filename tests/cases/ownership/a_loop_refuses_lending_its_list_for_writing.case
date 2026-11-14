@@ -9,24 +9,24 @@ step check: jet check cleared.jet
 exit: 1
 stderr: ~ "Error [jet.CollectionChangedWhileRead]" # the lend is refused (E0507)
 stderr: ~ "lending `names` for writing to `clear_all`" # naming the lend and its callee
-step o0: jet run --optimize=none cleared.jet
+step o0: jet run -O0 cleared.jet
 exit: == check
 stdout: = ""
 stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
-step o1: jet run --optimize=basic cleared.jet
+step o1: jet run -O1 cleared.jet
 exit: == check
 stdout: = ""
 stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
-step o2: jet run --optimize=full cleared.jet
+step o2: jet run -O2 cleared.jet
 exit: == check
 stdout: = ""
 stderr: ~ "lending `names` for writing to `clear_all`" # the run stops at the same check
-step allowed: jet run --optimize=none allowed.jet
+step allowed: jet run -O0 allowed.jet
 exit: 0
 stdout: = "4|0\n"
-step: jet run --optimize=basic allowed.jet
+step: jet run -O1 allowed.jet
 exit: 0
 stdout: == allowed
-step: jet run --optimize=full allowed.jet
+step: jet run -O2 allowed.jet
 exit: 0
 stdout: == allowed

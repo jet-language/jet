@@ -4,18 +4,18 @@
 # the loop starts with. The original keeps its values on every tier.
 fixture: a_copied_list_is_made_its_own_once_before_its_loop.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 exit: 0
-stdout: ~ "unique hoisted 1," # optimize: basic hoists it (O1)
+stdout: ~ "unique hoisted 1," # optimize: O1 hoists it (O1)
 step: jet inspect decisions --release main.jet
 exit: 0
 stdout: ~ "unique hoisted 1," # --release hoists it too (O2)
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = a_copied_list_is_made_its_own_once_before_its_loop.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = a_copied_list_is_made_its_own_once_before_its_loop.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = a_copied_list_is_made_its_own_once_before_its_loop.out

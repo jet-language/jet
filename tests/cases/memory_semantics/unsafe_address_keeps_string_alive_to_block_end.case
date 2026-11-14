@@ -3,16 +3,16 @@
 # raw reads on O0, O1, O2 and a built binary.
 fixture: unsafe_address_keeps_string_alive_to_block_end.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = unsafe_address_keeps_string_alive_to_block_end.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = unsafe_address_keeps_string_alive_to_block_end.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = unsafe_address_keeps_string_alive_to_block_end.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

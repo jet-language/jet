@@ -7,7 +7,7 @@
 // bytes, from the runtime counting policy's own facts in a counted build of
 // each arm, plus peak RSS (the gauntlet timer's, the program's exact VmHWM) of the
 // uncounted build. Both arms build from the row's surface_source and
-// plain_source at --optimize=full. Each metric gets its own verdict under the
+// plain_source at -O2. Each metric gets its own verdict under the
 // harness's rule that only strictly below plain wins. --write replaces the
 // row's memory_evidence_file; without it the result is printed.
 //
@@ -53,7 +53,7 @@ function build(jet, source, dir, counted) {
   if (counted && text === source) throw new Error("the pair source has no `package: {` line to take the counting allocator");
   writeFileSync(path.join(dir, "main.jet"), text);
   const out = path.join(dir, "out");
-  const built = run(jet, ["build", "--optimize=full", "--quiet", `--output-dir=${out}`, "main.jet"], { cwd: dir });
+  const built = run(jet, ["build", "-O2", "--quiet", `--output-dir=${out}`, "main.jet"], { cwd: dir });
   const binary = path.join(out, "main");
   if (built.status !== 0 || !existsSync(binary)) throw new Error(`build ${dir} failed:\n${built.stdout}${built.stderr}`);
   return binary;
@@ -138,7 +138,7 @@ function measure(argv) {
       surface_source_sha256: sha256(row.surface_source),
       plain_source_sha256: sha256(row.plain_source),
       expected_output: row.expected_output,
-      target: "jet build --optimize=full",
+      target: "jet build -O2",
       artifact_sha256: sha256(readFileSync(jet)),
       host: { platform: os.platform(), release: os.release(), arch: os.machine(), cpu_model: os.cpus()[0]?.model ?? null, cpu_count: os.availableParallelism() },
       generated_command: "node Tools/perf/read-into/memory.mjs --artifact <jet> --gdb <gdb> --write",

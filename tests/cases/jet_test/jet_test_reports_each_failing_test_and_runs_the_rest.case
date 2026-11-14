@@ -6,7 +6,7 @@ fixture: jet_test_reports_each_failing_test_and_runs_the_rest.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet test --show-default --capture=all --serial --optimize=none .
+step: jet test --show-default --capture=all --serial -O0 .
 exit: 1
 stdout: ~ "before the failures: pass" # the first clean test keeps its batch outcome
 stdout: ~ "fails an assert: FAIL" # the failing assert is that test's row
@@ -16,19 +16,19 @@ stdout: ~ "fails at exit: FAIL" # the isolated rerun attributes the exit to its 
 stdout: ~ "after the failures: pass" # a test after the dying test still runs
 stdout: ~ "4 passed, 2 failed, 0 skipped" # every test is counted once
 stderr: !~ "internal compiler error" # the run reports per test instead of an ICE
-step: jet test --show-default --capture=all --optimize=none .
+step: jet test --show-default --capture=all -O0 .
 exit: 1
 stdout: ~ "fails an assert: FAIL" # the parallel path reports the assert per test
 stdout: ~ "fails at exit: FAIL" # the parallel rerun attributes the exit too
 stdout: ~ "4 passed, 2 failed, 0 skipped" # the parallel run counts the same rows
 stderr: !~ "internal compiler error" # no ICE on the parallel path either
-step: jet test --show-default --capture=all --serial --optimize=basic .
+step: jet test --show-default --capture=all --serial -O1 .
 exit: 1
 stdout: ~ "fails an assert: FAIL" # basic optimization reports the assert per test
 stdout: ~ "fails at exit: FAIL" # basic optimization attributes the exit
 stdout: ~ "4 passed, 2 failed, 0 skipped" # basic optimization runs every test
 stderr: !~ "internal compiler error" # no ICE under basic optimization
-step: jet test --show-default --capture=all --serial --optimize=full .
+step: jet test --show-default --capture=all --serial -O2 .
 exit: 1
 stdout: ~ "fails an assert: FAIL" # full optimization reports the assert per test
 stdout: ~ "fails at exit: FAIL" # full optimization attributes the exit

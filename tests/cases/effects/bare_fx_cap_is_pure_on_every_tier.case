@@ -12,15 +12,15 @@ exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # the bare cap admits nothing
 stderr: ~ "The type's cap allows no effects in every method of the type" # the reason names the empty cap
-step: jet run --optimize=none type.jet
+step: jet run -O0 type.jet
 exit: 1
 stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O0 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=basic type.jet
+step: jet run -O1 type.jet
 exit: 1
 stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O1 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=full type.jet
+step: jet run -O2 type.jet
 exit: 1
 stderr: ~ "`go` uses the effect `IO`, which type `Bad`'s `#FX(…)` cap doesn't allow" # O2 refuses it
 stdout: !~ "escaped" # nothing runs
@@ -28,26 +28,26 @@ step: jet check module.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # a module's bare cap
-step: jet run --optimize=none module.jet
+step: jet run -O0 module.jet
 exit: 1
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O0 refuses it
-step: jet run --optimize=basic module.jet
+step: jet run -O1 module.jet
 exit: 1
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O1 refuses it
-step: jet run --optimize=full module.jet
+step: jet run -O2 module.jet
 exit: 1
 stderr: ~ "`hush` uses the effect `IO`, which module `quiet`'s `#FX(…)` cap doesn't allow" # O2 refuses it
 step: jet check trait.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "[jet.TraitCapExceeded]: `text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # a trait's bare cap binds its impls
-step: jet run --optimize=none trait.jet
+step: jet run -O0 trait.jet
 exit: 1
 stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O0 refuses it
-step: jet run --optimize=basic trait.jet
+step: jet run -O1 trait.jet
 exit: 1
 stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O1 refuses it
-step: jet run --optimize=full trait.jet
+step: jet run -O2 trait.jet
 exit: 1
 stderr: ~ "`text` uses the effect `IO`, which trait `Source`'s `#FX(…)` cap doesn't allow" # O2 refuses it
 step: jet check row.jet
@@ -65,12 +65,12 @@ file: head.jet ~ "#FX\nuse fs: core.files" # the formatter keeps the bare head
 file: head.jet !~ "#FX()" # never the refused empty list
 step: jet check within.jet
 exit: 0
-step: jet run --optimize=none within.jet
+step: jet run -O0 within.jet
 exit: 0
 stdout: = "3\n8\n9\n"
-step: jet run --optimize=basic within.jet
+step: jet run -O1 within.jet
 exit: 0
 stdout: = "3\n8\n9\n"
-step: jet run --optimize=full within.jet
+step: jet run -O2 within.jet
 exit: 0
 stdout: = "3\n8\n9\n"

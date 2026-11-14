@@ -5,39 +5,39 @@
 fixture: int_converts_a_whole_decimal_or_fraction_exactly.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = "-12\n3\n3\n3\n-1\n-1\n"
 stderr: empty
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = "-12\n3\n3\n3\n-1\n-1\n"
 stderr: empty
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = "-12\n3\n3\n3\n-1\n-1\n"
 stderr: empty
-step: jet run --optimize=none decimal_stop.jet
+step: jet run -O0 decimal_stop.jet
 exit: 70
 stdout: = "3\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Decimal; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even`" # 2.50 isn't whole
-step: jet run --optimize=basic decimal_stop.jet
+step: jet run -O1 decimal_stop.jet
 exit: 70
 stdout: = "3\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Decimal;" # the same stop at O1
-step: jet run --optimize=full decimal_stop.jet
+step: jet run -O2 decimal_stop.jet
 exit: 70
 stdout: = "3\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Decimal;" # the same stop at O2
-step: jet run --optimize=none fraction_stop.jet
+step: jet run -O0 fraction_stop.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Fraction; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even`" # 7/2 isn't whole
-step: jet run --optimize=basic fraction_stop.jet
+step: jet run -O1 fraction_stop.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Fraction;" # the same stop at O1
-step: jet run --optimize=full fraction_stop.jet
+step: jet run -O2 fraction_stop.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Stop [E3010]: `Int{x} needs a whole Fraction;" # the same stop at O2

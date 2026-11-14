@@ -13,7 +13,7 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JET_SCHEDULER_THREADS=1
-step: jet build --optimize=none main.jet
+step: jet build -O0 main.jet
 exit: 0
 step o0_contended: built contended
 timeout: 60s
@@ -27,7 +27,7 @@ stdout: = "status 134\n"
 stderr: ~ "memory allocation of " # the registered out-of-memory report
 stderr: ~ " bytes failed\n" # with its byte count
 stderr: !~ "panic" # exhaustion is no program panic
-step: jet build --optimize=basic main.jet
+step: jet build -O1 main.jet
 exit: 0
 step o1_contended: built contended
 timeout: 60s

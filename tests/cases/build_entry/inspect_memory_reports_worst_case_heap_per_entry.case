@@ -7,19 +7,19 @@
 # carries the same text in the entry's `heap` field.
 fixture: inspect_memory_reports_worst_case_heap_per_entry.fixture
 env: NO_COLOR=1
-step arena: jet inspect memory --optimize=none arena.jet
+step arena: jet inspect memory -O0 arena.jet
 exit: 0
 stdout: ~ "entry run" # the program entry
 stdout: ~ "heap: 8 B" # one 8-byte arena, reserved once
-step none: jet inspect memory --optimize=none none.jet
+step none: jet inspect memory -O0 none.jet
 exit: 0
 stdout: ~ "heap: 0 B" # nothing run reaches allocates
-step list: jet inspect memory --optimize=none list.jet
+step list: jet inspect memory -O0 list.jet
 exit: 0
 stdout: ~ "heap: unbounded, list construction allocates backing storage at list.jet via " # the list literal's storage has no proven size
 stdout: ~ ".run -> " # the path starts at the entry
 stdout: ~ ".count" # and ends at the allocating function
-step json: jet inspect memory --optimize=none arena.jet --json
+step json: jet inspect memory -O0 arena.jet --json
 exit: 0
 json: stdout doc $.entries[0].name = "run"
 json: stdout doc $.entries[0].heap = "8 B"

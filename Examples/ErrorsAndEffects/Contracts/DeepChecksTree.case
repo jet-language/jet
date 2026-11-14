@@ -1,4 +1,4 @@
-# The tree example at each optimize level (none, basic, and full through
+# The tree example at each optimize level (O0, O1, and O2 through
 # `--release`) and under `jet dev`. It loads a valid snapshot, then a corrupt
 # one, and each deep check walks the loaded tree once. A plain run keeps no deep
 # check, so both trees load and the corrupt one answers wrongly. A bare
@@ -9,50 +9,50 @@
 # (E2120), and the dotted `tree.run`, which is no scope, is refused before the
 # compile (E2119).
 env: NO_COLOR=1
-step off_o0: jet run --optimize=none run.jet
+step off_o0: jet run -O0 run.jet
 exit: 0
 stdout: = DeepChecksTree.out
 stderr: empty
-step all_o0: jet run --optimize=none --deep-checks run.jet
+step all_o0: jet run -O0 --deep-checks run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n" # the valid tree passes both checks; the corrupt load stops before it serves
 stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
-step package_o0: jet run --optimize=none --deep-checks=tree run.jet
+step package_o0: jet run -O0 --deep-checks=tree run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n" # the package scope keeps the load's deep check
 stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
-step function_o0: jet run --optimize=none --deep-checks=tree::run run.jet
+step function_o0: jet run -O0 --deep-checks=tree::run run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n" # `load`'s deep check is off, so the corrupt load passes
 stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
-step unknown_o0: jet run --optimize=none --deep-checks=tree::nowhere run.jet
+step unknown_o0: jet run -O0 --deep-checks=tree::nowhere run.jet
 exit: 1
 stdout: empty # refused before the run
 stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist
 stderr: ~ "jet-lang.dev/e/E2120" # the diagnostic's code link
-step off_o1: jet run --optimize=basic run.jet
+step off_o1: jet run -O1 run.jet
 exit: 0
 stdout: = DeepChecksTree.out
 stderr: empty
-step all_o1: jet run --optimize=basic --deep-checks run.jet
+step all_o1: jet run -O1 --deep-checks run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
 stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
-step package_o1: jet run --optimize=basic --deep-checks=tree run.jet
+step package_o1: jet run -O1 --deep-checks=tree run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
 stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
-step function_o1: jet run --optimize=basic --deep-checks=tree::run run.jet
+step function_o1: jet run -O1 --deep-checks=tree::run run.jet
 exit: 70
 stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
 stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
-step unknown_o1: jet run --optimize=basic --deep-checks=tree::nowhere run.jet
+step unknown_o1: jet run -O1 --deep-checks=tree::nowhere run.jet
 exit: 1
 stdout: empty
 stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist

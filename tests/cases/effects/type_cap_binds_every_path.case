@@ -11,13 +11,13 @@ step: jet check closure.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # the lambda's print belongs to the method
-step: jet run --optimize=none closure.jet
+step: jet run -O0 closure.jet
 exit: 1
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # O0 refuses it
-step: jet run --optimize=basic closure.jet
+step: jet run -O1 closure.jet
 exit: 1
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # O1 refuses it
-step: jet run --optimize=full closure.jet
+step: jet run -O2 closure.jet
 exit: 1
 stderr: ~ "`loud` reaches the `IO` effect, which type `Maker` denies" # O2 refuses it
 step: jet check default.jet
@@ -26,26 +26,26 @@ stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # the inherited default body is the type's method
 stderr: ~ "default.jet:5:5" # reported at the default body
 stderr: ~ "type `Square` is capped here" # the cap is the secondary label
-step: jet run --optimize=none default.jet
+step: jet run -O0 default.jet
 exit: 1
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # O0 refuses it
-step: jet run --optimize=basic default.jet
+step: jet run -O1 default.jet
 exit: 1
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # O1 refuses it
-step: jet run --optimize=full default.jet
+step: jet run -O2 default.jet
 exit: 1
 stderr: ~ "`show` reaches the `IO` effect, which type `Square` denies" # O2 refuses it
 step: jet check close.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # the Close impl is bound
-step: jet run --optimize=none close.jet
+step: jet run -O0 close.jet
 exit: 1
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # O0 refuses it
-step: jet run --optimize=basic close.jet
+step: jet run -O1 close.jet
 exit: 1
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # O1 refuses it
-step: jet run --optimize=full close.jet
+step: jet run -O2 close.jet
 exit: 1
 stderr: ~ "`close` reaches the `IO` effect, which type `Handle` denies" # O2 refuses it
 step: jet check field.jet
@@ -53,49 +53,49 @@ exit: 1
 stderr: count "Error [" = 2 # the field and the method that calls it
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # the field's fixed row counts at the call
 stderr: ~ "[jet.TypeFieldCapExceeded]: Field `act`'s row declares `IO`, which type `Holder` doesn't allow" # the field path has its own code
-step: jet run --optimize=none field.jet
+step: jet run -O0 field.jet
 exit: 1
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # O0 refuses it
-step: jet run --optimize=basic field.jet
+step: jet run -O1 field.jet
 exit: 1
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # O1 refuses it
-step: jet run --optimize=full field.jet
+step: jet run -O2 field.jet
 exit: 1
 stderr: ~ "`go` reaches the `IO` effect, which type `Holder` denies" # O2 refuses it
 step: jet check trait_field.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # the trait-value field brings Disk's read
-step: jet run --optimize=none trait_field.jet
+step: jet run -O0 trait_field.jet
 exit: 1
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # O0 refuses it
-step: jet run --optimize=basic trait_field.jet
+step: jet run -O1 trait_field.jet
 exit: 1
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # O1 refuses it
-step: jet run --optimize=full trait_field.jet
+step: jet run -O2 trait_field.jet
 exit: 1
 stderr: ~ "`show` reaches the `FS.Read` effect, which type `Report` denies" # O2 refuses it
 step: jet check row.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`say` reaches the `IO` effect, which type `Logger` denies" # a row can't widen the cap
-step: jet run --optimize=none row.jet
+step: jet run -O0 row.jet
 exit: 1
 stderr: ~ "`say` reaches the `IO` effect, which type `Logger` denies" # O0 refuses it
-step: jet run --optimize=basic row.jet
+step: jet run -O1 row.jet
 exit: 1
 stderr: ~ "`say` reaches the `IO` effect, which type `Logger` denies" # O1 refuses it
-step: jet run --optimize=full row.jet
+step: jet run -O2 row.jet
 exit: 1
 stderr: ~ "`say` reaches the `IO` effect, which type `Logger` denies" # O2 refuses it
 step: jet check within.jet
 exit: 0
-step: jet run --optimize=none within.jet
+step: jet run -O0 within.jet
 exit: 0
 stdout: = "181\n"
-step: jet run --optimize=basic within.jet
+step: jet run -O1 within.jet
 exit: 0
 stdout: = "181\n"
-step: jet run --optimize=full within.jet
+step: jet run -O2 within.jet
 exit: 0
 stdout: = "181\n"

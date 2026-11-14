@@ -6,17 +6,17 @@
 fixture: static_fixed_arrays_are_shared_addressable_constants.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet inspect decisions --optimize=basic --opt-dump=rounds main.jet
+step: jet inspect decisions -O1 --opt-dump=rounds main.jet
 exit: 0
 stdout: ~ "after fn rounds" # the dump covers the hot loop
 stdout: ~ "data_address" # the tables are read at their static address
 stdout: !~ "stack_address" # no table is built on the stack per read
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0 # o0
 stdout: = static_fixed_arrays_are_shared_addressable_constants.out # o0
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0 # o1
 stdout: = static_fixed_arrays_are_shared_addressable_constants.out # o1
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0 # o2
 stdout: = static_fixed_arrays_are_shared_addressable_constants.out # o2

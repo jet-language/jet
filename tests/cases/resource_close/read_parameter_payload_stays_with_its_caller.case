@@ -10,12 +10,12 @@ json: stdout doc $.reports[?code="E0201"] #= 2 # one E0201 per read parameter `?
 step: jet check main.jet
 exit: 1 # the copy out of a read parameter is rejected
 stderr: ~ "`warm` cannot be moved from borrowed storage" # rendered diagnostic text
-step: jet run --optimize=none fixed.jet
+step: jet run -O0 fixed.jet
 exit: 0 # o0
 stdout: = read_parameter_payload_stays_with_its_caller.out # o0
-step: jet run --optimize=basic fixed.jet
+step: jet run -O1 fixed.jet
 exit: 0 # o1
 stdout: = read_parameter_payload_stays_with_its_caller.out # o1
-step: jet run --optimize=full fixed.jet
+step: jet run -O2 fixed.jet
 exit: 0 # o2
 stdout: = read_parameter_payload_stays_with_its_caller.out # o2

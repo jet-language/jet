@@ -8,13 +8,13 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet
 exit: 0
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = source_loop_strides_walk_every_source_on_every_tier.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = source_loop_strides_walk_every_source_on_every_tier.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = source_loop_strides_walk_every_source_on_every_tier.out
 step: jet build main.jet
@@ -22,11 +22,11 @@ exit: 0
 step aot: built
 exit: 0
 stdout: = source_loop_strides_walk_every_source_on_every_tier.out
-step: jet run --optimize=none stop.jet
+step: jet run -O0 stop.jet
 exit: 70
 stdout: = source_loop_strides_walk_every_source_on_every_tier.stop.out
 stderr: ~ "E0123: loop stride must be positive" # O0 stops with the stride report
-step: jet run --optimize=full stop.jet
+step: jet run -O2 stop.jet
 exit: 70
 stdout: = source_loop_strides_walk_every_source_on_every_tier.stop.out
 stderr: ~ "E0123: loop stride must be positive" # O2 stops with the same report

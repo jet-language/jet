@@ -6,21 +6,21 @@ fixture: context_reads_through_the_core_context_import.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet run --optimize=none imported.jet
+step: jet run -O0 imported.jet
 exit: 0
 stdout: = "deadline false thread 0\ndeadline true thread 0\nshadowed 7\n"
-step: jet run --optimize=none renamed.jet
+step: jet run -O0 renamed.jet
 exit: 0
 stdout: = "renamed deadline true\n"
-step: jet run --optimize=basic imported.jet
+step: jet run -O1 imported.jet
 exit: 0
 stdout: = "deadline false thread 0\ndeadline true thread 0\nshadowed 7\n"
-step: jet run --optimize=basic renamed.jet
+step: jet run -O1 renamed.jet
 exit: 0
 stdout: = "renamed deadline true\n"
-step: jet run --optimize=full imported.jet
+step: jet run -O2 imported.jet
 exit: 0
 stdout: = "deadline false thread 0\ndeadline true thread 0\nshadowed 7\n"
-step: jet run --optimize=full renamed.jet
+step: jet run -O2 renamed.jet
 exit: 0
 stdout: = "renamed deadline true\n"

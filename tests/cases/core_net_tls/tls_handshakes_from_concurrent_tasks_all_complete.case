@@ -9,18 +9,18 @@ copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
 copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
-step: jet build --optimize=none main.jet
+step: jet build -O0 main.jet
 exit: 0
 step: built
 exit: 0
 stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step: built
 exit: 0

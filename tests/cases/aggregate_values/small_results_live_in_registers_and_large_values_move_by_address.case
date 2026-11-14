@@ -8,10 +8,10 @@
 # same values on every tier.
 fixture: small_results_live_in_registers_and_large_values_move_by_address.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=run
 exit: 0
-stdout: ~ "O1:" # optimize: basic runs the O1 passes
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
 stdout: ~ "scalar-replaced 2," # divmod's and quad's tuples
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied
@@ -24,16 +24,16 @@ stdout: ~ "scalar-replaced 4," # both tuples, and big's fields around its loans,
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied
 stdout: count "jet_rt_string_clone" = 1 # the literal's clone before the passes; none after
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = small_results_live_in_registers_and_large_values_move_by_address.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = small_results_live_in_registers_and_large_values_move_by_address.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = small_results_live_in_registers_and_large_values_move_by_address.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

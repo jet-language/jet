@@ -7,7 +7,7 @@
 // bytes, from the runtime counting policy's own facts in a counted build of
 // each arm, plus peak RSS (the gauntlet timer's, the program's exact VmHWM) of the
 // uncounted build. Both arms build from the row's surface_source and
-// plain_source at --optimize=full. Each metric gets its own verdict under the
+// plain_source at -O2. Each metric gets its own verdict under the
 // harness's rule that only strictly below plain wins. --write replaces the
 // row's memory_evidence_file; without it the result is printed.
 //
@@ -120,7 +120,7 @@ build: fn(jet: String, source: String, dir: String, allocator: String) -> String
     if allocator != "" && text == source -> fail("the pair source has no `package: {{` line to take the counting allocator")
     files.write(files.join(dir, "main.jet"), text) ?? fail("{dir}/main.jet: {err}")
     out: files.join(dir, "out")
-    built: run_program([String]{jet, "build", "--optimize=full", "--quiet", "--output-dir={out}", "main.jet"}, dir)
+    built: run_program([String]{jet, "build", "-O2", "--quiet", "--output-dir={out}", "main.jet"}, dir)
     binary: files.join(out, "main")
     if !built.success || !files.exists(binary) -> fail("build {dir} failed:\n{built.output}{built.errors}")
     binary
@@ -226,7 +226,7 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
         surface_source_sha256: crypto.sha256(row.surface_source).hex(),
         plain_source_sha256: crypto.sha256(row.plain_source).hex(),
         expected_output: row.expected_output.copy(),
-        target: "jet build --optimize=full",
+        target: "jet build -O2",
         artifact_sha256: crypto.sha256(artifact).hex(),
         host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
         generated_command: "jet Tools/perf/read-into/Memory.jet --artifact <jet> --gdb <gdb> --write",

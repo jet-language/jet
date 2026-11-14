@@ -6,12 +6,12 @@ step: jet emit --ast main.jet
 exit: 0
 stdout: ~ "call show\n    type Box<Int>\n" # the argument node keeps its type arguments
 stdout: !~ "ident Box" # it is not dropped to the bare name
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 exit: 1
 stderr: ~ "`Box<Int>` is a type, not a value" # the o0 build names the whole type
-step o1: jet run --optimize=basic main.jet
+step o1: jet run -O1 main.jet
 exit: 1
 stderr: ~ "`Box<Int>` is a type, not a value" # the o1 build names the whole type
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 exit: 1
 stderr: ~ "`Box<Int>` is a type, not a value" # the o2 build names the whole type

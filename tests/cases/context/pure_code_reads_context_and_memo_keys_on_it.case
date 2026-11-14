@@ -7,21 +7,21 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check pure.jet
 exit: 0
-step: jet run --optimize=none pure.jet
+step: jet run -O0 pure.jet
 exit: 0
 stdout: ~ "pure true thread 0" # the block's deadline, read by pure code
-step: jet run --optimize=basic pure.jet
+step: jet run -O1 pure.jet
 exit: 0
 stdout: ~ "pure true thread 0" # the block's deadline, read by pure code
-step: jet run --optimize=full pure.jet
+step: jet run -O2 pure.jet
 exit: 0
 stdout: ~ "pure true thread 0" # the block's deadline, read by pure code
-step: jet run --optimize=none memo.jet
+step: jet run -O0 memo.jet
 exit: 0
 stdout: ~ "memo 0 true 0 hits=1 misses=2" # the deadline is part of the key
-step: jet run --optimize=basic memo.jet
+step: jet run -O1 memo.jet
 exit: 0
 stdout: ~ "memo 0 true 0 hits=1 misses=2" # the deadline is part of the key
-step: jet run --optimize=full memo.jet
+step: jet run -O2 memo.jet
 exit: 0
 stdout: ~ "memo 0 true 0 hits=1 misses=2" # the deadline is part of the key

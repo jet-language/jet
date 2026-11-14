@@ -4,19 +4,19 @@
 # 40,000 calls per scenario grew the resident set by 80 MB to 100 MB on O0.
 fixture: map_or_set_method_on_a_call_result_drops_it.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 limit: time=120
 exit: 0
 stdout: = map_or_set_method_on_a_call_result_drops_it.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 limit: time=120
 exit: 0
 stdout: = map_or_set_method_on_a_call_result_drops_it.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 limit: time=120
 exit: 0
 stdout: = map_or_set_method_on_a_call_result_drops_it.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 limit: time=120

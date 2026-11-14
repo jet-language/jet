@@ -8,19 +8,19 @@ requires: os-name:linux
 fixture: tcp_reads_reuse_one_buffer_and_return_only_the_bytes_read.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step none: jet run --optimize=none main.jet
+step none: jet run -O0 main.jet
 exit: 0
 stdout: = tcp_reads_reuse_one_buffer_and_return_only_the_bytes_read.out
 stderr: empty
-step basic: jet run --optimize=basic main.jet
+step basic: jet run -O1 main.jet
 exit: 0
 stdout: = tcp_reads_reuse_one_buffer_and_return_only_the_bytes_read.out
 stderr: empty
-step full: jet run --optimize=full main.jet
+step full: jet run -O2 main.jet
 exit: 0
 stdout: = tcp_reads_reuse_one_buffer_and_return_only_the_bytes_read.out
 stderr: empty
-step build: jet build --optimize=full main.jet
+step build: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

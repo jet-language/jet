@@ -7,27 +7,27 @@
 # turn that FAIL into a pass.
 fixture: fatal_accept_ends_serve_with_its_typed_error.fixture
 env: NO_COLOR=1
-step o0: jet test --show-default --capture=all --serial --optimize=none run.jet
+step o0: jet test --show-default --capture=all --serial -O0 run.jet
 exit: 0
 stdout: = "fatal_accept_ends_serve_with_its_typed_error: pass\n1 passed, 0 failed, 0 skipped\n"
-step: jet test --show-default --capture=all --serial --optimize=basic run.jet
+step: jet test --show-default --capture=all --serial -O1 run.jet
 exit: == o0
 stdout: == o0
 stderr: == o0
-step: jet test --show-default --capture=all --serial --optimize=full run.jet
+step: jet test --show-default --capture=all --serial -O2 run.jet
 exit: == o0
 stdout: == o0
 stderr: == o0
-step u0: jet test --show-default --capture=all --serial --optimize=none unhandled.jet
+step u0: jet test --show-default --capture=all --serial -O0 unhandled.jet
 exit: 1
 stdout: = "serve_stops_on_a_fatal_accept: FAIL\n0 passed, 1 failed, 0 skipped\n"
 stderr: ~ "fault injected: Net.Accept call 1" # the failure report heads with the injected fault
 stderr: ~ "serve ended" # the test's stop on serve's typed error
-step: jet test --show-default --capture=all --serial --optimize=basic unhandled.jet
+step: jet test --show-default --capture=all --serial -O1 unhandled.jet
 exit: == u0
 stdout: == u0
 stderr: == u0
-step: jet test --show-default --capture=all --serial --optimize=full unhandled.jet
+step: jet test --show-default --capture=all --serial -O2 unhandled.jet
 exit: == u0
 stdout: == u0
 stderr: == u0

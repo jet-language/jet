@@ -46,11 +46,11 @@ step: jet test --capture=all
 cwd: {work}/app
 exit: 0
 stderr: ~ "2 rows recorded as the baseline" # an unsharded run records it
-step: jet test --show-default --optimize=none,basic --results=lv.json --compiler={jet}
+step: jet test --show-default -O0 -O1 --results=lv.json --compiler={jet}
 cwd: {work}/app
 exit: 0
-file: app/lv.json ~ "\"tier\":\"tests at optimize none\"" # one document holds every level's rows
-file: app/lv.json ~ "\"tier\":\"tests at optimize basic\"" # one document holds every level's rows
+file: app/lv.json ~ "\"tier\":\"tests at optimize O0\"" # one document holds every level's rows
+file: app/lv.json ~ "\"tier\":\"tests at optimize O1\"" # one document holds every level's rows
 file: app/lv.json ~ "\"suites\":[\"tests\"]" # under the tests suite
 file: app/lv.none.json absent # no file per level
 step: jet test --show-default --jobs=2

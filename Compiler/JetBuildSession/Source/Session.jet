@@ -221,8 +221,8 @@ BuildSessionTarget: struct {
     end: Int{0}
 }
 
-// A build option `build: fn` set (`b.optimize(.Full)`) or pinned
-// (`b.pin(.optimize, .Full)`): its row and value as the option table spells
+// A build option `build: fn` set (`b.optimize(.O2)`) or pinned
+// (`b.pin(.optimize, .O2)`): its row and value as the option table spells
 // them (JetFoundation BuildOptions.jet), and the call's span.
 BuildSessionOption: struct {
     name: String
@@ -664,7 +664,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     build_session_fail(state, "unknown build method `{method}`")
 }
 
-// `b.optimize(.Full)` (args: the row name, the value) or `b.pin(...)`: the
+// `b.optimize(.O2)` (args: the row name, the value) or `b.pin(...)`: the
 // last call's value holds; a pinned value can't change in the same fn build.
 build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 2 -> return build_session_fail(state, "a build option call takes an option and a value")

@@ -5,20 +5,20 @@
 fixture: embed_file_in_compound_prep_expression_keeps_target_and_input.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 exit: 0
 stdout: = "4\n[abc]\n(abc|def)\n"
 stderr: empty
-step o1: jet run --optimize=basic main.jet
+step o1: jet run -O1 main.jet
 exit: 0
 stdout: = "4\n[abc]\n(abc|def)\n"
 stderr: empty
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "4\n[abc]\n(abc|def)\n"
 stderr: empty
 copy: changed-notes.txt more/notes.txt
-step changed: jet run --optimize=none main.jet
+step changed: jet run -O0 main.jet
 exit: 0
 stdout: = "4\n[abc]\n(abc|xyz!)\n"
 stderr: empty

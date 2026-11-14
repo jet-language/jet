@@ -33,12 +33,12 @@ env: JET_OPT_DUMP=run
 exit: 0
 stdout: ~ "O2:" # the hardened build keeps release optimization
 stdout: ~ "jet_rt_sentry_read" # the raw read stays checked after the O2 passes
-step: jet run --profile=hardened --optimize=none read.jet
+step: jet run --profile=hardened -O0 read.jet
 cwd: read
 exit: 70
 stderr: ~ "Runtime fault [R0801]" # O0: the read past the allocation stops
 stderr: ~ "read.jet:6, in #Unsafe gate" # the gate's source location
-step: jet run --profile=hardened --optimize=basic read.jet
+step: jet run --profile=hardened -O1 read.jet
 cwd: read
 exit: 70
 stderr: ~ "Runtime fault [R0801]" # O1: the read past the allocation stops
@@ -48,13 +48,13 @@ cwd: read
 exit: 70
 stderr: ~ "Runtime fault [R0801]" # O2: the read past the allocation stops
 stderr: ~ "read.jet:6, in #Unsafe gate" # the gate's source location
-step: jet run --profile=hardened --optimize=none write.jet
+step: jet run --profile=hardened -O0 write.jet
 cwd: write
 exit: 70
 stdout: !~ "written" # the write stops before the print
 stderr: ~ "Runtime fault [R0801]: raw `volatile_write`" # O0: the write past the allocation stops
 stderr: ~ "write.jet:6, in #Unsafe gate" # the gate's source location
-step: jet run --profile=hardened --optimize=basic write.jet
+step: jet run --profile=hardened -O1 write.jet
 cwd: write
 exit: 70
 stdout: !~ "written" # the write stops before the print

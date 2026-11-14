@@ -12,14 +12,16 @@
 // guard packages, and the claims of the Jetpack engine areas that have no package), core (every
 // Core #Test at each optimize level), fuzz (the sema fuzz corpus tests/fuzz/sema: invalid files
 // fail `jet check`, every other file passes it, and a differential file then runs at each
-// optimize level with the same exit and stdout as at none; no jet exits 101), selfhost (the
+// optimize level with the same exit and stdout as at O0; no jet exits 101), selfhost (the
 // fixed point s2 == s3) and perf (the self-compile against its budget) are test.jet's.
 // `full` runs every suite, so each package's #Tests run in it.
 // The build profiles: `jet build --profile dev Compiler` is the fast build for targeted
 // testing (no optimizer passes). `ship` pins the values the self-host stages build with
-// (`basic`, not the stock `full` of `jet build`); the selfhost and perf suites of test.jet
+// (O1, not the stock O2 of `jet build`); the selfhost and perf suites of test.jet
 // build with it. Chain, census and release stages pass no profile, since they build trees
-// whose package.jet may predate these profiles: they pass `--optimize=basic` instead.
+// whose package.jet may predate these profiles: they pass `-O1` instead.
+// Bootstrap step (a) of #6840: the profiles keep the none/basic spelling the seed jet
+// reads; step (b) writes O0 and O1 once a batch jet reads them.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"

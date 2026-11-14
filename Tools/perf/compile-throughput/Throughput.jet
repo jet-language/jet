@@ -36,9 +36,9 @@
 // one after another, each in its own <work>/<mode>.<n> directory:
 //
 //   check    jet check Compiler
-//   O0       jet build --threads N --optimize=none Compiler
-//   O1       jet build --threads N --optimize=basic Compiler
-//   O2       jet build --threads N --optimize=full Compiler
+//   O0       jet build --threads N -O0 Compiler
+//   O1       jet build --threads N -O1 Compiler
+//   O2       jet build --threads N -O2 Compiler
 //   release  jet build --threads N --release Compiler
 //   default  jet build --threads N Compiler
 //
@@ -306,9 +306,9 @@ mode_args: fn(mode: String, threads: Int) -> [String] {
     if mode == "check" -> return [String]{"check", "Compiler"}
     build := [String]{"build", "--threads", "{threads}"}
     if {
-        mode == "O0" -> build.push("--optimize=none")
-        mode == "O1" -> build.push("--optimize=basic")
-        mode == "O2" -> build.push("--optimize=full")
+        mode == "O0" -> build.push("-O0")
+        mode == "O1" -> build.push("-O1")
+        mode == "O2" -> build.push("-O2")
         mode == "release" -> build.push("--release")
         else -> {}
     }
@@ -1739,7 +1739,7 @@ test_trace: fn() -> String {
 
 #Test("modes map to the compile they measure") {
     assert_eq(mode_args("check", 12).join(" "), "check Compiler")
-    assert_eq(mode_args("O0", 12).join(" "), "build --threads 12 --optimize=none Compiler")
+    assert_eq(mode_args("O0", 12).join(" "), "build --threads 12 -O0 Compiler")
     assert_eq(mode_args("release", 8).join(" "), "build --threads 8 --release Compiler")
     assert_eq(mode_args("default", 4).join(" "), "build --threads 4 Compiler")
 }

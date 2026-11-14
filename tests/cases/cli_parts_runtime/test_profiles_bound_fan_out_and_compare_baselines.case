@@ -20,7 +20,7 @@ stdout: ~ "2 passed, 0 failed" # both tests pass
 file: app/.jet/test/quick/tests.rows ~ "adds" # the baseline holds each test
 file: app/.jet/test/quick/tests.rows ~ "waits a moment" # the baseline holds each test
 file: app/.jet/test/quick/tests.rows !~ "failed" # every recorded row passed
-file: app/.jet/test/quick/tests-none.rows absent # quick has no optimize fan-out
+file: app/.jet/test/quick/tests-O0.rows absent # quick has no optimize fan-out
 step: jet test --show-default --capture=all
 cwd: {work}/app
 exit: 0
@@ -39,24 +39,24 @@ stderr: ~ "jet test: profile `tight`, run `tests`" # --profile names a test prof
 step: jet test --profile levels --capture=all
 cwd: {work}/app
 exit: 0
-stderr: ~ "run `tests at optimize none`" # one run per optimize level
-stderr: ~ "run `tests at optimize full`" # one run per optimize level
-file: app/.jet/test/levels/tests-none.rows exists
-file: app/.jet/test/levels/tests-full.rows exists
+stderr: ~ "run `tests at optimize O0`" # one run per optimize level
+stderr: ~ "run `tests at optimize O2`" # one run per optimize level
+file: app/.jet/test/levels/tests-O0.rows exists
+file: app/.jet/test/levels/tests-O2.rows exists
 file: app/.jet/test/levels/tests.rows absent # a fan-out profile has no unsuffixed run
-step: jet test --profile levels --optimize=basic --capture=all
+step: jet test --profile levels -O1 --capture=all
 cwd: {work}/app
 exit: 0
-stderr: ~ "run `tests at optimize basic`" # the flag overrides the profile's levels
-stderr: !~ "run `tests at optimize none`" # the profile's levels don't run beside it
-file: app/.jet/test/levels/tests-basic.rows exists
+stderr: ~ "run `tests at optimize O1`" # the flag overrides the profile's levels
+stderr: !~ "run `tests at optimize O0`" # the profile's levels don't run beside it
+file: app/.jet/test/levels/tests-O1.rows exists
 step: jet test --profile full --capture=all
 cwd: {work}/app
 exit: 0
-stdout: ~ "PASS\ttests/golden/greet.jet\to0" # optimize none runs the corpus on o0
-stdout: ~ "PASS\ttests/golden/greet.jet\to2" # optimize full runs it on o2
-stdout: !~ "greet.jet\to1" # basic is not one of the profile's levels
-stderr: ~ "run `tests at optimize full`" # the #Tests run beside the corpus
+stdout: ~ "PASS\ttests/golden/greet.jet\to0" # optimize O0 runs the corpus on o0
+stdout: ~ "PASS\ttests/golden/greet.jet\to2" # optimize O2 runs it on o2
+stdout: !~ "greet.jet\to1" # O1 is not one of the profile's levels
+stderr: ~ "run `tests at optimize O2`" # the #Tests run beside the corpus
 remove: app/tests/golden
 step: jet test --profile full
 cwd: {work}/app

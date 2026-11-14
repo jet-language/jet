@@ -17,13 +17,13 @@ stdout: ~ "loop zero_trip main.jet:79 `i` below 0 of Int: aliasing-free true, no
 stdout: ~ "loop unproven main.jet:86 `i` below 3 of Int: aliasing-free true, no early exit true, effect-free false, independent false; lowered scalar, proven accesses 0, unchecked 0" # offset index
 stdout: !~ "loop scalar_loop" # #Scalar records no proof
 stdout: !~ "loop first_index" # a loop that returns from inside has no proof
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = checked_loop_proofs_reach_the_range_loop.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = checked_loop_proofs_reach_the_range_loop.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = checked_loop_proofs_reach_the_range_loop.out
 step: jet build main.jet

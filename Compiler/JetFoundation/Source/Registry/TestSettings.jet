@@ -18,9 +18,10 @@
 // 0 (`--shuffle=7`, `shuffle: 7`, `t.shuffle(7)`). Text and Path: nonempty
 // text (`--results=r.json`, `results: "r.json"`, `t.results("r.json")`).
 // Capture: failed, all or none. Shard: I/N with 1 <= I <= N <= 4096
-// (`--shard=3/8`, `shard: 3/8`, `t.shard(3, 8)`). Levels: optimize levels
-// (`--optimize=none,full`, `optimize: [none, full]`,
-// `t.optimize(["none", "full"])`). Duration: a positive `ms`, `s` or `m`
+// (`--shard=3/8`, `shard: 3/8`, `t.shard(3, 8)`). Levels: the levels of the
+// Level build option of the same name, each flag one more level
+// (`-O0 -O2`, `optimize: [O0, O2]`, `t.optimize(["O0", "O2"])`).
+// Duration: a positive `ms`, `s` or `m`
 // duration (`--time-limit=60s`, `time_limit: 60s`, `t.time_limit("60s")`).
 // Size: a positive size in `k`, `m` or `g` (also `kib`, `mib`, `gib`) units
 // (`--memory=16G`, `memory: 16gib`, `t.memory("16G")`).
@@ -80,10 +81,10 @@ JET_TEST_SETTINGS: #run { [TestSettingRow]{
     {name: "serial", kind: TestSettingKind.Switch, ported: true, help: "Run tests one at a time instead of the parallel default"},
     {name: "measure", kind: TestSettingKind.Switch, ported: true, help: "Measure `.measure` claims"},
     {name: "trace_tiers", kind: TestSettingKind.Switch, ported: true, help: "Report the tier each test ran at"},
-    // The optimize levels of a test run: none is `jet run`, basic
-    // `jet build --optimize=basic` and full `jet build`. More than one runs
-    // the tests once per level.
-    {name: "optimize", kind: TestSettingKind.Levels, ported: true, help: "Run the tests at each listed optimize level: none, basic or full"},
+    // The optimize levels of a test run: O0 is `jet run`, O1
+    // `jet build -O1` and O2 `jet build`. More than one runs the tests
+    // once per level.
+    {name: "optimize", kind: TestSettingKind.Levels, ported: true, help: "Run the tests at each listed optimize level: O0, O1 or O2"},
     {name: "time_limit", kind: TestSettingKind.Duration, ported: true, help: "Bound each test's wall time, such as 60s"},
     {name: "opt_in", kind: TestSettingKind.Switch, ported: true, help: "Also run the corpus rows that are opt-in only"},
     // The same tests land in the same slice for the same tree. A sharded run
@@ -138,19 +139,44 @@ test_setting_flag: fn(name: String) -> String Never! {
     "--{name.replace("_", "-")}"
 }
 
-// The row a flag (`--shard` or `--shard=3/8`, `-u`) names.
+// The row a flag (`--shard` or `--shard=3/8`, `-u`, a level flag `-O2`)
+// names.
 test_setting_flag_row: fn(argument: String) -> TestSettingRow? {
     head: argument.split("=").to_list()[0]
     if head == "-u" -> return test_setting_row("update_snapshots")
     loop row in JET_TEST_SETTINGS {
-        if test_setting_flag(row.name) == head -> return Val(row.copy())
+        if row.kind != TestSettingKind.Levels {
+            if test_setting_flag(row.name) == head -> return Val(row.copy())
+            next
+        }
+        loop level in test_setting_levels(row) {
+            if build_option_level_flag(level) == argument -> return Val(row.copy())
+        }
     }
     None
+}
+
+// The levels a Levels row takes: the values of the Level build option of
+// the same name.
+test_setting_levels: fn(row: TestSettingRow) -> [String] Never! {
+    option: build_option_row(row.name) ?? return [String]{}
+    option.values
+}
+
+// How a row's flag is written: `--shard`, or for a Levels row its level
+// flags, `-O0, -O1 or -O2`.
+test_setting_flag_text: fn(row: TestSettingRow) -> String Never! {
+    if row.kind != TestSettingKind.Levels -> return test_setting_flag(row.name)
+    build_option_join(loop level in test_setting_levels(row) -> build_option_level_flag(level))
 }
 
 // The three spellings of a row, as `jet help test` shows them.
 test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
     flag: test_setting_flag(row.name)
+    levels: test_setting_levels(row)
+    // The first and the last level, as a Levels row's spellings show them.
+    low: if levels.len() > 0 -> levels[0].copy() else -> ""
+    high: if levels.len() > 0 -> levels[levels.len() - 1].copy() else -> ""
     if row.kind == {
         .Switch -> "{flag}, `{row.name}: true`, `t.{row.name}()`"
         .Count -> "{flag}=<n>, `{row.name}: 4`, `t.{row.name}(4)`"
@@ -158,7 +184,7 @@ test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
         .Text | .Path -> "{flag}=<text>, `{row.name}: \"x\"`, `t.{row.name}(\"x\")`"
         .Capture -> "{flag}=all, `{row.name}: all`, `t.{row.name}(\"all\")`"
         .Shard -> "{flag}=3/8, `{row.name}: 3/8`, `t.{row.name}(3, 8)`"
-        .Levels -> "{flag}=none,full, `{row.name}: [none, full]`, `t.{row.name}([\"none\", \"full\"])`"
+        .Levels -> "{build_option_level_flag(low)} {build_option_level_flag(high)}, `{row.name}: [{low}, {high}]`, `t.{row.name}([\"{low}\", \"{high}\"])`"
         .Duration -> "{flag}=60s, `{row.name}: 60s`, `t.{row.name}(\"60s\")`"
         .Size -> "{flag}=16G, `{row.name}: 16gib`, `t.{row.name}(\"16G\")`"
     }
@@ -174,7 +200,7 @@ test_setting_hint: fn(row: TestSettingRow) -> String Never! {
         .Path -> "a nonempty path"
         .Capture -> "failed, all or none"
         .Shard -> "I/N with 1 <= I <= N, such as `2/4`"
-        .Levels -> "optimize levels from none, basic and full, each at most once"
+        .Levels -> "optimize levels from {build_option_join(test_setting_levels(row))}, each at most once"
         .Duration -> "a positive duration such as `60s`, `1500ms` or `2m`"
         .Size -> "a positive size such as `16G`, `8gib` or `512mib`"
     }
@@ -184,7 +210,7 @@ test_setting_hint: fn(row: TestSettingRow) -> String Never! {
 // (test_setting_hint says what the row takes). Switch is `true`/`false`;
 // Count and Seed are decimal; Capture is failed, all or none (failure,
 // failures and off are accepted); Shard is `I/N`; Levels is the levels
-// joined by `,` (written `none,full`, `[none, full]` or `["none", "full"]`);
+// joined by `,` (written `O0,O2`, `[O0, O2]` or `["O0", "O2"]`);
 // Duration is whole milliseconds, `<n>ms`; Size is whole bytes.
 test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
     trimmed: text.trim()
@@ -225,7 +251,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             levels := [String]{}
             loop part in inner.split(",").to_list() {
                 level: part.trim().replace("\"", "")
-                if level != "none" && level != "basic" && level != "full" -> return None
+                if !test_setting_levels(row).contains(level) -> return None
                 if levels.contains(level) -> return None
                 levels.push(level)
             }
@@ -391,6 +417,9 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
     assert_eq((test_setting_flag_row("--shard=3/8") ?? panic("shard row")).name, "shard")
     assert(test_setting_flag_row("--profile") == None)
     assert_eq(test_setting_spellings(test_setting_row("shard") ?? panic("shard row")), "--shard=3/8, `shard: 3/8`, `t.shard(3, 8)`")
+    assert_eq((test_setting_flag_row("-O1") ?? panic("optimize row")).name, "optimize")
+    assert(test_setting_flag_row("-O3") == None)
+    assert_eq(test_setting_spellings(test_setting_row("optimize") ?? panic("optimize row")), "-O0 -O2, `optimize: [O0, O2]`, `t.optimize([\"O0\", \"O2\"])`")
 }
 
 #Test("test setting values are canonical or name what they need") {
@@ -401,9 +430,10 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
     assert_eq(test_setting_hint(shard), "I/N with 1 <= I <= N, such as `2/4`")
     assert_eq(test_setting_value(shard, "1/4097") ?? "refused", "refused")
     levels: test_setting_row("optimize") ?? panic("optimize row")
-    assert_eq(test_setting_value(levels, "[none, full]") ?? "", "none,full")
-    assert_eq(test_setting_value(levels, "[\"basic\"]") ?? "", "basic")
-    assert_eq(test_setting_value(levels, "none,none") ?? "refused", "refused")
+    assert_eq(test_setting_value(levels, "[O0, O2]") ?? "", "O0,O2")
+    assert_eq(test_setting_value(levels, "[\"O1\"]") ?? "", "O1")
+    assert_eq(test_setting_value(levels, "O0,O0") ?? "refused", "refused")
+    assert_eq(test_setting_value(levels, "none") ?? "refused", "refused")
     limit: test_setting_row("time_limit") ?? panic("time_limit row")
     assert_eq(test_setting_value(limit, "2m") ?? "", "120000ms")
     assert_eq(test_setting_value(limit, "0s") ?? "refused", "refused")
@@ -433,7 +463,7 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
     assert_eq(test_settings_lines(merged), "shard\t3/8\tfn test\nserial\ttrue\tprofile `ci`\nresults\tr.json\tfn test\n")
     assert_eq((test_settings_parse_lines(test_settings_lines(merged), "flag") ?? panic(err.message))[1].source, "profile `ci`")
     assert_eq(test_settings_refusal("levels\t1\n"), "`levels` is not a `jet test` setting")
-    assert_eq((test_settings_parse_lines("optimize\t[\"none\", \"full\"]\n", "fn test") ?? panic(err.message))[0].value, "none,full")
+    assert_eq((test_settings_parse_lines("optimize\t[\"O0\", \"O2\"]\n", "fn test") ?? panic(err.message))[0].value, "O0,O2")
     assert_eq(test_settings_refusal("coverage\ttrue\n"), "")
     assert_eq(test_settings_refusal("watch\ttrue\n"), "`t.watch(…)` is not ported to the Jet test runner yet")
     assert_eq(test_settings_refusal("shard\t9/8\n"), "`t.shard(…)` needs I/N with 1 <= I <= N, such as `2/4`, not `9/8`")

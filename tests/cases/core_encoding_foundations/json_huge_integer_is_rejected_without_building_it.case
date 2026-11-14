@@ -5,19 +5,19 @@
 # about 400 MB, and quadratic digit parsing of 10 MB would take far longer.
 fixture: json_huge_integer_is_rejected_without_building_it.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 limit: time=120
 exit: 0
 stdout: = json_huge_integer_is_rejected_without_building_it.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 limit: time=120
 exit: 0
 stdout: = json_huge_integer_is_rejected_without_building_it.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 limit: time=120
 exit: 0
 stdout: = json_huge_integer_is_rejected_without_building_it.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 limit: time=10 resident=262144

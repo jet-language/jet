@@ -10,25 +10,25 @@ step refused: jet check refused.jet
 exit: 1
 stderr: ~ "Error [jet.CopyNotSupported]" # the field move out of the write receiver is refused (E0211)
 stderr: ~ "refused.jet:21:28" # at `self.r.move()`
-step refused_o0: jet run --optimize=none refused.jet
+step refused_o0: jet run -O0 refused.jet
 exit: == refused
 stdout: = ""
 stderr: ~ "refused.jet:21:28" # the run stops at the same check
-step refused_o1: jet run --optimize=basic refused.jet
+step refused_o1: jet run -O1 refused.jet
 exit: == refused
 stdout: = ""
-step refused_o2: jet run --optimize=full refused.jet
+step refused_o2: jet run -O2 refused.jet
 exit: == refused
 stdout: = ""
 step check: jet check owned.jet
 exit: 0
-step o0: jet run --optimize=none owned.jet
+step o0: jet run -O0 owned.jet
 exit: 70
 stdout: = "close x\nrefilled b\nclose a\nclose b\n"
 stderr: ~ "panic: stop" # the callee's stop; the stderr also carries its location
-step o1: jet run --optimize=basic owned.jet
+step o1: jet run -O1 owned.jet
 exit: 70
 stdout: = "close x\nrefilled b\nclose a\nclose b\n"
-step o2: jet run --optimize=full owned.jet
+step o2: jet run -O2 owned.jet
 exit: 70
 stdout: = "close x\nrefilled b\nclose a\nclose b\n"

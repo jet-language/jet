@@ -3,12 +3,12 @@
 # comptime evaluator word the stop the same way.
 fixture: fixtures/list_position_stop_counts_one_item
 env: NO_COLOR=1
-step one_o0: jet run --optimize=none one.jet
+step one_o0: jet run -O0 one.jet
 exit: 70
 stdout: empty
 stderr: ~ "Stop [E3010]: `the list has 1 item, so position 1 doesn't exist`" # the stop's reason line; Why/Fix belong to the E3010 row
 stderr: ~ "--> one.jet:6" # the indexing site
-step one_o2: jet run --optimize=full one.jet
+step one_o2: jet run -O2 one.jet
 exit: 70
 stderr: ~ "Stop [E3010]: `the list has 1 item, so position 1 doesn't exist`" # the stop's reason line on the optimized tier
 step: jet build one.jet
@@ -16,7 +16,7 @@ exit: 0
 step one_aot: {work}/.jet/build/one
 exit: 70
 stderr: ~ "Stop [E3010]: `the list has 1 item, so position 1 doesn't exist`" # the AOT binary's reason line
-step two_o0: jet run --optimize=none two.jet
+step two_o0: jet run -O0 two.jet
 exit: 70
 stderr: ~ "Stop [E3010]: `the list has 2 items, so position 2 doesn't exist`" # a count above one keeps the plural
 step folded: jet run folded.jet

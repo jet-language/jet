@@ -1,7 +1,7 @@
 // The paired performance-surface harness, the twin of
 // Tools/gauntlet/harness/performance-surface.mjs (#5072 c8): a surface
 // spelling and its plain spelling each built once with
-// `jet build --optimize=full`, run as fresh processes in fresh empty
+// `jet build -O2`, run as fresh processes in fresh empty
 // directories in balanced seeded order, judged by a strict paired bootstrap,
 // and the evidence receipt that holds the measurement, which validates only
 // as a proven win. The artifact a receipt names is identified by its SHA-256
@@ -24,7 +24,7 @@ PS_PAIR_ID: "compound_assign_vs_binary_assign"
 PS_RANGE: "0..<100000"
 PS_ORACLE: "performance-surface:compound_assign_vs_binary_assign:4999950000\n"
 PS_TIER: "native"
-PS_TARGET: "jet build --optimize=full"
+PS_TARGET: "jet build -O2"
 PS_METRIC: "wall_time_ms"
 PS_WARMUPS: 10
 PS_TRIALS: 100
@@ -45,7 +45,7 @@ PS_BOUNDS: [(field: "ratio_lower95", label: "ratio lower bound"), (field: "ratio
 // The members of a measured pair row copied from the pair, each with the
 // pair member it copies.
 PS_ROW_FIELDS: [(name: "id", from: "id"), (name: "canonical", from: "surface"), (name: "alternate", from: "plain"), (name: "surface", from: "surface"), (name: "plain", from: "plain"), (name: "workload", from: "workload"), (name: "surface_program", from: "surface_program"), (name: "plain_program", from: "plain_program"), (name: "expected_output", from: "expected_output"), (name: "surface_source", from: "surface_source"), (name: "plain_source", from: "plain_source")]
-PS_SETUP: "one jet build --optimize=full per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory"
+PS_SETUP: "one jet build -O2 per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory"
 PS_HELP: "Usage: node Tools/gauntlet/harness/performance-surface.mjs [options]\n\nMeasure the exact compound_assign_vs_binary_assign pair on native executables, or with\n--pair ID the manifest pair ID into its own evidence_file.\nOptions: --artifact PATH, --scratch PATH, --output PATH, --canonical PATH, --timeout-ms N, --pair ID"
 
 // One thing wrong with a receipt: its kind and why.
@@ -860,7 +860,7 @@ build_arm: fn(request: ArmBuild) -> Dyn {
     out["root"] = Dyn.Text(root.copy())
     files.write(files.join(root, "main.jet"), request.source) ?? return out
     output_dir: files.join(root, "bin")
-    command: process.cmd([request.binary, "build", "--optimize=full", "--quiet", "--output-dir={output_dir}", "main.jet"]).cwd(root).env("JET_TEST_SCRATCH_DIR", request.scratch_root).timeout(time.duration_ms(request.timeout_ms))
+    command: process.cmd([request.binary, "build", "-O2", "--quiet", "--output-dir={output_dir}", "main.jet"]).cwd(root).env("JET_TEST_SCRATCH_DIR", request.scratch_root).timeout(time.duration_ms(request.timeout_ms))
     result: command.run() ?? {
         out["error_code"] = Dyn.Text("{err}")
         return out

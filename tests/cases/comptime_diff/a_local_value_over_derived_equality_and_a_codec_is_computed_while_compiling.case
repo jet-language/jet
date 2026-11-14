@@ -12,18 +12,18 @@ write: value.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: In
 step: jet check --trace main.jet
 exit: 0
 stderr: ~ "comptime.eval text" # the local value is computed while compiling
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
-step: jet run --optimize=none value.jet
+step: jet run -O0 value.jet
 exit: 0
 stdout: = "{\"x\":3,\"y\":4}\n{\"x\":3,\"y\":4}\n"
-step: jet run --optimize=full value.jet
+step: jet run -O2 value.jet
 exit: 0
 stdout: = "{\"x\":3,\"y\":4}\n{\"x\":3,\"y\":4}\n"

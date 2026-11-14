@@ -7,26 +7,26 @@
 # starts from the same values and sees each write.
 fixture: module_globals_start_laid_out_unless_they_hold_a_handle.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=show_laid_out
 exit: 0
 stdout: ~ "before fn show_laid_out" # the dump names the function reading the laid-out globals
 stdout: count "storage.start" = 0 # no first-use helper for the laid-out globals
 stdout: count "jet_rt_atomic_i64_load" = 0 # and no ready word to check
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=show_shared
 exit: 0
 stdout: ~ "storage.start" # the Shared cell is built by its start helper
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

@@ -3,32 +3,28 @@
 use {
     jetpack_foundation.[
         BUILD_CTOR, BUILD_FIELD_ALLOW, BUILD_FIELD_DEBUG_INFO, BUILD_FIELD_OPTIMIZE, BUILD_FIELD_PANIC,
-        BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL,
-        BUILD_OPTIMIZE_NONE, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE,
+        BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_O0, BUILD_OPTIMIZE_O1,
+        BUILD_OPTIMIZE_O2, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE,
     ]
-    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_refusal, build_option_row]
+    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_profile_value, build_option_refusal, build_option_row]
 }
 
-// Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
+// The `optimize:` level of a profile: O0, O1 or O2.
 BuildOptimize: enum {
-    Off
-    Basic
-    Full
+    O0
+    O1
+    O2
 
     as_str: fn(self) -> String Never! {
         if self == {
-            .Off -> BUILD_OPTIMIZE_NONE
-            .Basic -> BUILD_OPTIMIZE_BASIC
-            .Full -> BUILD_OPTIMIZE_FULL
+            .O0 -> BUILD_OPTIMIZE_O0
+            .O1 -> BUILD_OPTIMIZE_O1
+            .O2 -> BUILD_OPTIMIZE_O2
         }
     }
 
     cache_tag: fn(self) -> String Never! {
-        if self == {
-            .Off -> "opt:none"
-            .Basic -> "opt:basic"
-            .Full -> "opt:full"
-        }
+        "opt:{self.as_str()}"
     }
 }
 
@@ -215,7 +211,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         rest: value.removeprefix("{{")
         if rest.ends_with("}}") -> inner_block = Val(rest.removesuffix("}}").trim())
     } else {
-        return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: none|basic|full, … }}` value"))
+        return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: O0|O1|O2, … }}` value"))
     }
     inner: inner_block ?? ""
     optimize_value := String?{None}
@@ -236,7 +232,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
         seen_fields.push(key.copy())
         if key == {
-            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
+            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(build_option_profile_value(BUILD_FIELD_OPTIMIZE, pkg_unquote(field.value)))
             BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_PANIC -> {
@@ -281,14 +277,14 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         }
     }
     if optimize_value == .Val(selected) {
-        if selected == BUILD_OPTIMIZE_NONE {
-            profile.optimize = Val(BuildOptimize.Off)
-        } else if selected == BUILD_OPTIMIZE_BASIC {
-            profile.optimize = Val(BuildOptimize.Basic)
-        } else if selected == BUILD_OPTIMIZE_FULL {
-            profile.optimize = Val(BuildOptimize.Full)
+        if selected == BUILD_OPTIMIZE_O0 {
+            profile.optimize = Val(BuildOptimize.O0)
+        } else if selected == BUILD_OPTIMIZE_O1 {
+            profile.optimize = Val(BuildOptimize.O1)
+        } else if selected == BUILD_OPTIMIZE_O2 {
+            profile.optimize = Val(BuildOptimize.O2)
         } else {
-            return Err(PackageParseError.Composition("build profile `{name}` has an unknown `optimize:` value `{selected}` — use none, basic or full"))
+            return Err(PackageParseError.Composition("build profile `{name}` has an unknown `optimize:` value `{selected}` — use O0, O1 or O2"))
         }
     }
     Ok(profile)

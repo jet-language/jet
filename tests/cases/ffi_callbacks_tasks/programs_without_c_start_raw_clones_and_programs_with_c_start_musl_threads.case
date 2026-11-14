@@ -12,7 +12,7 @@ fixture: programs_without_c_start_raw_clones_and_programs_with_c_start_musl_thre
 write: clink/package.jet clink/package.template
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet build --optimize=none main.jet
+step: jet build -O0 main.jet
 cwd: pure
 exit: 0
 step: {work}/pure/.jet/build/main
@@ -21,7 +21,7 @@ stdout: = "tasks 16 sum 1240\n"
 step: node {work}/symbols.mjs {work}/pure/.jet/build/main
 exit: 0
 stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
-step: jet build --optimize=none main.jet
+step: jet build -O0 main.jet
 cwd: clink
 exit: 0
 step: {work}/clink/.jet/build/main
@@ -30,7 +30,7 @@ stdout: = "C ran on a musl thread of its own: true\nC shared the initial thread'
 step: node {work}/symbols.mjs {work}/clink/.jet/build/main
 exit: 0
 stdout: = "pthread functions: true\nmusl startup: true\nJet startup: false\nC thread functions handed to the runtime: true\n"
-step: jet build --optimize=basic main.jet
+step: jet build -O1 main.jet
 cwd: pure
 exit: 0
 step: {work}/pure/.jet/build/main
@@ -39,7 +39,7 @@ stdout: = "tasks 16 sum 1240\n"
 step: node {work}/symbols.mjs {work}/pure/.jet/build/main
 exit: 0
 stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
-step: jet build --optimize=basic main.jet
+step: jet build -O1 main.jet
 cwd: clink
 exit: 0
 step: {work}/clink/.jet/build/main
@@ -48,7 +48,7 @@ stdout: = "C ran on a musl thread of its own: true\nC shared the initial thread'
 step: node {work}/symbols.mjs {work}/clink/.jet/build/main
 exit: 0
 stdout: = "pthread functions: true\nmusl startup: true\nJet startup: false\nC thread functions handed to the runtime: true\n"
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 cwd: pure
 exit: 0
 step: {work}/pure/.jet/build/main
@@ -57,7 +57,7 @@ stdout: = "tasks 16 sum 1240\n"
 step: node {work}/symbols.mjs {work}/pure/.jet/build/main
 exit: 0
 stdout: = "pthread functions: false\nmusl startup: false\nJet startup: true\nC thread functions handed to the runtime: false\n"
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 cwd: clink
 exit: 0
 step: {work}/clink/.jet/build/main

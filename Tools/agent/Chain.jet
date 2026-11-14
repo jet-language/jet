@@ -1331,7 +1331,7 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
 }
 
 build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
-    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build --optimize=basic --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
+    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build -O1 --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
 }
 
 StageRun: struct {
@@ -1418,7 +1418,7 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
 
 // build_stage: NAME (jet, jet.o and its runtime pack jet-runtime/) built by
 // BUILDER_DIR/jet (sha BUILDER, its pack hash BUILDER_PACK) under IDENTITY:
-// `jet build --optimize=basic --threads THREADS Compiler` at the canonical
+// `jet build -O1 --threads THREADS Compiler` at the canonical
 // root, in the dev shell with no Rust tool on PATH; the build compiles no C.
 // Every stage builds at `basic`, the level of the Compiler workspace's `ship`
 // profile, which builders older than these profiles take as a flag.
@@ -1470,7 +1470,7 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     files.create_dir_all("{c.work}/tmp") ?? ()
     builder_jet: files.join(builder_dir, "jet")
     vars: [String]{"JET_COMPILER_IDENTITY={identity}", "JET_TOOLCHAIN_ROOT={c.r.root}", "JET_KEEP_GOING=1", "JET_KEEP_GOING_REPORT={report}", "TMPDIR={c.work}/tmp", "PATH={norust_path()}"}
-    argv: [String]{builder_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", builder_jet.copy(), "build", "--optimize=basic", "--threads", "{threads}", "Compiler"}
+    argv: [String]{builder_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", builder_jet.copy(), "build", "-O1", "--threads", "{threads}", "Compiler"}
     ran: stage_run(c, n, argv, vars, 3600, true)
     rows: keep_going_rows(report)
     built: files.join(build_out, "jet")

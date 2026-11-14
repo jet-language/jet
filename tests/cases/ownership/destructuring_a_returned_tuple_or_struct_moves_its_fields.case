@@ -5,19 +5,19 @@
 fixture: destructuring_a_returned_tuple_or_struct_moves_its_fields.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet inspect decisions --optimize=none --opt-dump=from_tuple,from_struct,from_nested main.jet
+step: jet inspect decisions -O0 --opt-dump=from_tuple,from_struct,from_nested main.jet
 exit: 0
 stdout: ~ "before fn from_nested" # the dump covers the repro
 stdout: !~ "jet_rt_string_clone" # no String field is cloned
 stdout: !~ "jet_rt_block_retain" # no List field is retained
 stdout: !~ "#copy<" # no field goes through a copy routine
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0 # o0
 stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o0
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0 # o1
 stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o1
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0 # o2
 stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o2
 step: jet build main.jet

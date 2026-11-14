@@ -11,15 +11,15 @@ requires: os-name:linux
 requires: probe grep -qw localhost /etc/hosts # the children resolve localhost from /etc/hosts
 fixture: fork_under_load_child_completes.fixture
 env: NO_COLOR=1
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 env: JET_STORE_DIR={work}/cache/o0
 exit: 0
 stdout: = fork_under_load_child_completes.out
-step o1: jet run --optimize=basic main.jet
+step o1: jet run -O1 main.jet
 env: JET_STORE_DIR={work}/cache/o1
 exit: 0
 stdout: = fork_under_load_child_completes.out
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 env: JET_STORE_DIR={work}/cache/o2
 exit: 0
 stdout: = fork_under_load_child_completes.out

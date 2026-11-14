@@ -16,7 +16,7 @@ A full run does the following:
 
 1. `Gen.jet DATA` writes the inputs. The bytes are the same on every run, and an input that
    already exists is kept.
-2. Each `wNN-*/run.jet` is built at O0 (`--optimize=none`), O1 (`--optimize=basic`) and O2
+2. Each `wNN-*/run.jet` is built at O0 (`-O0`), O1 (`-O1`) and O2
    (`jet build --release`). Every build, each `jet run` phase, and every peer must print exactly
    `wNN-*/expected.out`.
 3. Timing uses hyperfine `-N`, with the jet-bin tier (the release binary), the two jet-run

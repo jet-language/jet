@@ -4,21 +4,21 @@
 # holds at O0, O1 and O2 and under the hardened profile.
 fixture: a_sentry_fault_names_the_access_and_the_range.fixture
 env: NO_COLOR=1
-step none: jet run --optimize=none steps.jet
+step none: jet run -O0 steps.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
 stderr: ~ "steps.jet:8:15, in #Unsafe gate" # the faulting read's line and column, not the gate's line 5
 stderr: ~ "the access starts at offset 16 of the live range 0x" # the range's addresses vary with ASLR
 stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints
-step basic: jet run --optimize=basic steps.jet
+step basic: jet run -O1 steps.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
 stderr: ~ "steps.jet:8:15, in #Unsafe gate" # the faulting read's line and column, not the gate's line 5
 stderr: ~ "the access starts at offset 16 of the live range 0x" # the range's addresses vary with ASLR
 stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints
-step full: jet run --optimize=full steps.jet
+step full: jet run -O2 steps.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation

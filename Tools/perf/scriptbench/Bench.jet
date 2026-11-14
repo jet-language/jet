@@ -566,7 +566,7 @@ run: fn() {
         print("== {w.id} {w.dir}: {w.what} ({w.cards.join(", ")})")
         expected: fs.read("{bench}/{w.dir}/expected.out") ?? fail("no {w.dir}/expected.out")
         levels: ["O0", "O1", "O2"]
-        flags: ["--optimize=none", "--optimize=basic", "--release"]
+        flags: ["-O0", "-O1", "--release"]
         bins := [String]{}
         loop k in 0..<3 {
             if build(opts, bench, w, levels[k], flags[k]) == .Val(bin) -> bins.push(bin) else -> errors += 1

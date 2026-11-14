@@ -17,41 +17,41 @@ step: jet check main.jet
 exit: 0
 stdout: = ""
 stderr: = "ok: `main.jet` has no problems\n"
-step file_o0: jet run --optimize=none main.jet
+step file_o0: jet run -O0 main.jet
 exit: 0
 stdout: = "first\ntotal 6\nhi jet\nadd 10\n"
 stderr: = ""
-step file_o1: jet run --optimize=basic main.jet
+step file_o1: jet run -O1 main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step file_o2: jet run --optimize=full main.jet
+step file_o2: jet run -O2 main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o0: jet run --optimize=none -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o0: jet run -O0 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o1: jet run --optimize=basic -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o1: jet run -O1 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o2: jet run --optimize=full -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o2: jet run -O2 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step piped_o0: jet run --optimize=none -
+step piped_o0: jet run -O0 -
 stdin: main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step piped_o1: jet run --optimize=basic -
+step piped_o1: jet run -O1 -
 stdin: main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step piped_o2: jet run --optimize=full -
+step piped_o2: jet run -O2 -
 stdin: main.jet
 exit: 0
 stdout: == file_o0

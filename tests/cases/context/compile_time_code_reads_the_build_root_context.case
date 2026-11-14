@@ -5,12 +5,12 @@ fixture: compile_time_code_reads_the_build_root_context.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet run --optimize=none prepared.jet
+step: jet run -O0 prepared.jet
 exit: 0
 stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline true" # the build root, then the running task
-step: jet run --optimize=basic prepared.jet
+step: jet run -O1 prepared.jet
 exit: 0
 stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline true" # the build root, then the running task
-step: jet run --optimize=full prepared.jet
+step: jet run -O2 prepared.jet
 exit: 0
 stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline true" # the build root, then the running task

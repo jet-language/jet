@@ -8,31 +8,31 @@
 # rows under the `inspect.memory` status.
 fixture: inspect_memory_reports_worst_case_stack_per_entry.fixture
 env: NO_COLOR=1
-step direct: jet inspect memory --optimize=none direct.jet
+step direct: jet inspect memory -O0 direct.jet
 exit: 0
 stdout: ~ "memory: scope=" # the report header
-stdout: ~ "level=O0" # --optimize=none is the build's level
+stdout: ~ "level=O0" # -O0 is the build's level
 stdout: ~ "entry run" # the program entry
 stdout: ~ " B via run -> step -> leaf" # bytes, then the deepest chain of direct calls
 stdout: !~ "stack: unbounded" # every call is direct
-step recursive: jet inspect memory --optimize=none recursive.jet
+step recursive: jet inspect memory -O0 recursive.jet
 exit: 0
 stdout: ~ "entry run" # the program entry
 stdout: ~ "stack: unbounded, recursion via run -> depth -> depth (add #MaxDepth(n))" # the cycle closes on depth
 step default: jet inspect memory recursive.jet
 exit: 0
 stdout: ~ "stack bound: unbounded, recursion through recursive.depth with no `#MaxDepth(n)` on its cycle" # sema's bound holds at every level; the optimizer may turn the self call into a loop
-step value: jet inspect memory --optimize=none through_value.jet
+step value: jet inspect memory -O0 through_value.jet
 exit: 0
 stdout: ~ "stack: unbounded, a call through a function value via run -> apply (seal its targets)" # apply calls the value it is given
-step recjson: jet inspect memory --optimize=none recursive.jet --json
+step recjson: jet inspect memory -O0 recursive.jet --json
 exit: 0
 json: stdout doc $.action = "inspect.memory"
 json: stdout doc $.entries[0].name = "run"
 json: stdout doc $.entries[0].stack_bytes = null
 json: stdout doc $.entries[0].unbounded = "recursion"
 json: stdout doc $.entries[0].path[1] = "depth"
-step directjson: jet inspect memory --optimize=none direct.jet --json
+step directjson: jet inspect memory -O0 direct.jet --json
 exit: 0
 json: stdout doc $.entries[0].unbounded = ""
 json: stdout doc $.entries[0].path[2] = "leaf"

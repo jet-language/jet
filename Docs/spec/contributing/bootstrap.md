@@ -98,14 +98,14 @@ payload, with the rules Tower applies when a ballot is posted
 Run it from a checkout of the commit you want to build, in the Nix
 development environment (`Tools/agent/JetEnv.jet` or `nix develop`): each
 `jet build Compiler` also makes the runtime pack the new compiler lowers. Each
-stage builds at `--optimize=basic`, the level the release stages use. `SEED` is
+stage builds at `-O1`, the level the release stages use. `SEED` is
 the seed directory and `WORK` a
 scratch directory outside the checkout.
 
 ```sh
-"$SEED/jet" build --optimize=basic Compiler     # s1: Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
+"$SEED/jet" build -O1 Compiler     # s1: Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
 mkdir -p "$WORK" && cp -r Compiler/JetCli/.jet/build "$WORK/s1"
-"$WORK/s1/jet" build --optimize=basic Compiler  # s2, built by s1 with s1's own runtime pack
+"$WORK/s1/jet" build -O1 Compiler  # s2, built by s1 with s1's own runtime pack
 ```
 
 The build writes `IDENTITY` (`jet@a0.0.N#<digest>`) beside the

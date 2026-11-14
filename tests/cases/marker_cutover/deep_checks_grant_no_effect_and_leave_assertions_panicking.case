@@ -7,52 +7,52 @@
 requires: tool:node
 fixture: deep_checks_grant_no_effect_and_leave_assertions_panicking.fixture
 env: NO_COLOR=1
-step assert_off_o0: jet run --optimize=none main.jet
+step assert_off_o0: jet run -O0 main.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
-step assert_on_o0: jet run --optimize=none --deep-checks main.jet
+step assert_on_o0: jet run -O0 --deep-checks main.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
-step effect_off_o0: jet run --optimize=none effect.jet
+step effect_off_o0: jet run -O0 effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
 stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
-step effect_on_o0: jet run --optimize=none --deep-checks effect.jet
+step effect_on_o0: jet run -O0 --deep-checks effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
 stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
-step effect_granted_o0: jet run --optimize=none -A --deep-checks effect.jet
+step effect_granted_o0: jet run -O0 -A --deep-checks effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check
 stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
-step assert_off_o1: jet run --optimize=basic main.jet
+step assert_off_o1: jet run -O1 main.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
-step assert_on_o1: jet run --optimize=basic --deep-checks main.jet
+step assert_on_o1: jet run -O1 --deep-checks main.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
 stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
-step effect_off_o1: jet run --optimize=basic effect.jet
+step effect_off_o1: jet run -O1 effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
 stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
-step effect_on_o1: jet run --optimize=basic --deep-checks effect.jet
+step effect_on_o1: jet run -O1 --deep-checks effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
 stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
-step effect_granted_o1: jet run --optimize=basic -A --deep-checks effect.jet
+step effect_granted_o1: jet run -O1 -A --deep-checks effect.jet
 exit: 1
 stdout: empty
 stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check

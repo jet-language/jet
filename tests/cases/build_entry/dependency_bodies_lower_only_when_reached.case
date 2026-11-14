@@ -7,15 +7,15 @@ fixture: dependency_bodies_lower_only_when_reached.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_TRACE_DETAIL=functions
-step: jet build --optimize=none --trace=trace.json app/main.jet
+step: jet build -O0 --trace=trace.json app/main.jet
 exit: 0
 file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached dependency function is still checked
 file: trace.json ~ "{\"name\":\"hello\",\"cat\":\"ir.function\"" # the reached dependency function is lowered
 file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # the unreached one is not
-step: jet build --optimize=none --dead-code=keep --trace=keep.json app/main.jet
+step: jet build -O0 --dead-code=keep --trace=keep.json app/main.jet
 exit: 0
 file: keep.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # `dead_code: keep` keeps the built package's bodies, not a dependency's
-step: jet run --optimize=full --trace=run.json app/main.jet
+step: jet run -O2 --trace=run.json app/main.jet
 exit: 0
 stdout: = "hello, jet\n"
 file: run.json ~ "{\"name\":\"hello\",\"cat\":\"ir.function\"" # a run lowers the reached dependency function at O2 too

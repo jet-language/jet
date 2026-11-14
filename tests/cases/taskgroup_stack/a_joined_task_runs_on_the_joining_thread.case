@@ -17,7 +17,7 @@ step inline: strace -f -qq -e trace=clone,clone3 -o {work}/inline.trace {work}/.
 exit: 0
 stdout: = "reached the bottom true\n"
 file.filter(where ~ "CLONE_THREAD"): inline.trace lines = 0 # only thread starts count; a fork of the program is no thread
-step inline_o2: jet run --optimize=full inline.jet
+step inline_o2: jet run -O2 inline.jet
 exit: 0
 stdout: = "reached the bottom true\n"
 stderr: empty

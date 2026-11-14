@@ -5,23 +5,23 @@
 # nothing. `relay` adds a hop and keeps only the poll after its call to
 # `parse`. `noted` adds a context frame and keeps the polls after its calls to
 # `relay` and to the Int's text conversion. The failure still reports every hop
-# on every tier. At --optimize=none `jet inspect decisions` prints each
+# on every tier. At -O0 `jet inspect decisions` prints each
 # function's slot IR twice, before and after the passes, so each poll counts
 # twice.
 fixture: fixtures/a_failure_journey_hop_takes_no_stop_check
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=none main.jet
+step: jet inspect decisions -O0 main.jet
 env: JET_OPT_DUMP=parse
 exit: 0
 stdout: ~ "jet_rt_record_new_jet_err (" # the Err value
 stdout: ~ "call_runtime jet_journey_origin (" # its journey origin
 stdout: count "jet_ir_stop_poll" = 0 # neither call is followed by a poll
-step: jet inspect decisions --optimize=none main.jet
+step: jet inspect decisions -O0 main.jet
 env: JET_OPT_DUMP=relay
 exit: 0
 stdout: ~ "call_runtime jet_journey_frame_text (" # relay's hop
 stdout: count "jet_ir_stop_poll" = 2 # only the poll after the call to parse, printed twice
-step: jet inspect decisions --optimize=none main.jet
+step: jet inspect decisions -O0 main.jet
 env: JET_OPT_DUMP=noted
 exit: 0
 stdout: ~ "jet_err_with_context_frame (" # noted's context frame

@@ -5257,7 +5257,7 @@ a test profile nor a Check output.
 ```text
 test: {
     quick: TestProfile{ suites: [tests], time_limit: 60s },
-    full: TestProfile{ suites: [tests, golden], optimize: [none, full] },
+    full: TestProfile{ suites: [tests, golden], optimize: [O0, O2] },
 }
 suites: { golden: TestSuite{ golden_corpus: "tests/golden" } }
 defaults: { test: quick }
@@ -5414,13 +5414,13 @@ for the `.measure` claim's execution record.
 
 Build options come from one table (`JET_BUILD_OPTIONS`, #5005). Each row is
 settable in three places that spell it the same way: a profile field in
-`package.jet` (`build: { release: Build{ optimize: full } }`), a call in
-`build: fn` (`b.optimize(.Full)`), and a flag (`--optimize=full`; the `=` is
-required). Layers apply in order over the command's stock values (`jet build`
-optimizes `basic`; `jet run`, `jet dev` and `jet test` optimize `none`):
+`package.jet` (`build: { release: Build{ optimize: O2 } }`), a call in
+`build: fn` (`b.optimize(.O2)`), and a flag (`-O2`). Layers apply in order
+over the command's stock values (`jet build` optimizes `O2`; `jet run`,
+`jet dev` and `jet test` optimize `O0`):
 profile, then `build: fn`, then the flag. A flag that replaces a profile or
 `build: fn` value prints one `note:` line naming the replaced value and where it
-was written. `b.pin(.optimize, .Full)` fixes the value for every build; a flag
+was written. `b.pin(.optimize, .O2)` fixes the value for every build; a flag
 with another value is E2113. `jet run` reads profiles and flags, not
 `build: fn`. Example:
 [`Examples/Tooling/Build/BuildOptions`](../../Examples/Tooling/Build/BuildOptions/run.jet).
@@ -5452,7 +5452,7 @@ crash report prints the faulting address and the return addresses of its
 frames instead of function names and lines.
 
 `debug_info` also takes `split`, the value of the stock `release` profile
-(`--release` is `optimize: full` and `debug_info: split`; a `release` profile
+(`--release` is `optimize: O2` and `debug_info: split`; a `release` profile
 in `package.jet` replaces both). Under `split`, `jet build` writes the DWARF,
 the location table, the symbol table and the section headers to a side file,
 `<image>.debug` beside the image, and files the same bytes in the package's
@@ -5532,14 +5532,14 @@ state around the check are still E0517. Examples:
 `small` (stock `false`) favors a smaller binary: with `true` the optimizer
 inlines only within the O1 limits (callee size and per-caller budget, and no
 once-called callees) at any `optimize` level, so inlining grows the code no
-more than `optimize: basic` does. `jet build --small` is `--small=true`. Jai's
+more than `optimize: O1` does. `jet build --small` is `--small=true`. Jai's
 `min_size` has no row, since the native backend has no separate size pass. The
 command-line help describes the flag as “Favor a smaller binary”; it does not
 promise a particular byte-size ratio (S15). Example:
 [`tests/run/Tooling/BuildDebugInfo`](../../tests/run/Tooling/BuildDebugInfo/run.jet).
 
-`inline` says which callees the optimizer inlines at `optimize: basic` and
-`full` (`none` inlines none). `auto` (the stock) picks them by size, within the
+`inline` says which callees the optimizer inlines at `optimize: O1` and
+`O2` (`O0` inlines none). `auto` (the stock) picks them by size, within the
 level's limits. `always_marked` takes only the functions marked
 `#Inline(Always)`, at every direct call the inliner can splice, whatever their
 size and with no per-caller budget (`small` does not limit them). The inliner

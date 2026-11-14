@@ -3,18 +3,18 @@
 # the area. O1 and O2 run the one that checks each Dyn variant has a single
 # decode kind, in Core and in the runtime scalar decodes.
 env: NO_COLOR=1
-step: jet test {root}/Core/Encoding --optimize=none
+step: jet test {root}/Core/Encoding -O0
 timeout: 1800s
 exit: 0
 stdout: ~ " passed, 0 failed" # every Core/Encoding #Test passes at O0
 stderr: !~ "E1355" # the root project's dev imports don't stop a Core #Test
 stderr: !~ "internal compiler error" # the run doesn't crash the compiler
-step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" --optimize=basic
+step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" -O1
 timeout: 1800s
 exit: 0
 stdout: ~ "1 passed, 0 failed" # O1 keeps one decode kind per Dyn variant
 stderr: !~ "internal compiler error" # O1 doesn't crash the compiler
-step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" --optimize=full
+step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" -O2
 timeout: 1800s
 exit: 0
 stdout: ~ "1 passed, 0 failed" # O2 keeps one decode kind per Dyn variant

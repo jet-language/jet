@@ -54,9 +54,9 @@ command, result, and output for each:
 jet test Compiler --profile golden
 ```
 
-It runs each golden at every optimization level: `none` is `jet run`, and
-`basic` and `full` check the same golden through `jet build` and the built
-binary (same stdin, arguments and working directory). `--optimize=none`
+It runs each golden at every optimization level: `O0` is `jet run`, and
+`O1` and `O2` check the same golden through `jet build` and the built
+binary (same stdin, arguments and working directory). `-O0`
 narrows a run to the first, `--filter=Basics/` to one area.
 
 The suite reads the central known-failing ledger (`tests/known-failing.tsv`)

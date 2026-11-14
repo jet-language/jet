@@ -7,7 +7,7 @@ fixture: wasm_pin_shares_core_helper_with_js_caller.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet build --target web --optimize=none main.jet
+step: jet build --target web -O0 main.jet
 exit: 0
 stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
 copy: harness.mjs .jet/build/harness.mjs
@@ -15,14 +15,14 @@ step: node harness.mjs
 cwd: .jet/build
 exit: 0
 stdout: = "18\n"
-step: jet build --target web --optimize=basic main.jet
+step: jet build --target web -O1 main.jet
 exit: 0
 stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
 step: node harness.mjs
 cwd: .jet/build
 exit: 0
 stdout: = "18\n"
-step: jet build --target web --optimize=full main.jet
+step: jet build --target web -O2 main.jet
 exit: 0
 stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
 step: node harness.mjs

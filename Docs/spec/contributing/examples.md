@@ -75,8 +75,8 @@ jet test Compiler --profile golden                          # Examples and tests
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
 jet test Compiler --profile packages                        # the #Tests of every other package under Compiler/ and Jetpack/
-jet test Compiler --profile core                            # every Core #Test at optimize none, basic and full
-jet test Compiler --profile fuzz                            # tests/fuzz/sema: check verdicts, differential runs agree at none, basic and full
+jet test Compiler --profile core                            # every Core #Test at optimize O0, O1 and O2
+jet test Compiler --profile fuzz                            # tests/fuzz/sema: check verdicts, differential runs agree at O0, O1 and O2
 jet test Compiler --profile full                            # every package's and Core's #Tests, all three corpora, fuzz, selfhost and perf
 jet test Compiler --profile corpora                         # all three corpora, no #Tests
 jet test Compiler --profile golden Basics/FizzBuzz          # rows whose ID contains the filter
@@ -87,10 +87,10 @@ jet test Compiler --profile ui --shard=2/4 --results=ui-2.json        # one slic
 The selected suites share one pool sized by cores and free memory. Rows print
 as cases finish; the reports and the failing rows keep suite-then-path order.
 A profile's `jobs:`, `memory:`, `filter:`, `cases:`, `shard:`, `opt_in:`,
-`optimize:` (none is o0, basic o1, full o2) and `baseline:` (the known-failing
+`optimize:` (O0 is o0, O1 o1, O2 o2) and `baseline:` (the known-failing
 ledger) shape the run; each is also a `jet test` flag (`--jobs=8`,
 `--memory=16G`, `--cases=ids.txt`, `--shard=2/4`, `--opt-in`,
-`--optimize=none,full`, `--time-limit=90s`) that overrides the profile. Census
+`-O0 -O2`, `--time-limit=90s`) that overrides the profile. Census
 and release tooling that shards, lists or reports across processes passes
 `--shard`, `--list`, `--results` and `--compiler=<jet under test>` to the
 same command.
@@ -113,8 +113,8 @@ root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
 and `.stderr.out` pins successful stderr. `.stdin` contains exact piped input.
 `<stem>.test.out` is the entry's `jet test` stdout, checked on each tier once
-the run passes: `o0` tests with `--optimize=none`, `o1` with
-`--optimize=basic` and `o2` with `--release`, a package or workspace entry
+the run passes: `o0` tests with `-O0`, `o1` with
+`-O1` and `o2` with `--release`, a package or workspace entry
 tests as its directory, and `<stem>.<tier>.test.out` replaces it for that tier
 alone. Its last line is the harness summary, and the exit must be 1 when the
 summary counts a failed or unexpected-pass test, else 0.

@@ -4,15 +4,15 @@
 # instead of running it at none and stopping in IR Lint at basic and full.
 fixture: fixed_timing_untagged_callee_is_refused_at_every_tier.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: nonzero
 stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # E0737 at the call, before inlining
 stdout: !~ "ran" # the program never runs
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: nonzero
 stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # the same E0737, not an IR Lint stop
 stdout: !~ "ran" # the program never runs
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: nonzero
 stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # the same E0737, not an IR Lint stop
 stdout: !~ "ran" # the program never runs

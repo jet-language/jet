@@ -7,13 +7,13 @@ fixture: a_lambda_that_writes_a_list_waits_for_its_live_views.fixture
 env: NO_COLOR=1
 step check: jet check accepted.jet
 exit: 0
-step o0: jet run --optimize=none accepted.jet
+step o0: jet run -O0 accepted.jet
 exit: 0
 stdout: = "4|7\n"
-step o1: jet run --optimize=basic accepted.jet
+step o1: jet run -O1 accepted.jet
 exit: 0
 stdout: = "4|7\n"
-step o2: jet run --optimize=full accepted.jet
+step o2: jet run -O2 accepted.jet
 exit: 0
 stdout: = "4|7\n"
 step refused: jet check refused.jet
@@ -21,6 +21,6 @@ exit: 1
 stderr: ~ "jet.OwnerMovedWhileViewed" # the writing call is refused (E0212)
 stderr: ~ "refused.jet:9:5" # at the call of `add`
 stderr: ~ "cannot be changed by calling `add` while `window` is still looking into it" # naming the call and the live view
-step refused_run: jet run --optimize=none refused.jet
+step refused_run: jet run -O0 refused.jet
 exit: 1
 stderr: ~ "jet.OwnerMovedWhileViewed" # the run stops at the same check

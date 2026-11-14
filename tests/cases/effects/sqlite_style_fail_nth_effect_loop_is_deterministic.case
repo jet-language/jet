@@ -7,35 +7,35 @@
 fixture: sqlite_style_fail_nth_effect_loop_is_deterministic.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step o0: jet test --show-default --capture=all --optimize=none loop.jet
+step o0: jet test --show-default --capture=all -O0 loop.jet
 exit: 0
 stdout: = "sqlite_style_fail_nth_effect_loop_is_deterministic: pass\n1 passed, 0 failed, 0 skipped\n"
-step: jet test --show-default --capture=all --optimize=none loop.jet
+step: jet test --show-default --capture=all -O0 loop.jet
 exit: == o0
 stdout: == o0
 stderr: == o0
-step: jet test --show-default --capture=all --optimize=basic loop.jet
+step: jet test --show-default --capture=all -O1 loop.jet
 exit: == o0
 stdout: == o0
 stderr: == o0
-step: jet test --show-default --capture=all --optimize=full loop.jet
+step: jet test --show-default --capture=all -O2 loop.jet
 exit: == o0
 stdout: == o0
 stderr: == o0
-step u0: jet test --show-default --capture=all --optimize=none unhandled.jet
+step u0: jet test --show-default --capture=all -O0 unhandled.jet
 exit: 1
 stdout: = "second_write_stops_on_its_fault: FAIL\n0 passed, 1 failed, 0 skipped\n"
 stderr: ~ "fault injected: FS.Write call 2" # the report heads with the second call's fault
 stderr: ~ "second write fault not handled" # and carries that run's own stop
-step: jet test --show-default --capture=all --optimize=none unhandled.jet
+step: jet test --show-default --capture=all -O0 unhandled.jet
 exit: == u0
 stdout: == u0
 stderr: == u0
-step: jet test --show-default --capture=all --optimize=basic unhandled.jet
+step: jet test --show-default --capture=all -O1 unhandled.jet
 exit: == u0
 stdout: == u0
 stderr: == u0
-step: jet test --show-default --capture=all --optimize=full unhandled.jet
+step: jet test --show-default --capture=all -O2 unhandled.jet
 exit: == u0
 stdout: == u0
 stderr: == u0

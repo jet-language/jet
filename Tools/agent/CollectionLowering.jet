@@ -16,7 +16,7 @@ ROWS: "Compiler/JetFoundation/Source/Collections.jet"
 
 EXAMPLE: "Examples/Collections/MapSetMethods.jet"
 
-LEVELS: [String]{"none", "basic", "full"}
+LEVELS: [String]{"O0", "O1", "O2"}
 
 FAULT: "ir.build unlowered: "
 
@@ -71,7 +71,7 @@ run: fn() {
     found := [String]{}
     failed := [String]{}
     loop level in LEVELS {
-        ran: process.cmd([String]{jet, "run", "--optimize={level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
+        ran: process.cmd([String]{jet, "run", "-{level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
         seen: faults_in(ran.output, found) + faults_in(ran.errors, found)
         if ran.code != 0 && seen == 0 {
             failed.push("{level}: exit {ran.code}: {ran.errors.trim()}")

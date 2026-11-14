@@ -5,15 +5,15 @@
 # O0, O1 and O2.
 fixture: math_round_keeps_nan_and_infinity_and_int_stops_out_of_range.fixture
 env: NO_COLOR=1
-step nan_o0: jet run --optimize=none nan.jet
+step nan_o0: jet run -O0 nan.jet
 exit: 70
 stdout: = math_round_keeps_nan_and_infinity_and_int_stops_out_of_range.out
 stderr: ~ "Stop [E3010]: `Int{f} needs a whole, finite Float in range; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even`" # the rounded NaN has no Int
-step nan_o1: jet run --optimize=basic nan.jet
+step nan_o1: jet run -O1 nan.jet
 exit: 70
 stdout: = math_round_keeps_nan_and_infinity_and_int_stops_out_of_range.out
 stderr: ~ "Stop [E3010]: `Int{f} needs a whole, finite Float in range;" # the same stop at O1
-step nan_o2: jet run --optimize=full nan.jet
+step nan_o2: jet run -O2 nan.jet
 exit: 70
 stdout: = math_round_keeps_nan_and_infinity_and_int_stops_out_of_range.out
 stderr: ~ "Stop [E3010]: `Int{f} needs a whole, finite Float in range;" # the same stop at O2

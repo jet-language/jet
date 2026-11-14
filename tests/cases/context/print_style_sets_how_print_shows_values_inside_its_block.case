@@ -6,12 +6,12 @@ fixture: print_style_sets_how_print_shows_values_inside_its_block.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = "00ff\n[0001, 0002, 0003]\nx = 255\n255\n-101\n[100; 101]\n(count,share) { count: 1; share: 2.50 }\nPoint { 11, 100 }\n0.13\n[; ]\n[1, 2, 3]\n(count,share) { count: 1, share: 2.5 }\nPoint { x: 3, y: 4 }\n"
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = "00ff\n[0001, 0002, 0003]\nx = 255\n255\n-101\n[100; 101]\n(count,share) { count: 1; share: 2.50 }\nPoint { 11, 100 }\n0.13\n[; ]\n[1, 2, 3]\n(count,share) { count: 1, share: 2.5 }\nPoint { x: 3, y: 4 }\n"
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = "00ff\n[0001, 0002, 0003]\nx = 255\n255\n-101\n[100; 101]\n(count,share) { count: 1; share: 2.50 }\nPoint { 11, 100 }\n0.13\n[; ]\n[1, 2, 3]\n(count,share) { count: 1, share: 2.5 }\nPoint { x: 3, y: 4 }\n"

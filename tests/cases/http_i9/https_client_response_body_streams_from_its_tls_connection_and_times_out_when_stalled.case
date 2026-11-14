@@ -17,13 +17,13 @@ env: SSL_CERT_FILE={work}/ca.pem
 session tls raw: sh serve.sh {free-port:tls}
 sleep: 250ms
 write: main.jet https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.fixture/main.template
-step none: jet run --optimize=none main.jet
+step none: jet run -O0 main.jet
 exit: 0
 stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
-step basic: jet run --optimize=basic main.jet
+step basic: jet run -O1 main.jet
 exit: 0
 stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
-step full: jet run --optimize=full main.jet
+step full: jet run -O2 main.jet
 exit: 0
 stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
 signal tls: KILL

@@ -6,17 +6,17 @@
 requires: os:unix
 fixture: stdout_flush_shows_piped_lines_before_the_program_ends.fixture
 env: NO_COLOR=1
-step build0: jet build --optimize=none main.jet
+step build0: jet build -O0 main.jet
 exit: 0
 step pipe0: sh -c "timeout -s KILL 2 .jet/build/main | cat; echo killed"
 exit: 0
 stdout: = "a printed line before the flush\na stdout write before the flush\nkilled\n" # the line after the flush died with the process
-step build1: jet build --optimize=basic main.jet
+step build1: jet build -O1 main.jet
 exit: 0
 step pipe1: sh -c "timeout -s KILL 2 .jet/build/main | cat; echo killed"
 exit: 0
 stdout: = "a printed line before the flush\na stdout write before the flush\nkilled\n"
-step build2: jet build --optimize=full main.jet
+step build2: jet build -O2 main.jet
 exit: 0
 step pipe2: sh -c "timeout -s KILL 2 .jet/build/main | cat; echo killed"
 exit: 0

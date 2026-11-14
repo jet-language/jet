@@ -10,15 +10,15 @@ step runtime: jet check runtime/main.jet
 exit: 1 # the fact read is compile-time only
 stderr: ~ "Error [jet.UnknownField]: Fact read `reflect().layout` is compile-time only" # E0302 at the run-time read
 stderr: ~ "Fix: Write `FACT: #run I32.reflect().layout`, then use `FACT` in this expression" # the fix the o0 to o2 steps compile
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 exit: 0
 stdout: = primitive_layout_fact_fix_compiles_on_every_tier.stdout.expected
 stderr: empty
-step o1: jet run --optimize=basic main.jet
+step o1: jet run -O1 main.jet
 exit: 0
 stdout: = primitive_layout_fact_fix_compiles_on_every_tier.stdout.expected
 stderr: empty
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 exit: 0
 stdout: = primitive_layout_fact_fix_compiles_on_every_tier.stdout.expected
 stderr: empty

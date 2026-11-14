@@ -26,15 +26,15 @@ step web: jet check returned.jet --target web
 exit: 1
 stderr: ~ "jet.SharedReferenceCycle" # refused for the web target too
 stderr: ~ "returned.jet:23:5" # at the same store
-step o0: jet run --optimize=none weak.jet
+step o0: jet run -O0 weak.jet
 exit: 0
 stdout: ~ "end 2 0\n" # the feed's run line
 stdout: ~ "closed 7\n" # the stream closes when the feed goes
-step o1: jet run --optimize=basic weak.jet
+step o1: jet run -O1 weak.jet
 exit: 0
 stdout: ~ "end 2 0\n" # the feed's run line
 stdout: ~ "closed 7\n" # the stream closes when the feed goes
-step o2: jet run --optimize=full weak.jet
+step o2: jet run -O2 weak.jet
 exit: 0
 stdout: ~ "end 2 0\n" # the feed's run line
 stdout: ~ "closed 7\n" # the stream closes when the feed goes

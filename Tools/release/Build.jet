@@ -9,7 +9,7 @@
 // --check-gate says whether it would start and stops. It exports COMMIT (it
 // must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on
-// PATH: the seed builds s1 (`jet build --optimize=basic Compiler` makes jet
+// PATH: the seed builds s1 (`jet build -O1 Compiler` makes jet
 // and the runtime pack it lowers), s1 builds s2, s2 builds s3, and s2 and s3
 // must be byte-identical. Every stage
 // runs in the export as its working directory, so the images record source
@@ -123,7 +123,7 @@ build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) 
     log: files.join(run.logs, "{name}.log")
     vars: with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity)})
     builder_jet: files.join(builder, "jet")
-    result: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), "build", "--optimize=basic", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
+    result: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), "build", "-O1", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
     if result.rc != 0 || !files.exists(built) || !files.exists(files.join(built_pack, "native.key")) -> return Stage{dir: "", identity: "", error: "{name}: jet build Compiler rc={result.rc}: {tail_of(log, 6)}"}
     dir: files.join(run.work, name)
     files.create_dir_all(dir) ?? return Stage{dir: "", identity: "", error: "{name}: cannot create {dir}: {err}"}

@@ -11,23 +11,23 @@ stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 3 # one per call
 stderr: ~ "This callback uses the effect `IO`, which the parameter doesn't allow\n  --> denied.jet:10:17" # the printing lambda
 stderr: ~ "This callback uses the effect `Panic`, which the parameter doesn't allow\n  --> denied.jet:14:22" # the stopping lambda
 stderr: ~ "This callback uses the effect `Panic`, which the parameter doesn't allow\n  --> denied.jet:15:22" # the stopping named function
-step: jet run --optimize=none denied.jet
+step: jet run -O0 denied.jet
 exit: 1
 stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 3 # O0 refuses them
-step: jet run --optimize=basic denied.jet
+step: jet run -O1 denied.jet
 exit: 1
 stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 3 # O1 refuses them
-step: jet run --optimize=full denied.jet
+step: jet run -O2 denied.jet
 exit: 1
 stderr: count "Error [jet.CallbackEffectBoundExceeded]" = 3 # O2 refuses them
 step: jet check allowed.jet
 exit: 0
-step: jet run --optimize=none allowed.jet
+step: jet run -O0 allowed.jet
 exit: 0
 stdout: = "io 3\n4 3 5 6 6\n"
-step: jet run --optimize=basic allowed.jet
+step: jet run -O1 allowed.jet
 exit: 0
 stdout: = "io 3\n4 3 5 6 6\n"
-step: jet run --optimize=full allowed.jet
+step: jet run -O2 allowed.jet
 exit: 0
 stdout: = "io 3\n4 3 5 6 6\n"

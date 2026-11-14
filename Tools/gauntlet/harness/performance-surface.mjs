@@ -46,7 +46,7 @@ export const EXPECTED_OUTPUT = `performance-surface:${PAIR_ID}:${EXPECTED_SUM}\n
 // Every pair is timed on native executables at the shipping optimization
 // level: each arm is built once, then run as a fresh process per sample.
 export const TIER = "native";
-export const TARGET = "jet build --optimize=full";
+export const TARGET = "jet build -O2";
 export const METRIC = "wall_time_ms";
 export const WARMUPS = 10;
 export const TRIALS = 100;
@@ -86,7 +86,7 @@ export const PLAIN_SOURCE = [
 ].join("\n");
 
 const WORKLOAD = "100000-element integer reduction with identical final stdout";
-const SETUP = "one jet build --optimize=full per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory";
+const SETUP = "one jet build -O2 per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory";
 const ORDER_LABELS = Object.freeze(["surface_first", "plain_first"]);
 export const PAIR_MEASUREMENT = Object.freeze({
   inputs: Object.freeze({ iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM }),
@@ -838,7 +838,7 @@ function buildArm({ binary, source, scratchRoot, label, timeoutMs = DEFAULT_TIME
   const buildRoot = mkdtempSync(path.join(scratchRoot, `build-${label}-`));
   writeFileSync(path.join(buildRoot, "main.jet"), source, "utf8");
   const outputDir = path.join(buildRoot, "bin");
-  const result = spawnSync(binary, ["build", "--optimize=full", "--quiet", `--output-dir=${outputDir}`, "main.jet"], {
+  const result = spawnSync(binary, ["build", "-O2", "--quiet", `--output-dir=${outputDir}`, "main.jet"], {
     cwd: buildRoot,
     env: { ...process.env, JET_TEST_SCRATCH_DIR: scratchRoot },
     timeout: timeoutMs,

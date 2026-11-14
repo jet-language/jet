@@ -1,5 +1,5 @@
 // The native debug session: LLDB drives the program's own native image, built
-// at `optimize: none` with `debug_info: true`. The image's DWARF line table and
+// at `optimize: O0` with `debug_info: true`. The image's DWARF line table and
 // variable entries name the Jet source file, line, function and locals
 // directly, so a stop needs no source map. LLDB is the one external tool; the
 // Jet dev shell pins it, and its absence is E2203.
@@ -360,7 +360,7 @@ NativeSession: struct {
 // (`jet`), unoptimized, with its DWARF and the deep checks `deep_checks`
 // selects, into `out_dir`.
 native_debug_build_argv: fn(jet: String, entry: String, out_dir: String, deep_checks: DeepChecks) -> [String] Never! {
-    argv := [String]{jet, "build", "--optimize=none"}
+    argv := [String]{jet, "build", "-O0"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     argv.push("--output-dir={out_dir}")
     argv.push(entry.copy()) // copy: the command owns its words.

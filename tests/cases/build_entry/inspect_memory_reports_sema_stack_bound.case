@@ -7,7 +7,7 @@
 # `stack_bound`.
 fixture: inspect_memory_reports_sema_stack_bound.fixture
 env: NO_COLOR=1
-step direct: jet inspect memory --optimize=none direct.jet
+step direct: jet inspect memory -O0 direct.jet
 exit: 0
 stdout: ~ "entry run" # the program entry
 stdout: ~ "stack bound: " # sema's bound under the backend's stack
@@ -16,10 +16,10 @@ stdout: !~ "stack bound: unbounded" # every call is direct and every value sized
 step inlined: jet inspect memory direct.jet
 exit: 0
 stdout: ~ "stack bound: " # inlining adds each inlined body's bound to its caller's frame
-step recursive: jet inspect memory --optimize=none recursive.jet
+step recursive: jet inspect memory -O0 recursive.jet
 exit: 0
 stdout: ~ "stack bound: unbounded, recursion through " # depth calls itself
-step json: jet inspect memory --optimize=none recursive.jet --json
+step json: jet inspect memory -O0 recursive.jet --json
 exit: 0
 json: stdout doc $.action = "inspect.memory"
 stdout: ~ "unbounded, recursion through " # the same bound as `stack_bound`

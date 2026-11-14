@@ -3,16 +3,16 @@
 fixture: string_option_local_survives_a_call_that_returns_a_close_value.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet run --allow=FS.Read --optimize=none run.jet
+step: jet run --allow=FS.Read -O0 run.jet
 exit: 0 # o0
 stdout: = string_option_local_survives_a_call_that_returns_a_close_value.out # o0
-step: jet run --allow=FS.Read --optimize=basic run.jet
+step: jet run --allow=FS.Read -O1 run.jet
 exit: 0 # o1
 stdout: = string_option_local_survives_a_call_that_returns_a_close_value.out # o1
-step: jet run --allow=FS.Read --optimize=full run.jet
+step: jet run --allow=FS.Read -O2 run.jet
 exit: 0 # o2
 stdout: = string_option_local_survives_a_call_that_returns_a_close_value.out # o2
-step: jet build --allow=FS.Read --optimize=full run.jet
+step: jet build --allow=FS.Read -O2 run.jet
 exit: 0
 step: {work}/.jet/build/run
 exit: 0 # o2 image

@@ -6,17 +6,17 @@ fixture: fixtures/deadline_marker_bounds_blocks_and_functions_earliest_wins
 step: jet run nested.jet
 exit: 0
 stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
-step o1: jet run --optimize=basic nested.jet
+step o1: jet run -O1 nested.jet
 exit: 0
 stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
-step o2: jet run --optimize=full nested.jet
+step o2: jet run -O2 nested.jet
 exit: 0
 stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
 step function: jet run expired_function.jet
 exit: nonzero
 stdout: empty
 stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
-step function_o2: jet run --optimize=full expired_function.jet
+step function_o2: jet run -O2 expired_function.jet
 exit: nonzero
 stdout: empty
 stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
@@ -24,7 +24,7 @@ step instant: jet run expired_instant.jet
 exit: nonzero
 stdout: empty
 stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
-step instant_o2: jet run --optimize=full expired_instant.jet
+step instant_o2: jet run -O2 expired_instant.jet
 exit: nonzero
 stdout: empty
 stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier

@@ -4,17 +4,17 @@
 # The scalar composition test checks those bits; this runs it at O0, O1 and
 # O2, so an optimizer fold or a float conversion on any level fails here.
 env: NO_COLOR=1
-step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" --optimize=none
+step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" -O0
 timeout: 1800s
 exit: 0
 stdout: ~ "1 passed, 0 failed" # O0 keeps the signaling NaN's bits
 stderr: !~ "internal compiler error" # no level crashes the compiler
-step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" --optimize=basic
+step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" -O1
 timeout: 1800s
 exit: 0
 stdout: ~ "1 passed, 0 failed" # O1 keeps the signaling NaN's bits
 stderr: !~ "internal compiler error" # no level crashes the compiler
-step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" --optimize=full
+step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition" -O2
 timeout: 1800s
 exit: 0
 stdout: ~ "1 passed, 0 failed" # O2 keeps the signaling NaN's bits

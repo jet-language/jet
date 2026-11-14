@@ -186,16 +186,10 @@ pkg_debug_environments: fn(environments: [String: EnvironmentFact]) -> String Ne
 pkg_debug_build_profiles: fn(profiles: [BuildProfileDef]) -> String Never! {
     parts := [String]{}
     loop profile in profiles {
-        // A declared level keeps its Rust spelling; a profile that leaves
+        // A declared level keeps its spelling; a profile that leaves
         // `optimize:` to the command is `Stock`.
         optimize := "Stock"
-        if profile.optimize == .Val(level) {
-            optimize = if level == {
-                .Off -> "None"
-                .Basic -> "Basic"
-                .Full -> "Full"
-            }
-        }
+        if profile.optimize == .Val(level) -> optimize = level.as_str()
         panic := "None"
         if profile.panic == .Val(mode) {
             panic = if mode == {

@@ -9,10 +9,10 @@
 # every tier.
 fixture: hot_loops_poll_once_and_own_their_list_once.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=step
 exit: 0
-stdout: ~ "O1:" # optimize: basic runs the O1 passes
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
 stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=step
@@ -22,24 +22,24 @@ stdout: count "jet_ir_stop_poll" = 4 # three polls before the passes, one after
 step: jet inspect decisions --release main.jet
 exit: 0
 stdout: ~ "unique hoisted 1," # bump's list is made its own once, before its loop
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 exit: 0
-stdout: ~ "unique hoisted 1," # optimize: basic hoists it too (Opt.jet: `unique` runs at O1)
+stdout: ~ "unique hoisted 1," # optimize: O1 hoists it too (Opt.jet: `unique` runs at O1)
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=bump
 exit: 0
 stdout: count "#unique<" = 1 # before the passes bump makes its list its own in its loop
 stdout: count "jet_rt_block_unique" = 0 # after them it neither tests nor copies: run does
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = hot_loops_poll_once_and_own_their_list_once.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = hot_loops_poll_once_and_own_their_list_once.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = hot_loops_poll_once_and_own_their_list_once.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

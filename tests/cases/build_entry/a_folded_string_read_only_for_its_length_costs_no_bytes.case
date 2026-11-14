@@ -4,7 +4,7 @@
 # count (jet_char_len) to the constant count of its bytes, which
 # `jet inspect decisions` reports, so the IR after the passes reads neither
 # run and the lengths add to one constant. No run-time code then reads a
-# byte of either run, so the --optimize=full image holds neither: it stays
+# byte of either run, so the -O2 image holds neither: it stays
 # within 10% of the image of the same program that reads its size at run
 # time (10% of that image's 136,272 bytes on seed-b13 is 13,627), and its
 # data holds no run of either byte.
@@ -12,19 +12,19 @@ requires: os-name:linux
 requires: tool:readelf
 fixture: a_folded_string_read_only_for_its_length_costs_no_bytes.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=full constant.jet
+step: jet inspect decisions -O2 constant.jet
 env: JET_OPT_DUMP=last_use
 exit: 0
-stdout: ~ "O2:" # --optimize=full runs the O2 passes
+stdout: ~ "O2:" # -O2 runs the O2 passes
 stdout: ~ "text length last_use: the scalar count of a 50000000-byte text folds to 50000000" # the folded length
 stdout: count "jet_char_len" = 2 # the two scalar counts before the passes, none after them
 stdout: count "jet_rt_string_clone" = 2 # the two clones before the passes, none after them
 stdout: count "const_text" = 2 # the two runs before the passes, neither after them
 stdout: ~ "<- 100000000 " # the folded lengths, added while optimizing
-step: jet build --optimize=full runtime.jet
+step: jet build -O2 runtime.jet
 exit: 0
 capture: runtime = size file .jet/build/runtime
-step: jet build --optimize=full constant.jet
+step: jet build -O2 constant.jet
 exit: 0
 file: .jet/build/constant size <= {cap:runtime}+13627
 step: {work}/.jet/build/constant

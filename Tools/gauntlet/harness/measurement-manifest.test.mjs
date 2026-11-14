@@ -802,7 +802,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.deepEqual(manifest.performance_surface_pairs.pair_measurement, {
     inputs: { iterations: 100000, range: "0..<100000", expected_sum: 4999950000 },
     tier: "native",
-    target: "jet build --optimize=full",
+    target: "jet build -O2",
     artifact_binding: "one_artifact_sha256",
     environment_binding: "one_host_toolchain_affinity_identity",
     sampling: "balanced_seeded_fisher_yates; one build per arm, fresh process and fresh empty directory per sample",

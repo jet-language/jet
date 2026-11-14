@@ -50,7 +50,7 @@ Usage:
   jet self <command>                   Manage the Jet installation and editor tools
   jet split [args]                     Extract closed Package facts into Configs or members
   jet status [<file.jet|dir>]          Show what the project has proved
-  jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
+  jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [-O0|-O1|-O2...] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
   jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
   jet trust [args]                     Review or change trusted authority
   jet try <plan.json>                  Speculatively apply a plan and re-check its claims
@@ -289,10 +289,9 @@ Flags:
   -u                           Short form of --update-snapshots
   --release                    With build/run/dev/jobs/test/inspect: Optimize for release
   --profile                    With build/run/dev/jobs/test/check: How hard to optimize: release, debug, or a named optimization bundle
-  --optimize                   With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
-  -O0                          Short form of --optimize=none
-  -O1                          Short form of --optimize=basic
-  -O2                          Short form of --optimize=full
+  -O0                          With build/run/dev/test/inspect: How hard to optimize: O0, O1 or O2; this flag is O0; with test: Run the tests at each listed optimize level: O0, O1 or O2; -O0 -O2, `optimize: [O0, O2]`, `t.optimize(["O0", "O2"])`
+  -O1                          With build/run/dev/test/inspect: How hard to optimize: O0, O1 or O2; this flag is O1; with test: Run the tests at each listed optimize level: O0, O1 or O2; -O0 -O2, `optimize: [O0, O2]`, `t.optimize(["O0", "O2"])`
+  -O2                          With build/run/dev/test/inspect: How hard to optimize: O0, O1 or O2; this flag is O2; with test: Run the tests at each listed optimize level: O0, O1 or O2; -O0 -O2, `optimize: [O0, O2]`, `t.optimize(["O0", "O2"])`
   --bounds                     With build/run/dev/test/inspect: What a failed bounds check does: fatal, report or off
   --debug-info                 With build/run/dev/test/inspect: Whether the image carries DWARF debug info: true, false or split
   --small                      With build/run/dev/test/inspect: Favor a smaller binary by keeping inlining to the O1 limits: true or false

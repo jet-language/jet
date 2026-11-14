@@ -11,9 +11,9 @@ use {
 
 #Test("the_debug_build_keeps_the_selected_deep_checks") {
     off: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{})
-    assert_eq(off, [String]{"jet", "build", "--optimize=none", "--output-dir=out", "prog.jet"})
+    assert_eq(off, [String]{"jet", "build", "-O0", "--output-dir=out", "prog.jet"})
     kept: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{all: true, scopes: [String]{"tree", "tree::run"}})
-    assert_eq(kept, [String]{"jet", "build", "--optimize=none", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree::run", "--output-dir=out", "prog.jet"})
+    assert_eq(kept, [String]{"jet", "build", "-O0", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree::run", "--output-dir=out", "prog.jet"})
 }
 
 #Test("frames_name_the_jet_function_file_and_line") {
@@ -85,7 +85,7 @@ native_test_toolchain_root: fn() -> String Never! {
     source: native_test_files.join(root, "prog.jet")
     native_test_files.write(source, "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n") ?? panic("source: {err}")
     out: native_test_files.join(root, "out")
-    built: native_test_process.cmd([String]{jet, "build", "--optimize=none", "--output-dir={out}", source}).env("JET_TOOLCHAIN_ROOT", native_test_toolchain_root()).stdout(.Capture).stderr(.Capture).run() ?? panic("jet build: {err}")
+    built: native_test_process.cmd([String]{jet, "build", "-O0", "--output-dir={out}", source}).env("JET_TOOLCHAIN_ROOT", native_test_toolchain_root()).stdout(.Capture).stderr(.Capture).run() ?? panic("jet build: {err}")
     if !built.success -> panic("jet build failed: {built.output}{built.errors}")
     session := NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
     resolved := -1

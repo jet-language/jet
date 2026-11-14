@@ -17,24 +17,24 @@
 fixture: a_struct_made_from_reflected_fields_needs_no_meta_raw.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet build --optimize=none typed/main.jet --write-generated=on
+step: jet build -O0 typed/main.jet --write-generated=on
 exit: 0
 file: typed/.jet/generated/main/shape.jet ~ "Shape: struct {" # the declared struct is the generated module
 file: typed/.jet/generated/main/shape.jet ~ "    total: I32\n" # the renamed field keeps its reflected type
 step: {work}/typed/.jet/build/app
 exit: 0
 stdout: = a_struct_made_from_reflected_fields_needs_no_meta_raw.out
-step: jet build --optimize=basic typed/main.jet
+step: jet build -O1 typed/main.jet
 exit: 0
 step: {work}/typed/.jet/build/app
 exit: 0
 stdout: = a_struct_made_from_reflected_fields_needs_no_meta_raw.out
-step: jet build --optimize=full typed/main.jet
+step: jet build -O2 typed/main.jet
 exit: 0
 step: {work}/typed/.jet/build/app
 exit: 0
 stdout: = a_struct_made_from_reflected_fields_needs_no_meta_raw.out
-step: jet build --optimize=full typed/main.jet
+step: jet build -O2 typed/main.jet
 exit: 0
 step: {work}/typed/.jet/build/app
 exit: 0

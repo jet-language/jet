@@ -6,16 +6,16 @@ fixture: a_raw_pointer_steps_by_elements_or_bytes.fixture
 env: NO_COLOR=1
 step check: jet check main.jet
 exit: 0
-step o0: jet run --optimize=none main.jet
+step o0: jet run -O0 main.jet
 exit: 0
 stdout: = "30\n20\n40\n30\n"
-step o1: jet run --optimize=basic main.jet
+step o1: jet run -O1 main.jet
 exit: 0
 stdout: = "30\n20\n40\n30\n"
-step o2: jet run --optimize=full main.jet
+step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "30\n20\n40\n30\n"
-step pastnone: jet run --optimize=none past.jet
+step pastnone: jet run -O0 past.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
@@ -23,7 +23,7 @@ stderr: ~ "past.jet:9:15, in #Unsafe gate" # the fault is located at the stepped
 stderr: ~ "raw `read` outside" # the gate's audit text follows
 stderr: ~ "the access starts at offset 8 of the live range 0x" # the range's addresses vary with ASLR
 stderr: ~ "(8 bytes) and runs past its end" # the one Int cell
-step pastfull: jet run --optimize=full past.jet
+step pastfull: jet run -O2 past.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation

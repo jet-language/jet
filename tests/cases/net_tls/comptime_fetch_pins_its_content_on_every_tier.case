@@ -12,13 +12,13 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet check good.jet
 exit: 0
-step: jet run --optimize=none good.jet
+step: jet run -O0 good.jet
 exit: 0
 stdout: = "fetched: pinned text\nsame: true\n" # O0 holds the fetched value
-step: jet run --optimize=basic good.jet
+step: jet run -O1 good.jet
 exit: 0
 stdout: = "fetched: pinned text\nsame: true\n" # O1 holds the fetched value
-step: jet run --optimize=full good.jet
+step: jet run -O2 good.jet
 exit: 0
 stdout: = "fetched: pinned text\nsame: true\n" # O2 holds the fetched value
 step: jet check bad.jet
@@ -26,15 +26,15 @@ exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "[jet.FetchHashMismatch]" # the pin is checked
 stderr: ~ "hashes to `f007767c80150f15e9cacf96dc8d24ac3b6b3094c9b727d1534b175910968f2a`" # the report names the content's hash
-step: jet run --optimize=none bad.jet
+step: jet run -O0 bad.jet
 exit: 1
 stderr: ~ "[jet.FetchHashMismatch]" # O0 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=basic bad.jet
+step: jet run -O1 bad.jet
 exit: 1
 stderr: ~ "[jet.FetchHashMismatch]" # O1 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=full bad.jet
+step: jet run -O2 bad.jet
 exit: 1
 stderr: ~ "[jet.FetchHashMismatch]" # O2 refuses it
 stdout: !~ "escaped" # nothing runs
@@ -43,15 +43,15 @@ exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # a runtime fetch is refused
 stderr: ~ "runtime.jet:4" # where the program calls it
-step: jet run --optimize=none runtime.jet
+step: jet run -O0 runtime.jet
 exit: 1
 stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O0 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=basic runtime.jet
+step: jet run -O1 runtime.jet
 exit: 1
 stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O1 refuses it
 stdout: !~ "escaped" # nothing runs
-step: jet run --optimize=full runtime.jet
+step: jet run -O2 runtime.jet
 exit: 1
 stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O2 refuses it
 stdout: !~ "escaped" # nothing runs

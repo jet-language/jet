@@ -4,39 +4,39 @@
 # exact Float is E1003 at compile time, and `approx(n)` is the rounding spelling.
 fixture: float_from_int_and_float_braces_follow_one_crossing_rule.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none exact.jet
+step: jet run -O0 exact.jet
 exit: 0
 stdout: = float_from_int_and_float_braces_follow_one_crossing_rule.out
-step: jet run --optimize=basic exact.jet
+step: jet run -O1 exact.jet
 exit: 0
 stdout: = float_from_int_and_float_braces_follow_one_crossing_rule.out
-step: jet run --optimize=full exact.jet
+step: jet run -O2 exact.jet
 exit: 0
 stdout: = float_from_int_and_float_braces_follow_one_crossing_rule.out
-step: jet run --optimize=none from_int.jet
+step: jet run -O0 from_int.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # the stop names the crossing rule
 stderr: ~ "from_int.jet:3" # the stop names the call's line
-step: jet run --optimize=basic from_int.jet
+step: jet run -O1 from_int.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # the stop names the crossing rule
 stderr: ~ "from_int.jet:3" # the stop names the call's line
-step: jet run --optimize=full from_int.jet
+step: jet run -O2 from_int.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # the stop names the crossing rule
 stderr: ~ "from_int.jet:3" # the stop names the call's line
-step: jet run --optimize=none braces.jet
+step: jet run -O0 braces.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # braces cross the same rule
-step: jet run --optimize=basic braces.jet
+step: jet run -O1 braces.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # braces cross the same rule
-step: jet run --optimize=full braces.jet
+step: jet run -O2 braces.jet
 exit: 70
 stdout: empty
 stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # braces cross the same rule

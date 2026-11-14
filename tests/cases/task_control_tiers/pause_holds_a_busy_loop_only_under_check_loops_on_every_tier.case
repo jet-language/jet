@@ -14,26 +14,26 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet
 exit: 0
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=spin
 exit: 0
-stdout: ~ "O1:" # optimize: basic runs the O1 passes
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
 stdout: count "jet_ir_stop_turn" >= 2 # the loop's check before the passes, and after them
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=spin
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
 stdout: count "jet_ir_stop_turn" >= 2 # the loop's check before the passes, and after them
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
-step: jet build --optimize=full main.jet
+step: jet build -O2 main.jet
 exit: 0
 step aot: built
 exit: 0

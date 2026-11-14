@@ -12,15 +12,15 @@ exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`write` writes a cell through `c`" # the parameter route
 stderr: ~ "`c` may hold a module cell" # the reason names the holder
-step: jet run --optimize=none alias.jet
+step: jet run -O0 alias.jet
 exit: 1
 stderr: ~ "`write` writes a cell through `c`" # O0 refuses it
 stdout: !~ "1" # nothing runs
-step: jet run --optimize=basic alias.jet
+step: jet run -O1 alias.jet
 exit: 1
 stderr: ~ "`write` writes a cell through `c`" # O1 refuses it
 stdout: !~ "1" # nothing runs
-step: jet run --optimize=full alias.jet
+step: jet run -O2 alias.jet
 exit: 1
 stderr: ~ "`write` writes a cell through `c`" # O2 refuses it
 stdout: !~ "1" # nothing runs
@@ -34,17 +34,17 @@ stderr: ~ "`hidden` writes module state `HITS`" # a lambda's write is its functi
 stderr: !~ "indirect call" # the lambda's call is its written body, not an unknown callee
 stderr: ~ "`relay` reaches a write of a cell through `c`" # through an inferred helper
 stderr: ~ "Call chain: relay → write_back" # the chain names the helper
-step: jet run --optimize=none held.jet
+step: jet run -O0 held.jet
 exit: 1
 stderr: count "Error [" = 5 # O0 refuses the receiver, alias, lease, lambda and helper routes
 stderr: ~ "`hidden` writes module state `HITS`" # the lambda route on O0
 stdout: = "" # nothing runs
-step: jet run --optimize=basic held.jet
+step: jet run -O1 held.jet
 exit: 1
 stderr: count "Error [" = 5 # O1 refuses all five routes
 stderr: ~ "`alias` writes a cell through `held`" # the alias route on O1
 stdout: = "" # nothing runs
-step: jet run --optimize=full held.jet
+step: jet run -O2 held.jet
 exit: 1
 stderr: count "Error [" = 5 # O2 refuses all five routes
 stderr: ~ "`relay` reaches a write of a cell through `c`" # the helper route on O2
@@ -52,13 +52,13 @@ stdout: = "" # nothing runs
 step: jet check trait.jet
 exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # through a trait dispatch
-step: jet run --optimize=none trait.jet
+step: jet run -O0 trait.jet
 exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # O0 refuses it
-step: jet run --optimize=basic trait.jet
+step: jet run -O1 trait.jet
 exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # O1 refuses it
-step: jet run --optimize=full trait.jet
+step: jet run -O2 trait.jet
 exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # O2 refuses it
 step: jet check lent.jet
@@ -67,12 +67,12 @@ stderr: count "Error [" = 1 # pin only; add writes the place it is lent
 stderr: ~ "`pin` writes module state `pinned`" # lending module state is the caller's write
 step: jet check ok.jet
 exit: 0
-step: jet run --optimize=none ok.jet
+step: jet run -O0 ok.jet
 exit: 0
 stdout: = "6\n10\n5\n5\n"
-step: jet run --optimize=basic ok.jet
+step: jet run -O1 ok.jet
 exit: 0
 stdout: = "6\n10\n5\n5\n"
-step: jet run --optimize=full ok.jet
+step: jet run -O2 ok.jet
 exit: 0
 stdout: = "6\n10\n5\n5\n"

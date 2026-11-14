@@ -1,14 +1,16 @@
 // The one build-option
 // table. By one naming rule a row is the field of a `package.jet` build profile
-// (`build: { fast: Build{ optimize: full } }`), the flag `--optimize=full` (`_`
-// is `-` in a flag), the `build: fn` method `b.optimize(.Full)` and the pin
-// `b.pin(.optimize, .Full)`; a value's method spelling is its PascalCase form.
+// (`build: { fast: Build{ inline: off } }`), the flag `--inline=off` (`_`
+// is `-` in a flag), the `build: fn` method `b.inline(.Off)` and the pin
+// `b.pin(.inline, .Off)`; a value's method spelling is its PascalCase form.
 // One order holds: the command's stock value, then the selected profile, then
 // `build: fn`, then the flag, each later layer replacing the earlier. A pin makes
 // a flag with another value an error (E2113) that names the pin.
 
-// How a row's value is written. A Choice value is a word (`optimize: full`,
-// `--optimize=full`, `b.optimize(.Full)`); a Bool value is `true` or `false`
+// How a row's value is written. A Choice value is a word (`inline: off`,
+// `--inline=off`, `b.inline(.Off)`); a Level value is a word that is also
+// its own flag (`optimize: O2`, `-O2`, `b.optimize(.O2)`), and its row has no
+// `--name` flag; a Bool value is `true` or `false`
 // everywhere (`debug_info: false`, `--debug-info=false`,
 // `b.debug_info(false)`), and its bare flag (`--small`) is `true`;
 // `debug_info` also takes the word `split` as a profile field and a flag. A Text
@@ -21,6 +23,7 @@
 // `b.action_timeout(10min)`), whole milliseconds or more.
 BuildOptionKind: enum {
     Choice
+    Level
     Bool
     Text
     List
@@ -43,9 +46,9 @@ BuildOptionRow: struct {
 }
 
 JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
-    // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
-    // `jet build` is full; `jet run`, `jet dev` and `jet test` are none.
-    {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "full", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
+    // The native backend's level (AGENTS.md I9). `jet build` is O2;
+    // `jet run`, `jet dev` and `jet test` are O0.
+    {name: "optimize", kind: BuildOptionKind.Level, values: [String]{"O0", "O1", "O2"}, stock_build: "O2", stock_run: "O0", removes_check: [String]{}, help: "How hard to optimize: O0, O1 or O2"},
     // A failed list bounds check: fatal stops the program (the stock), report
     // writes the failure to stderr and goes on with the access unchecked, off
     // drops the check.
@@ -60,7 +63,7 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // true or false only (build_option_method_values).
     {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true, false or split"},
     // true keeps the optimizer's inlining to the O1 limits at any level, so
-    // inlining grows the code no more than `optimize: basic` does.
+    // inlining grows the code no more than `optimize: O1` does.
     {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
     // Which callees the optimizer inlines (O1 and O2; O0 inlines none): auto
     // picks them by size, always_marked takes only the `#Inline(Always)` ones,
@@ -159,8 +162,8 @@ BuildOptionLayer: enum {
     Flag
 }
 
-// One written value of a row. `written` is its spelling (`--optimize=full`,
-// `b.optimize(.Full)`, `optimize: full`) and `site` the phrase placing it
+// One written value of a row. `written` is its spelling (`-O2`,
+// `b.optimize(.O2)`, `optimize: O2`) and `site` the phrase placing it
 // (`at build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
 // stock layer and for a flag. `pinned` marks a `b.pin` call.
 BuildOptionChoice: struct {
@@ -443,30 +446,47 @@ build_option_flag: fn(name: String) -> String Never! {
     "--{name.replace("_", "-")}"
 }
 
-// The row a jet flag (`--optimize` or `--optimize=full`) names.
+// The row a jet flag names: `--bounds` or `--bounds=off` the `bounds` row,
+// a level flag (`-O2`) its Level row.
 build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     head: argument.split("=").to_list()[0]
     loop row in JET_BUILD_OPTIONS {
-        if build_option_flag(row.name) == head -> return Val(row.copy())
+        if row.kind != BuildOptionKind.Level {
+            if build_option_flag(row.name) == head -> return Val(row.copy())
+            next
+        }
+        loop value in row.values {
+            if build_option_level_flag(value) == argument -> return Val(row.copy())
+        }
     }
     None
 }
 
-// The `--optimize=<value>` spelling of the short level flag `-O<n>`: the
-// optimize row's values are the levels in order (none is O0), so `-O1` is
-// `--optimize=basic`. None for any other word, which includes a level past
-// the last value.
-build_option_level_spelling: fn(word: String) -> String? {
-    row: build_option_row("optimize") ?? return None
-    loop (level, value) in row.values {
-        if word == ("-O{level}") -> return Val("{build_option_flag(row.name)}={value}")
+// The flag of a Level row's value: `-O2` for `O2`.
+build_option_level_flag: fn(value: String) -> String Never! {
+    "-{value}"
+}
+
+// The value a level flag (`-O2`) names; None for any other word, which
+// includes a level past the last value.
+build_option_level_of_flag: fn(word: String) -> String? Never! {
+    loop row in JET_BUILD_OPTIONS {
+        if row.kind != BuildOptionKind.Level -> next
+        loop value in row.values {
+            if build_option_level_flag(value) == word -> return Val(value.copy())
+        }
     }
     None
+}
+
+// A Level row's flags, as a fix names them: `-O0, -O1 or -O2`.
+build_option_level_flags_text: fn(row: BuildOptionRow) -> String Never! {
+    build_option_join(loop value in row.values -> build_option_level_flag(value))
 }
 
 // A value as a `build: fn` argument: `min_size` -> `.MinSize` for a Choice
-// row, `false` as it is for a Bool row, `"dist"` for a Text row and
-// `["z", "bz2"]` for a List row.
+// row, `O2` -> `.O2` for a Level row, `false` as it is for a Bool row,
+// `"dist"` for a Text row and `["z", "bz2"]` for a List row.
 build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
     if row.kind == {
         .Bool | .Duration -> value.copy()
@@ -476,13 +496,13 @@ build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
             loop item in build_option_items(value) -> items.push("\"{item}\"")
             "[{items.join(", ")}]"
         }
-        .Choice -> ".{sema_casing_pascal_words(value)}"
+        .Choice | .Level -> ".{sema_casing_pascal_words(value)}"
     }
 }
 
 // The row value a `build: fn` argument `.Variant` spells, if any.
 build_option_value_of_variant: fn(row: BuildOptionRow, variant: String) -> String? {
-    if row.kind != BuildOptionKind.Choice -> return None
+    if row.kind != BuildOptionKind.Choice && row.kind != BuildOptionKind.Level -> return None
     spelled: ".{variant}"
     loop value in row.values {
         if build_option_argument(row, value) == spelled -> return Val(value)
@@ -490,15 +510,30 @@ build_option_value_of_variant: fn(row: BuildOptionRow, variant: String) -> Strin
     None
 }
 
-// Whether `value` is a value of `row`: one of its spellings for a Choice or
-// Bool row, any one-line text for a Text row, and items none of which is
-// empty for a List row.
+// Whether `value` is a value of `row`: one of its spellings for a Choice,
+// Level or Bool row, any one-line text for a Text row, and items none of
+// which is empty for a List row.
 build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
     if row.kind == {
-        .Choice | .Bool -> row.values.contains(value)
+        .Choice | .Level | .Bool -> row.values.contains(value)
         .Text -> !value.contains("\n")
         .List -> !build_option_items(value).contains("")
         .Duration -> build_option_duration_ms(value) != None
+    }
+}
+
+// Bootstrap step (a) of #6840, deleted with its two callers (the CLI's
+// profile read and Jetpack's pkg_parse_build_profile) in step (b): a
+// package.jet profile may still spell `optimize:` none, basic or full, so
+// the seed jet and this jet both build Compiler/package.jet. Any other
+// field or value is returned as written.
+build_option_profile_value: fn(name: String, value: String) -> String Never! {
+    if name != "optimize" -> return value.copy()
+    if value == {
+        "none" -> "O0"
+        "basic" -> "O1"
+        "full" -> "O2"
+        else -> value.copy()
     }
 }
 
@@ -535,16 +570,17 @@ build_option_list_value: fn(items: [String]) -> String Never! {
     items.join("\n")
 }
 
-// `none, basic or full`
+// `fatal, report or off`
 build_option_values_text: fn(row: BuildOptionRow) -> String Never! {
     build_option_join(row.values)
 }
 
-// What a value of `row` is, as a fix names it: `one of none, basic or full`,
-// `a path or other text`, `one item per flag`.
+// What a value of `row` is, as a fix names it: `one of fatal, report or
+// off`, `one of -O0, -O1 or -O2`, `a path or other text`, `one item per flag`.
 build_option_value_hint: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == {
         .Choice | .Bool -> "one of {build_option_values_text(row)}"
+        .Level -> "one of {build_option_level_flags_text(row)}"
         .Text -> "a path or other text"
         .List -> "one item per flag"
         .Duration -> "a positive duration such as 10min, 90s or 500ms"
@@ -554,14 +590,14 @@ build_option_value_hint: fn(row: BuildOptionRow) -> String Never! {
 // What a `package.jet` profile field of `row` holds, as a fix names it.
 build_option_profile_hint: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == {
-        .Choice | .Bool -> "one of {build_option_values_text(row)}"
+        .Choice | .Level | .Bool -> "one of {build_option_values_text(row)}"
         .Text -> "a string"
         .List -> "a list of strings, none empty"
         .Duration -> "a positive Time literal such as 10min"
     }
 }
 
-// `one of .None, .Basic or .Full`: the values as `build: fn` writes them; for
+// `one of .Fatal, .Report or .Off`: the values as `build: fn` writes them; for
 // a Text or List row, the shape of its argument.
 build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
@@ -673,16 +709,21 @@ build_option_check_removal_note: fn(choice: BuildOptionChoice) -> String Never! 
 }
 
 // The jet flags of `argv` that name a row, as Flag-layer choices, or the
-// refusal of a value outside its row.
+// refusal of a value outside its row. A level flag (`-O2`) is its value.
 build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
     flags := [BuildOptionChoice]{}
     loop argument in argv {
         if argument == "--" -> break
         row := build_option_flag_row(argument) ?? next
-        flag: build_option_flag(row.name)
+        level: row.kind == BuildOptionKind.Level
+        flag: if level -> build_option_level_flags_text(row) else -> build_option_flag(row.name)
         bare: argument == flag && row.kind == BuildOptionKind.Bool
-        if !bare && !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
-        value: if bare -> "true" else -> argument.slice(flag.len() + 1..<argument.len())
+        if !level && !bare && !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
+        value: if {
+            level -> argument.slice(1..<argument.len())
+            bare -> "true"
+            else -> argument.slice(flag.len() + 1..<argument.len())
+        }
         if !build_option_accepts(row, value) || (row.kind == BuildOptionKind.List && value == "") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
         // Each flag of a List row is one more item.
         if row.kind == BuildOptionKind.List {
@@ -696,7 +737,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
             if merged -> next
         }
         loop earlier in flags {
-            if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}
+            if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: if level -> "pass one of {flag}" else -> "pass `{flag}` once"}
         }
         flags.push(BuildOptionChoice{name: row.name.move(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
     }

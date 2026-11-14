@@ -11,7 +11,7 @@ use {
     ]
     jet_foundation.[
         JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_FORMS, JET_TEST_SETTINGS,
-        build_option_flag_row, build_option_level_spelling, test_setting_flag,
+        build_option_flag_row, test_setting_flag,
     ]
     model_sys: core.sys
     model_files: core.files
@@ -92,9 +92,8 @@ command_model_listed_refusals: fn() -> [String] Never! {
     loop spec in JET_CLI_FLAGS {
         if JET_CLI_RUN_PORTED_FLAGS.contains(spec.long) -> next
         // A build option is ported on every command that takes it, and so is
-        // its short level spelling: the front door reads `-O2` as
-        // `--optimize=full` (jet_cli_level_words).
-        if build_option_flag_row(spec.long) != None || build_option_level_spelling(spec.long) != None -> next
+        // each of its level flags (`-O2`).
+        if build_option_flag_row(spec.long) != None -> next
         commands := [String]{}
         if jet_cli_flag_takes(spec, "run") -> commands.push("run")
         // `jet dev` watches by itself: `--watch` (`=on`/`=off`) is its own switch.

@@ -712,7 +712,7 @@ test_names: fn(text: String) -> [String] {
 
 // ---------------------------------------------------------------------------
 // core: one row per Core #Test at each CORE_LEVELS level, `<file> [<level>]:
-// <test>`, from `jet test <file> --optimize=<level>` for every Core source that
+// <test>`, from `jet test <file> -<level>` for every Core source that
 // declares #Tests. A Core source tests as the Core unit the compiler loads,
 // with Core's privileges; a file whose tests didn't run is the failing row
 // `<file> [<level>]`. Under a filter only the runs holding a row it selects
@@ -720,7 +720,7 @@ test_names: fn(text: String) -> [String] {
 // child can apply it (run_filter). CORE_LEVELS copies the `optimize` row's
 // values in JetFoundation/Source/Registry/BuildOptions.jet, which a script
 // can't import; tests/guards/closed_lists.jet fails when the two differ.
-CORE_LEVELS: [String]{"none", "basic", "full"}
+CORE_LEVELS: [String]{"O0", "O1", "O2"}
 
 core_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
@@ -757,7 +757,7 @@ core_rows: fn(rows: TestRows) {
     runs: kit_exec_select_runs(ids, held, rows.filter)
     specs := [ProcessSpec]{}
     loop run in runs {
-        args := [String]{"test", tested[at[run].file], "--optimize={CORE_LEVELS[at[run].level]}"}
+        args := [String]{"test", tested[at[run].file], "-{CORE_LEVELS[at[run].level]}"}
         if run_filter(rows, ids[run], held[run]) == .Val(filter) {
             args.push("--filter")
             args.push(filter)
@@ -772,7 +772,7 @@ core_rows: fn(rows: TestRows) {
     loop (index, run) in runs {
         if results[index] == {
             .Ok(receipt) -> { _ := package_rows(rows, ids[run], receipt) }
-            .Err(error) -> rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} --optimize={CORE_LEVELS[at[run].level]}`: {error}")
+            .Err(error) -> rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} -{CORE_LEVELS[at[run].level]}`: {error}")
         }
     }
 }
@@ -869,7 +869,7 @@ fuzz_rows: fn(rows: TestRows) {
         }
         if failure != "" || !program.runs -> next
         running.push(index)
-        loop level in CORE_LEVELS -> runs.push(fuzz_command(setup, program.cwd, [String]{"run", "--optimize={level}", program.name}))
+        loop level in CORE_LEVELS -> runs.push(fuzz_command(setup, program.cwd, [String]{"run", "-{level}", program.name}))
     }
     if runs.len() == 0 -> return
     ran: process.run_all(runs, fuzz_jobs(runs.len())) ?? {

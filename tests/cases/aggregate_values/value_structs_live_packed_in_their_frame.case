@@ -6,10 +6,10 @@
 # its reference. Every tier prints the same values.
 fixture: value_structs_live_packed_in_their_frame.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=run
 exit: 0
-stdout: ~ "O1:" # optimize: basic runs the O1 passes
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
 stdout: ~ "local value: Aggregate/24" # value's 24 packed bytes live in the frame
 stdout: ~ "local other: Aggregate/24" # the copy takes its own 24 bytes in the frame
 stdout: count "stack_address" = 4 # value and other, before and after the passes
@@ -24,12 +24,12 @@ stdout: ~ "local other: Aggregate/24" # the copy takes its own 24 bytes in the f
 stdout: count "stack_address" = 4 # value and other, before and after the passes
 stdout: count "jet_rt_alloc" = 0 # no heap block for either struct
 stdout: count "jet_rt_record_new" = 0 # no runtime record for either struct
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 0
 stdout: = value_structs_live_packed_in_their_frame.out
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 0
 stdout: = value_structs_live_packed_in_their_frame.out
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 0
 stdout: = value_structs_live_packed_in_their_frame.out

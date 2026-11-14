@@ -10,16 +10,16 @@
 # own.
 fixture: literal_body_reads_as_a_body_after_every_return_type_form.fixture
 env: NO_COLOR=1
-step o0: jet run --optimize=none run.jet
+step o0: jet run -O0 run.jet
 exit: 0
 stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
-step o1: jet run --optimize=basic run.jet
+step o1: jet run -O1 run.jet
 exit: 0
 stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
-step o2: jet run --optimize=full run.jet
+step o2: jet run -O2 run.jet
 exit: 0
 stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
-step o0_unknown_escape: jet run --optimize=none unknown_escape.jet
+step o0_unknown_escape: jet run -O0 unknown_escape.jet
 exit: nonzero
 stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\q` of the body after `-> String`
 stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\q` of the body after `-[]> String`
@@ -28,7 +28,7 @@ stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\q` of the body after `-[IO
 stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\q` of the body after a generic function's `-[IO]> String`
 stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\q` of the body after `-[IO]> [U8]`
 stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
-step o0_unknown_escape_other_forms: jet run --optimize=none unknown_escape_other_forms.jet
+step o0_unknown_escape_other_forms: jet run -O0 unknown_escape_other_forms.jet
 exit: nonzero
 stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\q` of the body after `-[IO]> names.Text<Int>`
 stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\q` of the body after `-[IO]> Holder<String>`
@@ -37,7 +37,7 @@ stderr: ~ "unknown_escape_other_forms.jet:20:52" # E0001 at the `\q` of the body
 stderr: ~ "unknown_escape_other_forms.jet:21:46" # E0001 at the `\q` of the body after `-[IO]> String?`
 stderr: ~ "unknown_escape_other_forms.jet:22:49" # E0001 at the `\q` of the body after `-[IO]> String Bad!`
 stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
-step o1_unknown_escape: jet run --optimize=basic unknown_escape.jet
+step o1_unknown_escape: jet run -O1 unknown_escape.jet
 exit: nonzero
 stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\q` of the body after `-> String`
 stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\q` of the body after `-[]> String`
@@ -46,7 +46,7 @@ stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\q` of the body after `-[IO
 stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\q` of the body after a generic function's `-[IO]> String`
 stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\q` of the body after `-[IO]> [U8]`
 stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
-step o1_unknown_escape_other_forms: jet run --optimize=basic unknown_escape_other_forms.jet
+step o1_unknown_escape_other_forms: jet run -O1 unknown_escape_other_forms.jet
 exit: nonzero
 stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\q` of the body after `-[IO]> names.Text<Int>`
 stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\q` of the body after `-[IO]> Holder<String>`
@@ -55,7 +55,7 @@ stderr: ~ "unknown_escape_other_forms.jet:20:52" # E0001 at the `\q` of the body
 stderr: ~ "unknown_escape_other_forms.jet:21:46" # E0001 at the `\q` of the body after `-[IO]> String?`
 stderr: ~ "unknown_escape_other_forms.jet:22:49" # E0001 at the `\q` of the body after `-[IO]> String Bad!`
 stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
-step o2_unknown_escape: jet run --optimize=full unknown_escape.jet
+step o2_unknown_escape: jet run -O2 unknown_escape.jet
 exit: nonzero
 stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\q` of the body after `-> String`
 stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\q` of the body after `-[]> String`
@@ -64,7 +64,7 @@ stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\q` of the body after `-[IO
 stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\q` of the body after a generic function's `-[IO]> String`
 stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\q` of the body after `-[IO]> [U8]`
 stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
-step o2_unknown_escape_other_forms: jet run --optimize=full unknown_escape_other_forms.jet
+step o2_unknown_escape_other_forms: jet run -O2 unknown_escape_other_forms.jet
 exit: nonzero
 stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\q` of the body after `-[IO]> names.Text<Int>`
 stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\q` of the body after `-[IO]> Holder<String>`

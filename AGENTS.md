@@ -173,7 +173,7 @@ A violation stops the affected work until it is fixed at the root.
   opt-in. A new mechanism needs approved Tower scope or owner approval.
 - **I9 — One meaning across tiers.** Every language feature and Core API has
   one executable meaning on every tier: the Jet code generator's levels (O0
-  for `jet run`, `jet dev`, and compile-time code; O1 for `--optimize=basic`;
+  for `jet run`, `jet dev`, and compile-time code; O1 for `-O1`;
   O2 for `jet build`) and web where applicable. That meaning lives in the embedded
   Prelude and the ratified CoreLib, compiled once into the one shared runtime
   (D-EXEC1). Code generators and hosts only marshal values and call the same

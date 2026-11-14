@@ -223,7 +223,7 @@ jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or projec
 jet build [<file.jet|dir>]           Create a native executable
 jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
-jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
+jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [-O0|-O1|-O2...] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
 jet fmt [args]                       Format Jet and configured project files
 jet explain <CODE|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
@@ -739,10 +739,10 @@ checked handles and are revalidated before invoking the compiler.
 the Jet-native backend: the IR builder builds the functions `run: fn` reaches,
 x86-64 selection compiles them to a relocatable object, and the in-process
 linker binds it to the runtime pack shipped beside `jet` into a static x86-64
-executable. The default build is O2 (`optimize: full`); `--optimize=basic` is
-O1 and `--optimize=none` (or `--profile debug`) is O0. `-O0`, `-O1` and `-O2`
-are the short forms of `--optimize=none`, `basic` and `full`; two levels that
-disagree, such as `-O1 --optimize=full`, are refused with E2104, and a level
+executable. The default build is O2 (`optimize: O2`); `-O1` is
+O1 and `-O0` (or `--profile debug`) is O0. `-O0`, `-O1` and `-O2`
+are the optimize level flags; two levels that
+disagree, such as `-O1 -O2`, are refused with E2104, and a level
 the project pins is refused with E2113. A program that backend cannot build
 yet is refused with E2104.
 Other build flags and profiles are refused with E2104 until they are ported.
@@ -774,7 +774,7 @@ they compile and link it in one command of the C toolchain Jet programs
 compile their own C with (`CC`/`AR` when set, else the C toolchain pack
 `jetpack` provides), into `.jet/build/<stem>` in the nearest directory at or
 above the file that holds `package.jet`, or the file's own directory. The
-compile is O0 for `jet run` and O2 for `jet build`; `--optimize=none|basic|full`
+compile is O0 for `jet run` and O2 for `jet build`; `-O0|basic|full`
 (or `-O0`, `-O1`, `-O2`) picks O0, O1 or O2, and `--release` is O2. A
 run then runs the program on the caller's stdin, stdout and stderr with the
 same arguments a Jet program gets, and exits as it exits. The C toolchain
@@ -841,8 +841,8 @@ and `stdin/` source files above are written there). Keeping a built program
 ([`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)) is
 off, and no flag, variable or setting turns it on.
 
-A plain `jet run` compiles at the stock `optimize: none`, so a run starts
-quickly; `jet run --optimize=full` (or `-O2`) runs an O2 program, and no run
+A plain `jet run` compiles at the stock `optimize: O0`, so a run starts
+quickly; `jet run -O2` (or `-O2`) runs an O2 program, and no run
 builds at a level it was not asked for. The compiled program runs in place of
 `jet run` with its process id, so a signal sent to that process reaches the
 program.
@@ -882,7 +882,8 @@ task while `ir.build` runs, so the span holds only what stays), and under
 `cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
 which a cold store lays out first; opened only while saved work is reused) and
 the native backend's (`native.sources`,
-`native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
+`native.rust_foreign`, `ir.build`, `ir.opt` (named by the build's optimize
+level, such as `O2`), `ir.x64`, `ir.object`,
 `native.foreign` (the wait for the program's C closure and the runtime's
 bytes, which its own thread realizes and reads while the object builds; for
 a closure only checked foreign declarations name, also the link's live
@@ -1024,14 +1025,14 @@ they reach the module's own names); a runtime unit tests as itself. `jet test`
 of a directory of the Core library (`jet test Core/Encoding`) runs
 `jet test <file>` for each Core source under it that declares #Tests or
 doctests, as a workspace runs its members.
-`jet test Compiler --profile core` runs every Core #Test at optimize none,
-basic and full. `jet test Compiler --profile fuzz` runs the sema fuzz corpus
+`jet test Compiler --profile core` runs every Core #Test at optimize O0,
+O1 and O2. `jet test Compiler --profile fuzz` runs the sema fuzz corpus
 `tests/fuzz/sema` differentially. Each `invalid/<name>.<code>.jet` file must
 fail `jet check`; `<code>` names the refusal it was written for. Every other
 file must pass `jet check`. A `differential/` file that passes then runs at
-optimize none, basic and full: the none run exits 0 and prints exactly the
+optimize O0, O1 and O2: the O0 run exits 0 and prints exactly the
 output `differential/manifest.tsv` pairs it with (an `exact-stdout` row), and
-the basic and full runs end with the none run's exit code and stdout. No check
+the O1 and O2 runs end with the O0 run's exit code and stdout. No check
 or run may exit 101 (an internal compiler error), die by a signal or time out.
 Its rows are `tests/fuzz/sema/<dir>/<file>` and
 `tests/fuzz/sema/differential/<file> [<level>]`.
@@ -1045,7 +1046,7 @@ step (the harness runs no test while `JET_TEST_PLAN` names the plan file)
 before any test runs, and prints the settings it used and the layer each came
 from whenever a profile or `test: fn` wrote one. The settings are
 `docs`, `filter`, `capture`, `update_snapshots` (`-u`), `shuffle=<seed>`,
-`serial`, `measure`, `trace_tiers`, `optimize=<levels>` (one run per level
+`serial`, `measure`, `trace_tiers`, `optimize` (`-O0`, `-O1`, `-O2`; one run per level
 when it lists more than one), `time_limit=<duration>`, `opt_in`,
 `shard=<i/n>` (the tests and corpus rows sorted, then every n-th from the
 i-th), `list` (prints the selected tests and corpus rows, runs nothing, exits
@@ -1093,7 +1094,7 @@ profiles run. `--profile <name>` naming a test profile of the package's
 or a bare package `jet test` when `defaults: { test: <name> }` names one, runs
 that profile instead (`--show-default` runs the stock default): each run is a
 child `jet test` with the other flags, the `tests` suite once, or once per
-level `optimize: [none, full]` lists (an `--optimize` flag or `t.optimize(…)`
+level `optimize: [O0, O2]` lists (a level flag such as `-O1` or a `t.optimize(…)`
 call replaces the profile's levels). `time_limit:` stops each test that runs longer and fails it; each
 test then runs alone, and with output checks the batch runs bounded by the
 limit for each test and check. Each run's output follows a
@@ -1586,7 +1587,7 @@ Signal<Int> synchronized for task crossing`. `#Local` locks the one-thread
 form; a crossing then fails the build with E1102, which names the crossing.
 Inlining: for a program with a `run: fn`, each call site the optimizer inlined
 as `jet build` optimizes it (the profile's level and the build option flags,
-so `--inline=off` and `--optimize=none` list none), at the call's line, with
+so `--inline=off` and `-O0` list none), at the call's line, with
 why it was taken: its size within the level's callee limit and the caller's
 remaining budget, its only call, or `marked #Inline(Always)`.
 `#Inline(Always)` locks the callee inlined; a change that makes it recursive,
@@ -1670,7 +1671,7 @@ observation never stamps an unexecuted check or link action.
 
 Decision inspection builds the checked program into the slot IR from its
 `run: fn` and runs the IR optimizer at the level `jet build` uses: O2, or O1
-under `--optimize=basic` (`-O1`), or O0 under `--optimize=none` or the `debug`
+under `-O1`, or O0 under `-O0` or the `debug`
 profile. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
 fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar

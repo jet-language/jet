@@ -317,7 +317,7 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
         summary: "Run tests",
         frequency_rank: 5,
         exhaustive: false,
-        usage: Val("test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u]"),
+        usage: Val("test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [-O0|-O1|-O2...] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -910,12 +910,12 @@ JET_CLI_FORMS: #run { [JetCLIFormSpec]{
 } }
 
 // Every jet flag: the fixed rows, with one row per build option
-// (BuildOptions.jet) after `--profile`, the short level flags `-O0`, `-O1`
-// and `-O2` after `--optimize`, one per `jet test` setting
+// (BuildOptions.jet) after `--profile`, one per value of a Level option
+// (`-O0`, `-O1`, `-O2`), one per `jet test` setting
 // (TestSettings.jet) after `--explain-partition`, and one per compiler
 // control (CLIControls.jet) after `--threads`. A setting whose flag is a
 // fixed row shared with other commands keeps that row; one whose flag is a
-// build option's (`--optimize`) shares that option's row, which says both.
+// build option's shares that option's rows, which say both.
 JET_CLI_FLAGS: #run jet_cli_flag_rows()
 
 jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
@@ -924,12 +924,19 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
         rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
-                flag: build_option_flag(option.name)
                 help := "With build/run/dev/test/inspect: {option.help}"
+                if option.kind == .Level {
+                    // Each level is its own flag; the option has no `--name` flag.
+                    loop value in option.values {
+                        level_help := "{help}; this flag is {value}"
+                        if test_setting_row(option.name) == .Val(row) -> level_help = "{level_help}; with test: {jet_cli_test_setting_text(row)}"
+                        rows.push(JetCLIFlagSpec{long: build_option_level_flag(value), help: level_help})
+                    }
+                    next
+                }
+                flag: build_option_flag(option.name)
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
                 rows.push(JetCLIFlagSpec{long: flag, help: help, value: jet_cli_build_option_value(option)})
-                if option.name != "optimize" -> next
-                loop (level, value) in option.values -> rows.push(JetCLIFlagSpec{long: "-O{level}", help: "Short form of {flag}={value}"})
             }
         }
         if spec.long == "--threads" {
@@ -937,6 +944,8 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
         }
         if spec.long != "--explain-partition" -> next
         loop setting in JET_TEST_SETTINGS {
+            // A Levels setting's flags are its Level option's rows.
+            if setting.kind == .Levels -> next
             flag: test_setting_flag(setting.name)
             // The lambdas take their own names: a capture moves the name it reads.
             fixed_flag: flag.copy() // copy: the fixed-row lambda's own name.
@@ -951,7 +960,7 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
 
 // How a build option's flag is written: a Bool row with no third value
 // (`--small`, `--small=false`) is Bool, a List row one flag per item, any
-// other row one value (`--optimize=full`, `--debug-info=split`).
+// other row one value (`--bounds=off`, `--debug-info=split`).
 jet_cli_build_option_value: fn(option: BuildOptionRow) -> JetCLIFlagValue Never! {
     if option.kind == .List -> return JetCLIFlagValue.Repeated
     if option.kind == .Bool && option.values.len() == 2 -> return JetCLIFlagValue.Bool
@@ -973,18 +982,13 @@ jet_cli_test_setting_of_flag: fn(flag: String) -> TestSettingRow? Never! {
     None
 }
 
-#Test("--optimize is one flag row that says what it does for a build and for jet test") {
-    rows: JET_CLI_FLAGS.filter(fn(row) { row.long == "--optimize" })
-    assert_eq(rows.len(), 1)
-    assert(rows[0].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
-}
-
-#Test("-O0, -O1 and -O2 are the short forms of the three optimize levels") {
+#Test("-O0, -O1 and -O2 are the optimize flags, each saying what it does for a build and for jet test") {
     rows: JET_CLI_FLAGS.filter(fn(row) { row.long.starts_with("-O") })
     assert_eq(rows.len(), 3)
-    assert_eq(rows[0].help, "Short form of --optimize=none")
-    assert_eq(rows[1].help, "Short form of --optimize=basic")
-    assert_eq(rows[2].help, "Short form of --optimize=full")
+    assert_eq(rows[0].long, "-O0")
+    assert_eq(rows[2].long, "-O2")
+    assert(rows[1].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: O0, O1 or O2; this flag is O1; with test: Run the tests at each listed optimize level"))
+    assert(JET_CLI_FLAGS.filter(fn(row) { row.long.starts_with("--optim") }).is_empty())
 }
 
 // A setting's help line: what it does and its three spellings.

@@ -4,15 +4,15 @@
 # ended twice on any tier.
 fixture: trait_values_free_at_their_last_owner_on_a_panic.fixture
 env: NO_COLOR=1
-step: jet run --optimize=none main.jet
+step: jet run -O0 main.jet
 exit: 70
 stdout: = trait_values_free_at_their_last_owner_on_a_panic.out
 stderr: ~ "Stop [E3001]: `panic: stop with 2 live`" # the stop reports only the live payload's owner
-step: jet run --optimize=basic main.jet
+step: jet run -O1 main.jet
 exit: 70
 stdout: = trait_values_free_at_their_last_owner_on_a_panic.out
 stderr: ~ "Stop [E3001]: `panic: stop with 2 live`" # the stop reports only the live payload's owner
-step: jet run --optimize=full main.jet
+step: jet run -O2 main.jet
 exit: 70
 stdout: = trait_values_free_at_their_last_owner_on_a_panic.out
 stderr: ~ "Stop [E3001]: `panic: stop with 2 live`" # the stop reports only the live payload's owner

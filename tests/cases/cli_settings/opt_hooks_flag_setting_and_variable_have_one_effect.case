@@ -13,41 +13,41 @@
 fixture: opt_hooks_flag_setting_and_variable_have_one_effect.fixture
 env: NO_COLOR=1
 env: JET_OPT_VERIFY=
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 exit: 0
 stdout: ~ "ssa 2 (rewritten 0, moves 0, fresh slots 0)" # no hook: two SSA values, none rewritten
-step: jet inspect decisions --optimize=basic --opt-disable=ssa main.jet
+step: jet inspect decisions -O1 --opt-disable=ssa main.jet
 exit: 0
 stdout: ~ "ssa 0 (rewritten 0, moves 0, fresh slots 0)" # the flag skips the SSA pass
 capture: disable_flag = text stdout
 write: disable_flag.out = "{cap:disable_flag}"
-step: jet inspect decisions --optimize=basic --opt-ssa-stress main.jet
+step: jet inspect decisions -O1 --opt-ssa-stress main.jet
 exit: 0
 stdout: ~ "ssa 2 (rewritten 2, moves 0, fresh slots 4)" # the flag moves each SSA value through a fresh slot
 capture: stress_flag = text stdout
 write: stress_flag.out = "{cap:stress_flag}"
 mkdir: config/jet
 copy: disable.settings config/jet/settings.jet
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 0
 capture: disable_setting = text stdout
 write: disable_setting.out = "{cap:disable_setting}"
 file: disable_setting.out == disable_flag.out # the setting skips it too
 copy: stress.settings config/jet/settings.jet
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 0
 capture: stress_setting = text stdout
 write: stress_setting.out = "{cap:stress_setting}"
 file: stress_setting.out == stress_flag.out # and stresses the same way
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DISABLE=ssa
 exit: 0
 capture: disable_variable = text stdout
 write: disable_variable.out = "{cap:disable_variable}"
 file: disable_variable.out == disable_flag.out # the variable skips it too
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_SSA_STRESS=1
 exit: 0
 capture: stress_variable = text stdout

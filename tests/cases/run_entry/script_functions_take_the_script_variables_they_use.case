@@ -20,15 +20,15 @@ exit: 0
 stdout: ~ "note [" # the script function's checked signature row
 stdout: ~ "write count{count}: Int [label_only]" # the written variable is an extra `&` label-only parameter defaulting to itself
 stdout: ~ "limit{limit}: Int [label_only]" # the read one is an extra label-only parameter too
-step file_o0: jet run --optimize=none main.jet
+step file_o0: jet run -O0 main.jet
 exit: 0
 stdout: = "1/3 apple\n2/3 pear\ndone: 2\n"
 stderr: = ""
-step file_o1: jet run --optimize=basic main.jet
+step file_o1: jet run -O1 main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step file_o2: jet run --optimize=full main.jet
+step file_o2: jet run -O2 main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""

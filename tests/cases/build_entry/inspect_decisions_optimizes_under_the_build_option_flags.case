@@ -2,11 +2,11 @@
 # compiles the entry: the build option flags apply over the profile, so the
 # report never contradicts the build. The default build runs the O2 passes.
 # Under the stock `inline: auto` the small `bump` is spliced at its calls;
-# `--inline=off` inlines nothing; `--optimize=basic` and its short form `-O1`
-# run the O1 passes, and `-O1` against `--optimize=full`, in either order, is
+# `--inline=off` inlines nothing; `-O1`
+# runs the O1 passes, and `-O1` against `-O2`, in either order, is
 # refused as two disagreeing levels; a value outside the row is refused as
 # `jet build` refuses it. JET_OPT_DUMP names functions by a comma list and
-# dumps them on every tier, O0 (`--optimize=none`) included.
+# dumps them on every tier, O0 (`-O0`) included.
 fixture: fixtures/build_inline
 env: NO_COLOR=1
 step: jet inspect decisions main.jet
@@ -19,33 +19,29 @@ cwd: open
 exit: 0
 stdout: ~ "O2:" # the flag keeps the build's level
 stdout: ~ "inlined 0," # off inlines nothing
-step: jet inspect decisions --optimize=basic main.jet
-cwd: open
-exit: 0
-stdout: ~ "O1:" # optimize: basic runs the O1 passes
 step: jet inspect decisions -O1 main.jet
 cwd: open
 exit: 0
-stdout: ~ "O1:" # -O1 is --optimize=basic
-step: jet inspect decisions -O1 --optimize=full main.jet
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
+step: jet inspect decisions -O1 -O2 main.jet
 cwd: open
 exit: 2
 stderr: ~ "E2104" # two levels that disagree
-stderr: ~ "`--optimize=basic` and `--optimize=full` disagree" # -O1 reads as --optimize=basic
-step: jet inspect decisions --optimize=full -O1 main.jet
+stderr: ~ "`-O1` and `-O2` disagree" # -O1 reads as -O1
+step: jet inspect decisions -O2 -O1 main.jet
 cwd: open
 exit: 2
-stderr: ~ "`--optimize=full` and `--optimize=basic` disagree" # the other order too
-step: jet inspect decisions --optimize=none main.jet
+stderr: ~ "`-O2` and `-O1` disagree" # the other order too
+step: jet inspect decisions -O0 main.jet
 cwd: open
 env: JET_OPT_DUMP=stage_one,bump
 exit: 0
-stdout: ~ "O0:" # optimize: none runs the inline Int facts only
+stdout: ~ "O0:" # optimize: O0 runs the inline Int facts only
 stdout: count "before fn stage_one [" = 1 # each listed function before its passes
 stdout: count "after fn stage_one [" = 1 # and after them
 stdout: count "after fn bump [" = 1 # the second name of the list
 stdout: count "fn stage_two [" = 0 # a function the list does not name
-step: jet inspect decisions --optimize=full main.jet
+step: jet inspect decisions -O2 main.jet
 cwd: open
 env: JET_OPT_DUMP=stage_two,stage_three
 exit: 0

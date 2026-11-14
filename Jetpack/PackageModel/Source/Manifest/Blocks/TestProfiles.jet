@@ -5,7 +5,7 @@
 // or cases corpus (`golden_corpus`, `ui_corpus`, `cases_corpus`). A profile
 // carries `baseline`, the `ID<TAB>card<TAB>reason` ledger of rows accepted as
 // failing, and any `jet test` setting by its row name (jet_foundation
-// Registry/TestSettings.jet: `shard: 2/4`, `optimize: [none, full]`,
+// Registry/TestSettings.jet: `shard: 2/4`, `optimize: [O0, O2]`,
 // `filter: "E01"`, `jobs: 8`, `memory: 16gib`, …), its lowest layer. Test and
 // build profile names share one namespace, and `defaults: { test: <profile> }`
 // picks the profile a bare `jet test` runs.
@@ -274,7 +274,7 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 }
 
 #Test("test profiles parse suites and their settings in order") {
-    profiles: pkg_parse_test_profiles(`quick: TestProfile{ suites: [tests], time_limit: 60s }, full: TestProfile{ suites: [tests, golden], optimize: [none, full] }`) ?? panic(err.message())
+    profiles: pkg_parse_test_profiles(`quick: TestProfile{ suites: [tests], time_limit: 60s }, full: TestProfile{ suites: [tests, golden], optimize: [O0, O2] }`) ?? panic(err.message())
     assert_eq(profiles.len(), 2)
     assert_eq(profiles[0].name, "quick")
     assert_eq(profiles[0].suites, [String]{"tests"})
@@ -282,7 +282,7 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
     assert_eq(profiles[0].settings[0].source, "profile `quick`")
     assert(test_settings_get(profiles[0].settings, "optimize") == None)
     assert_eq(profiles[1].suites, [String]{"tests", "golden"})
-    assert_eq(test_settings_get(profiles[1].settings, "optimize") ?? "", "none,full")
+    assert_eq(test_settings_get(profiles[1].settings, "optimize") ?? "", "O0,O2")
 }
 
 #Test("test profile fields refuse unknown fields, bad values and empty suites") {
@@ -292,7 +292,7 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], memory: lots }`), "test profile `quick` needs `memory:` as a positive size such as `16G`, `8gib` or `512mib`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], shard: 3/2 }`), "test profile `quick` needs `shard:` as I/N with 1 <= I <= N, such as `2/4`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], opt_in: yes }`), "test profile `quick` needs `opt_in:` as true or false")
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], optimize: [fast] }`), "test profile `quick` needs `optimize:` as optimize levels from none, basic and full, each at most once")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], optimize: [fast] }`), "test profile `quick` needs `optimize:` as optimize levels from O0, O1 and O2, each at most once")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], time_limit: 0s }`), "test profile `quick` needs `time_limit:` as a positive duration such as `60s`, `1500ms` or `2m`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ time_limit: 60s }`), "test profile `quick` needs `suites: [ … ]` naming at least one suite")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: tests }`), "test profile `quick` field `suites` needs a list such as `[tests]`")

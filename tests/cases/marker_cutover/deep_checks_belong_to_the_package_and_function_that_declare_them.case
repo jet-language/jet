@@ -8,73 +8,73 @@
 # refused at load (E0603) whether or not a deep check is selected.
 fixture: deep_checks_belong_to_the_package_and_function_that_declare_them.fixture
 env: NO_COLOR=1
-step off_o0: jet run --optimize=none app/main.jet -- --bad side
+step off_o0: jet run -O0 app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n" # no flag, so the negative side is not caught
 stderr: empty
-step library_o0: jet run --optimize=none --deep-checks=shapes app/main.jet -- --bad side
+step library_o0: jet run -O0 --deep-checks=shapes app/main.jet -- --bad side
 exit: 70
 stdout: empty
 stderr: ~ "panic: a side is negative" # the library scope keeps the library check
 stderr: ~ "shapes.jet:4 in area" # the stop names the deep check's line and function
-step library_skips_app_o0: jet run --optimize=none --deep-checks=shapes app/main.jet -- --bad count
+step library_skips_app_o0: jet run -O0 --deep-checks=shapes app/main.jet -- --bad count
 exit: 0
 stdout: = "8\n" # the application check is outside the library scope
 stderr: empty
-step app_o0: jet run --optimize=none --deep-checks=app app/main.jet -- --bad count
+step app_o0: jet run -O0 --deep-checks=app app/main.jet -- --bad count
 exit: 70
 stdout: empty
 stderr: ~ "panic: the app has no shapes" # the application scope keeps the application check
 stderr: ~ "main.jet:14 in run" # the stop names the deep check's line and function
-step app_skips_library_o0: jet run --optimize=none --deep-checks=app app/main.jet -- --bad side
+step app_skips_library_o0: jet run -O0 --deep-checks=app app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n" # the library check is outside the application scope
 stderr: empty
-step lambda_owner_o0: jet run --optimize=none --deep-checks=shapes::total app/main.jet -- --bad size
+step lambda_owner_o0: jet run -O0 --deep-checks=shapes::total app/main.jet -- --bad size
 exit: 70
 stdout: empty
 stderr: ~ "panic: a size is negative" # the lambda's check belongs to `total`, which declares it
 stderr: ~ "shapes.jet:10 in total" # the stop names the deep check's line and function
-step other_function_o0: jet run --optimize=none --deep-checks=shapes::area app/main.jet -- --bad size
+step other_function_o0: jet run -O0 --deep-checks=shapes::area app/main.jet -- --bad size
 exit: 0
 stdout: = "4\n" # `area` does not own the check in `total`
 stderr: empty
-step caller_o0: jet run --optimize=none --deep-checks=app::run app/main.jet -- --bad side
+step caller_o0: jet run -O0 --deep-checks=app::run app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n" # `run` reaches `area` but does not own its check
 stderr: empty
-step off_o1: jet run --optimize=basic app/main.jet -- --bad side
+step off_o1: jet run -O1 app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n"
 stderr: empty
-step library_o1: jet run --optimize=basic --deep-checks=shapes app/main.jet -- --bad side
+step library_o1: jet run -O1 --deep-checks=shapes app/main.jet -- --bad side
 exit: 70
 stdout: empty
 stderr: ~ "panic: a side is negative" # the failed deep check's own message
 stderr: ~ "shapes.jet:4 in area" # the stop names the deep check's line and function
-step library_skips_app_o1: jet run --optimize=basic --deep-checks=shapes app/main.jet -- --bad count
+step library_skips_app_o1: jet run -O1 --deep-checks=shapes app/main.jet -- --bad count
 exit: 0
 stdout: = "8\n"
 stderr: empty
-step app_o1: jet run --optimize=basic --deep-checks=app app/main.jet -- --bad count
+step app_o1: jet run -O1 --deep-checks=app app/main.jet -- --bad count
 exit: 70
 stdout: empty
 stderr: ~ "panic: the app has no shapes" # the failed deep check's own message
 stderr: ~ "main.jet:14 in run" # the stop names the deep check's line and function
-step app_skips_library_o1: jet run --optimize=basic --deep-checks=app app/main.jet -- --bad side
+step app_skips_library_o1: jet run -O1 --deep-checks=app app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n"
 stderr: empty
-step lambda_owner_o1: jet run --optimize=basic --deep-checks=shapes::total app/main.jet -- --bad size
+step lambda_owner_o1: jet run -O1 --deep-checks=shapes::total app/main.jet -- --bad size
 exit: 70
 stdout: empty
 stderr: ~ "panic: a size is negative" # the failed deep check's own message
 stderr: ~ "shapes.jet:10 in total" # the stop names the deep check's line and function
-step other_function_o1: jet run --optimize=basic --deep-checks=shapes::area app/main.jet -- --bad size
+step other_function_o1: jet run -O1 --deep-checks=shapes::area app/main.jet -- --bad size
 exit: 0
 stdout: = "4\n"
 stderr: empty
-step caller_o1: jet run --optimize=basic --deep-checks=app::run app/main.jet -- --bad side
+step caller_o1: jet run -O1 --deep-checks=app::run app/main.jet -- --bad side
 exit: 0
 stdout: = "2\n"
 stderr: empty

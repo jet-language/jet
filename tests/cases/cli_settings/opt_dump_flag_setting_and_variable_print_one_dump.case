@@ -6,23 +6,23 @@
 # is shown.
 fixture: opt_dump_flag_setting_and_variable_print_one_dump.fixture
 env: NO_COLOR=1
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 exit: 0
 stdout: !~ "before fn run" # no control: no dump
-step: jet inspect decisions --optimize=basic --opt-dump=run main.jet
+step: jet inspect decisions -O1 --opt-dump=run main.jet
 exit: 0
 stdout: ~ "before fn run" # the flag shows run's IR before the passes
 capture: flag = text stdout
 write: flag.out = "{cap:flag}"
 mkdir: config/jet
 copy: user.settings config/jet/settings.jet
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 0
 capture: setting = text stdout
 write: setting.out = "{cap:setting}"
 file: setting.out == flag.out # the setting shows the same dump
-step: jet inspect decisions --optimize=basic main.jet
+step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=run
 exit: 0
 capture: variable = text stdout

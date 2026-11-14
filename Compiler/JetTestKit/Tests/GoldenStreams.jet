@@ -150,22 +150,22 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     options := kit_test_checkout_options(root)
     context: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless(), known: kit_known_load(options.ledger)}
     // The shared file holds o1's level; o0 and o2 test at their own.
-    kit_exec_write(files.join(root, "{entry.expected}.test.out"), "at --optimize=basic: pass\n1 passed, 0 failed, 0 skipped\n")
+    kit_exec_write(files.join(root, "{entry.expected}.test.out"), "at -O1: pass\n1 passed, 0 failed, 0 skipped\n")
     shared: kit_golden_run_suite(entry, context)
     assert_eq(shared.map(fn(outcome) { outcome.verdict.status }), ["FAIL", "PASS", "FAIL"])
-    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at --optimize=none: pass\n1 passed, 0 failed, 0 skipped\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at -O0: pass\n1 passed, 0 failed, 0 skipped\n")
     kit_exec_write(files.join(root, "{entry.expected}.o2.test.out"), "at --release: pass\n1 passed, 0 failed, 0 skipped\n")
     loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
     // A summary that counts a failure expects exit 1, so a passing run fails.
-    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at --optimize=none: pass\n0 passed, 1 failed, 0 skipped\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at -O0: pass\n0 passed, 1 failed, 0 skipped\n")
     exit: kit_golden_run_suite(entry, context)[0].verdict
     assert_eq(exit.status, "FAIL")
     assert(exit.detail.contains("jet test exit 0; expected 1"))
     // The sidecar's environment reaches `jet test`: the failing run exits 1 as its summary says.
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_TEST_FAIL=1\n")
-    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at --optimize=basic: FAIL\n0 passed, 1 failed, 0 skipped\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at -O1: FAIL\n0 passed, 1 failed, 0 skipped\n")
     assert_eq(kit_golden_run_suite(entry, context)[1].verdict.status, "PASS")
-    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at --optimize=basic: FAIL\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at -O1: FAIL\n")
     unknown: kit_golden_run_suite(entry, context)[1].verdict
     assert_eq(unknown.status, "FAIL")
     assert(unknown.detail.contains("ends in no test summary"))

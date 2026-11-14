@@ -5,25 +5,25 @@ fixture: core_service_effect_kernel/input
 env: NO_COLOR=1
 step: jet check ok.jet
 exit: 0
-step: jet run --optimize=none ok.jet
+step: jet run -O0 ok.jet
 exit: 0
 stdout: = "people: 1\n"
-step: jet run --optimize=basic ok.jet
+step: jet run -O1 ok.jet
 exit: 0
 stdout: = "people: 1\n"
-step: jet run --optimize=full ok.jet
+step: jet run -O2 ok.jet
 exit: 0
 stdout: = "people: 1\n"
 step: jet check net.jet
 exit: 1
 stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`offline_count` reaches the `Net` effect, which it prohibits with `-[!Net]>`" # remote_count's DB row admits Net; the denial does not
-step: jet run --optimize=none net.jet
+step: jet run -O0 net.jet
 exit: 1
 stderr: ~ "`offline_count` reaches the `Net` effect, which it prohibits with `-[!Net]>`" # run refuses it as check does
-step: jet run --optimize=basic net.jet
+step: jet run -O1 net.jet
 exit: 1
 stderr: ~ "`offline_count` reaches the `Net` effect, which it prohibits with `-[!Net]>`" # run refuses it as check does
-step: jet run --optimize=full net.jet
+step: jet run -O2 net.jet
 exit: 1
 stderr: ~ "`offline_count` reaches the `Net` effect, which it prohibits with `-[!Net]>`" # run refuses it as check does
