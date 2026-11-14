@@ -31,6 +31,8 @@ use core: core
 // tables, 4:4:4 YCbCr (or one gray component when every pixel is gray),
 // through libjpeg's integer forward DCT and color conversion. Alpha is
 // dropped.
+//
+// `resize` scales by nearest pixel or by area average, alpha-weighted.
 
 #Error
 ImageError: enum {
@@ -1279,6 +1281,88 @@ jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
     Ok(bits.out)
 }
 
+// How `resize` picks each destination pixel.
+ResizeFilter: enum {
+    // The source pixel under the destination pixel's center.
+    Nearest
+    // The source pixels the destination pixel covers, averaged by the area
+    // each covers, color weighted by alpha.
+    Area
+}
+
+// `image` scaled to `width` x `height`. The source pixel bytes count against
+// the input budget, the result against the pixel budget and its bytes
+// against the output budget. A size below 1, or pixels that are not `width *
+// height * 4` bytes, is `Malformed`.
+resize: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: Limits) -> Image ImageError! {
+    if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
+    if image.width < 1 || image.height < 1 || width < 1 || height < 1 -> return Err(.Malformed)
+    if image.width > limits.max_input_bytes /% 4 /% image.height -> return Err(.TooLarge)
+    if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
+    if width > limits.max_pixels /% height || width > limits.max_output_bytes /% 4 /% height -> return Err(.TooLarge)
+    if filter == {
+        .Nearest -> Ok(resize_nearest(image, width, height))
+        .Area -> Ok(resize_area(image, width, height))
+    }
+}
+
+resize_nearest: fn(image: Image, width: Int, height: Int) -> Image {
+    pixels := [U8]{}
+    loop y in 0..<height {
+        row: ((2 * y + 1) * image.height) /% (2 * height)
+        loop x in 0..<width {
+            at: (row * image.width + ((2 * x + 1) * image.width) /% (2 * width)) * 4
+            loop channel in 0..<4 -> pixels.push(image.pixels[at + channel])
+        }
+    }
+    Image{width: width, height: height, pixels: pixels}
+}
+
+// How much of source cell `index` (spanning `index * target` up to
+// `(index + 1) * target`) lies inside destination cell `cell` (spanning `cell
+// * source` up to `(cell + 1) * source`).
+cell_overlap: fn(index: Int, cell: Int, source: Int, target: Int) -> Int {
+    start: if index * target > cell * source -> index * target else -> cell * source
+    end: if (index + 1) * target < (cell + 1) * source -> (index + 1) * target else -> (cell + 1) * source
+    if end > start -> end - start else -> 0
+}
+
+// Each destination pixel is its covered source pixels averaged by area, in
+// units where a destination pixel is `image.width * image.height`. Color
+// averages weighted by alpha so transparent pixels add no color; rounding
+// is to nearest.
+resize_area: fn(image: Image, width: Int, height: Int) -> Image {
+    total: image.width * image.height
+    pixels := [U8]{}
+    loop y in 0..<height {
+        first_row: (y * image.height) /% height
+        last_row: ((y + 1) * image.height - 1) /% height
+        loop x in 0..<width {
+            first_column: (x * image.width) /% width
+            last_column: ((x + 1) * image.width - 1) /% width
+            red := 0
+            green := 0
+            blue := 0
+            alpha := 0
+            loop row in first_row..<(last_row + 1) {
+                weight_y: cell_overlap(row, y, image.height, height)
+                loop column in first_column..<(last_column + 1) {
+                    weight: weight_y * cell_overlap(column, x, image.width, width)
+                    at: (row * image.width + column) * 4
+                    opacity: weight * byte_at(image.pixels, at + 3)
+                    red += opacity * byte_at(image.pixels, at)
+                    green += opacity * byte_at(image.pixels, at + 1)
+                    blue += opacity * byte_at(image.pixels, at + 2)
+                    alpha += opacity
+                }
+            }
+            loop sum in ([Int]{red, green, blue}) -> pixels.push(U8{if alpha == 0 -> 0 else -> (sum + alpha /% 2) /% alpha})
+            pixels.push(U8{(alpha + total /% 2) /% total})
+        }
+    }
+    Image{width: width, height: height, pixels: pixels}
+}
+
 C_TEST_LIMITS: Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 256}
 
 // A PNG of one zlib stream of already filtered scanlines.
@@ -1780,4 +1864,51 @@ squared_error: fn(left: Image, right: Image) -> Int {
         assert_eq(back.pixels[3], U8{255})
     }
     assert(encode_error(smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
+}
+
+resize_error: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: Limits) -> ImageError {
+    if resize(image, width, height, filter, limits) == {
+        .Ok(_) -> panic("resized")
+        .Err(error) -> error
+    }
+}
+
+pixel_image: fn(width: Int, height: Int, words: [Int]) -> Image {
+    pixels := [U8]{}
+    loop word in words {
+        loop shift in ([Int]{24, 16, 8, 0}) -> pixels.push(U8{(word >> shift).bit_and(255)})
+    }
+    Image{width: width, height: height, pixels: pixels}
+}
+
+#Test("area resize averages covered pixels by area and alpha") {
+    // 4 x 2 to 2 x 1: each destination pixel averages a 2 x 2 square.
+    source: pixel_image(4, 2, [Int]{0x000000FF, 0x646464FF, 0xFF0000FF, 0xFF0000FF, 0x0A0A0AFF, 0x1E1E1EFF, 0x0000FFFF, 0x0000FFFF})
+    halved: resize(source, 2, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(image_words(halved), [Int]{2, 1, 0x232323FF, 0x800080FF})
+    // 3 x 1 to 2 x 1: the middle pixel is split half to each side, so each
+    // destination pixel is two parts its own end and one part the middle.
+    thirds: resize(pixel_image(3, 1, [Int]{0x000000FF, 0x606060FF, 0xC0C0C0FF}), 2, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(image_words(thirds), [Int]{2, 1, 0x202020FF, 0xA0A0A0FF})
+    // A transparent pixel adds no color, only transparency.
+    faded: resize(pixel_image(2, 1, [Int]{0xFF000000, 0x00FF00FF}), 1, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(image_words(faded), [Int]{1, 1, 0x00FF0080})
+    // Upscaling repeats a pixel over the cells it covers.
+    doubled: resize(pixel_image(1, 1, [Int]{0x12345678}), 2, 2, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(image_words(doubled), [Int]{2, 2, 0x12345678, 0x12345678, 0x12345678, 0x12345678})
+}
+
+#Test("nearest resize takes the pixel under each center") {
+    source: pixel_image(4, 1, [Int]{0x01, 0x02, 0x03, 0x04})
+    assert_eq(image_words(resize(source, 2, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{2, 1, 0x02, 0x04})
+    assert_eq(image_words(resize(source, 8, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{8, 1, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x04, 0x04})
+}
+
+#Test("resize refuses bad sizes and budgets") {
+    source: pixel_image(2, 1, [Int]{0x01, 0x02})
+    assert(resize_error(source, 0, 1, .Area, C_TEST_LIMITS) == .Malformed)
+    assert(resize_error(Image{width: 2, height: 2, pixels: [U8]{1}}, 1, 1, .Nearest, C_TEST_LIMITS) == .Malformed)
+    // 9 x 8 is 72 pixels, above the 64 the limits allow.
+    assert(resize_error(source, 9, 8, .Area, C_TEST_LIMITS) == .TooLarge)
+    assert(resize_error(source, 5, 5, .Area, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 99}) == .TooLarge)
 }
