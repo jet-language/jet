@@ -97,22 +97,21 @@ sema_call_impl_targets: fn(implementation: SemaRegistrationImpl, nominal: SemaRe
     !module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name
 }
 
-// The associated methods registration generated for `nominal`, such as a
-// codec's `decode` and `__read`. The type's source never declares them, so a
-// Fix listing what it declares leaves them out.
-sema_call_generated_method_names: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> [String] Never! {
-    names := [String]{}
+// Whether registration generated `nominal`'s associated method `name`, such
+// as a codec's `decode` and `__read`. The type's source never declares it, so
+// a Fix listing what the type declares leaves it out.
+sema_call_method_is_generated: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, name: String) -> Bool Never! {
     loop function in nominal.methods {
-        if function.declaration.compiler_generated -> names.push(function.symbol.name.copy())
+        if function.symbol.name == name && function.declaration.compiler_generated -> return true
     }
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         if !sema_call_impl_targets(implementation, nominal) -> next
         loop function in implementation.methods {
-            if implementation.compiler_generated || function.declaration.compiler_generated -> names.push(function.symbol.name.copy())
+            if function.symbol.name == name && (implementation.compiler_generated || function.declaration.compiler_generated) -> return true
         }
     }
-    names
+    false
 }
 
 SEMA_CALL_SCALAR_OWNERS: [String]{"Int", "Float", "Bool", "String", "Char", "F32", "F64", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"}
@@ -147,10 +146,9 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
         if sema_call_registered_method_names(graph, nominal, false, environment, program).contains(method) {
             diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
         } else {
-            generated: sema_call_generated_method_names(graph, nominal)
             statics := [String]{}
             loop name in sema_call_registered_method_names(graph, nominal, true, environment, program) {
-                if !generated.contains(name) -> statics.push(name.copy())
+                if !sema_call_method_is_generated(graph, nominal, name) -> statics.push(name)
             }
             shown: loop name in statics -> "`{name}`"
             fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
