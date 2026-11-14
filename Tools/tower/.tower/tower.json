@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102321,
+    "rev": 102325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38664,11 +38664,11 @@
         {
           "n": 8,
           "text": "(was #2385 c2) ASCII lower and upper change only A-Z/a-z, preserve every other byte/code point, have typed signatures and tier parity, and the complete-ladder warning proves same-value flow plus no intervening observation [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:46:53.238Z"
+          "evidence": "dev b80f01b024 (text_unicode: ASCII case conversion moves only ASCII letters, with the complete-ladder guidance fixture). cases ascii_case_conversion 1/0 at O0, O1 and O2; ui complete_ascii_case_ladder 1/0. Lander5, gate-p56 jet (b47proofs).",
+          "at": "2026-11-14T08:51:19.177Z"
         },
         {
           "n": 9,
@@ -38682,11 +38682,11 @@
         {
           "n": 10,
           "text": "(was #2385 c4) fs.walk_files inherits fs.walk ordering, error and symlink policy while yielding regular files only; direct-loop guidance has control-flow/metadata-use positive and negative tests [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:46:54.730Z"
+          "evidence": "dev 80b8f15c4a (core_files_foundations: walk_files is walk's regular files, inheriting its ordering, error and symlink policy) on 863e3d6b4e (lazy walk and walk_files). The walk_files case 1/0; ui walk_files_filter 1/0. Lander5, gate-p56 jet (b47proofs).",
+          "at": "2026-11-14T08:51:21.793Z"
         },
         {
           "n": 11,
@@ -38748,7 +38748,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-14T06:19:34.877Z",
+      "updated": "2026-11-14T08:51:21.793Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -56721,11 +56721,11 @@
         {
           "n": 31,
           "text": "jet build --target=web writes app.wasm.map, a v3 source map with sourcesContent and relative sources, referenced by a sourceMappingURL custom section in app.wasm. It maps app.wasm instructions back to Jet source lines, so a debugger pause on a mapped Jet line works. app.js is the fixed host loader and holds no Jet code, so it has no map; Tools/web-test/SourceMap.jet checks an app.js.map only when a build writes a JS partition. #5072 c3 (the sourcemap tool's parity entry and the live CDP breakpoint) depends on this. Proof: the js_source_map case, rewritten for the wasm map, passes: sources [\"main.jet\"], no host path, and mappings land on the fixture's main.jet lines.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T15:05:39.585Z"
+          "evidence": "dev 582da19689 (G6Meta-srcmapsection: the fixture's verify.mjs finds exactly one sourceMappingURL custom section anywhere and checks its URL; jet.command now follows it), on top of e3bef336e0 (line markers, sources [\"main.jet\"], no host path). Lander5, gate-p62 jet: cases js_source_map_uses_line_markers_and_hides_host_paths 1/0, 0 known-failing.",
+          "at": "2026-11-14T08:50:50.533Z"
         }
       ],
       "refs": [],
@@ -56735,7 +56735,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-14T08:14:14.820Z",
+      "updated": "2026-11-14T08:50:50.533Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -78733,6 +78733,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decisions (Main, 2026-11-14, within D-WEBAPP-SHAPE1=A), for the Remote transport (G5DevX2-app-remote-transport). (a) #App.SignedIn endpoints answer 401 (CallError.SignedOut) until App sign-in lands (c4), so the call fails closed. (b) CallError.Invalid carries [FieldError] (Core's existing FieldError{path, reason}), decoded from the 422 body, so server field errors (#6831) need no second form. (c) Every Remote<S> call, direct ones included, has CallError in its type and -[Net, Time.Wait]>, so screen code is the same on every target. Web leg: JSPI (WebAssembly.Suspending and promising), with events queued while a call is suspended. G5DevX-2 checked the support: Chrome and Edge 137, Firefox 153, Safari 27 (MDN browser-compat-data); Node on by default from 25.0.0 and 24.20.0; local node v24.21.0 ran a round trip unflagged."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-13, within D-WEBAPP-SHAPE1=A): a screen gets its app.Remote<S> from one Core constructor, app.remote(service). The ratified example takes `crew: app.Remote<Crew>` as a parameter but names no constructor; this is the smallest one, a Core struct API with no new syntax. Only methods marked for remote calls are callable on it (E2812 jet.ServerOnlyMethod otherwise). The client transport is a separate c3 item."
         },
         {
@@ -78847,7 +78852,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-14T08:17:45.659Z",
+      "updated": "2026-11-14T08:49:53.935Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -205173,6 +205178,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T08:51:21.793Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iiv9ft",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-14T08:51:19.177Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iiv9ft",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-14T08:50:50.533Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m58g8t",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-14T08:49:53.935Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y7zq8s",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T08:48:07.621Z",
       "by": "Main",
