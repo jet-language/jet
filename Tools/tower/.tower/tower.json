@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6834,
-    "rev": 101843,
+    "rev": 101844,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73391,6 +73391,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c22 plan (G12Docs-5, 2026-11-13, measured on the batch-12 jet built from dev fc9a6efc76, cold store). Today: print hello 0.03 s and 48 MB; RandomSeededSequence 0.35 s and 147 MB, parsing 1.19 MB of Core text and checking 154 bodies; jetc-trace Summarize 1.04 s and 264 MB, parsing 2.33 MB of Core. The shipped jet carries no Core record: 498ba80dd8 dropped the build step, and core-record --write ICEs (271 modules registered, 270 checked). In the batch-1 trial the record was about 375 MB, so size is the real blocker. Design: the jet.core/v5 record is an ELF part of the final jet, written by jet-bare from its embedded Core; its header names the jet-bare sha256 and the Core source digest; IDENTITY is computed from the final bytes, so it is immutable with nothing to invalidate. Core machine code (S7b) stays out for now. Main decision: slice 2 size gate is a record of at most 64 MB, recorded as fact here. Slices: 1 the writer skips the canonical effect module and prints section sizes; 2 size; 3 restore the build step; 4 load-path proof (0 Core parse, 0 core_checked in the hello, random and summarize traces); 5 Request.jet skips the Core text list; 6 S8 proof on o0, o1 and o2; 7 machine code later. Owner: G12Docs-5."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Landed on dev: f452b1fdcb (G11Speed-c23a) and fb751456e7 (G11Speed-c23b-r2), small programs compile on the calling thread.\n- Proof: its cases passed 1/0 on the core-b1 jet. parallel_check_matches_serial_check is known-failing (#4310).\n- Measured (cold, 7 runs, seed-b14 vs the core-b1 jet): c23b's paired bench.jet went from 1452 ms to 235 ms. hello `jet run` is unchanged at 24-26 ms.\n- c23 stays open for c23c: the compiler-side case showing no thread-pool futex traffic for `jet run hello.jet`. It comes after a reseed that carries c23b."
@@ -73915,7 +73920,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-13T14:04:33.831Z",
+      "updated": "2026-11-14T00:10:53.669Z",
       "updatedBy": "Main",
       "criteriaLastN": 32
     },
@@ -204302,6 +204307,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T00:10:53.669Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T00:08:09.278Z",
       "by": "Main",
