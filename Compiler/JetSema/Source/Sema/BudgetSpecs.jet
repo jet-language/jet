@@ -135,12 +135,12 @@ sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDi
 BudgetLocatedDiagnostic: struct { module_index: Int, diagnostic: Diagnostic }
 
 // Every module's budgets in module order, Core's among them, then each
-// owning package's resolution and collision findings.
+// owning package's resolution and collision findings. Only a package with a
+// budget reads its attachments, so only its modules are walked for them.
 sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
     findings := [BudgetLocatedDiagnostic]{}
     packages := [String]{}
     group_specs := [String: [LocatedBudgetSpec]]{}
-    group_catalogs := [String: BudgetAttachmentCatalog]{}
     loop (module_index, row) in graph.modules {
         module_diagnostics := [Diagnostic]{}
         module_specs: sema_budget_elaborate_items(row.program.items, module_diagnostics)
@@ -149,22 +149,24 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBud
         if !packages.contains(package) {
             packages.push(package.copy())
             group_specs[package] = [LocatedBudgetSpec]{}
-            group_catalogs[package] = sema_budget_empty_catalog()
         }
+        if module_specs.len() == 0 -> next
         grouped := group_specs.get(package) ?? [LocatedBudgetSpec]{}
         loop spec in module_specs {
             grouped.push(LocatedBudgetSpec{spec: spec.copy(), module_index: module_index})
             specs.push(LocatedBudgetSpec{spec: spec, module_index: module_index})
         }
         group_specs[package] = grouped
-        catalog := group_catalogs.get(package) ?? sema_budget_empty_catalog()
-        sema_budget_catalog_extend(catalog, sema_budget_attachment_catalog(row.program.items))
-        group_catalogs[package] = catalog
     }
     packages.sort()
     loop package in packages {
         grouped: group_specs.get(package) ?? [LocatedBudgetSpec]{}
-        sema_budget_validate_resolution(grouped, group_catalogs.get(package) ?? sema_budget_empty_catalog(), findings)
+        if grouped.len() == 0 -> next
+        catalog := sema_budget_empty_catalog()
+        loop row in graph.modules {
+            if row.package_identity == package -> sema_budget_catalog_extend(catalog, sema_budget_attachment_catalog(row.program.items))
+        }
+        sema_budget_validate_resolution(grouped, catalog, findings)
         sema_budget_validate_collisions(grouped, findings)
     }
     findings
