@@ -86,16 +86,42 @@ body_tree_unpack: fn(tree: &BodyTree, base: Int) Never! {
     type_table_index_rebuild(tree.types)
 }
 
-// The row of node `id`.
+// The row of node `id`. A body's source ids run mostly unbroken to its last
+// row, so the row as far from the end as `id` is from the last id is tried
+// first: it is the answer when it holds `id` and no row before it does.
+// Otherwise the rows are searched.
 body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
+    count: tree.nodes.len()
+    if count > 0 {
+        guess: count - 1 - (tree.nodes[count - 1].id - id)
+        if guess >= 0 && guess < count && tree.nodes[guess].id == id {
+            if guess == 0 || tree.nodes[guess - 1].id < id -> return tree.nodes[guess]
+        }
+    }
     low := 0
-    high := tree.nodes.len()
+    high := count
     loop low < high {
         middle: (low + high) /% 2
         if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
     }
-    if low < tree.nodes.len() && tree.nodes[low].id == id -> return tree.nodes[low]
+    if low < count && tree.nodes[low].id == id -> return tree.nodes[low]
     panic("body tree has no node {id}")
+}
+
+#Test("a node and its type row are found by id across gaps in the ids") {
+    tree := body_tree_new()
+    ids: [Int]{-9, -5, 3, 4, 5, 9, 10, 11}
+    loop (index, id) in ids {
+        tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: index, width: None}, span: Span{start: index, end: index + 1}})
+        tree.expr_types.push(TExprType{id: id, ty: index})
+    }
+    loop (index, id) in ids {
+        assert(body_node(tree, id).kind == NodeKind.IntLit{value: index, width: None})
+        assert_eq(body_type_id(tree, id), index)
+    }
+    assert(checked_expr_type_id(tree.expr_types, 6) == None)
+    assert(checked_expr_type_id(tree.expr_types, 12) == None)
+    assert(checked_expr_type_id(tree.expr_types, -20) == None)
 }
 
 // The checked type of node `id`.
