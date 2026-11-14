@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6839,
-    "rev": 101984,
+    "nextNum": 6840,
+    "rev": 102000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98328,6 +98328,164 @@
       "updated": "2026-11-14T01:16:47.984Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0oe96sn",
+      "num": 6839,
+      "title": "ui profile regressions found by the batch-17 ui sweep",
+      "body": "The full ui profile on the batch-17 jet had 155 FAIL (157 on batch 16). G5DevX-2 and G6Meta-4 triaged every row on 2026-11-13. Rows whose new text was correct are re-blessed in light SUBs that cite the commit that changed the text. The rows below are real regressions, grouped by root. Each criterion names its owner in brackets. Diffs: Lander5 b17proofs/2.out on the gate-p22 jet.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "[G6Meta-4] A call chain names a method as `Type.method`, never the retired `X::y`. Effects/Checks.jet:3920 passes \"{type_name(owner_type)}::{method}\" through without the `.` conversion that line 2167 does. Proof: ui checked_text_check_without_row_refuses_io, effect_trait_impl_bound, impl_method_inherits_trait_pure_row_refuses_io and operator_effectful_hook pass against their unchanged snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:03.220Z"
+        },
+        {
+          "n": 2,
+          "text": "[G6Meta-4] The compile-time check of Int{literal} is restored: ui E0112_int_from_float_brace reports E0112 (today: no errors), and typed_lit_float_to_int reports E1003, not \"value is Decimal\". 7260dbb778 added the checks; suspects after it in Constructors.jet: 352f3b2a78, 5fe30eab7f and 2d2afdbb12. Proof: both ui rows pass unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:05.510Z"
+        },
+        {
+          "n": 3,
+          "text": "[G5DevX-2] E2404`s Fix parenthesizes a union target: `impl (NetError | TaskFailure).From(ParseErr)`, with the form checked to compile. Proof: ui qualified_union_absent_member_reports_e2404.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:07.720Z"
+        },
+        {
+          "n": 4,
+          "text": "[G5DevX-2] static_missing_core_member`s Fix lists only public members, never internal ones such as `decode` and `__read`. Proof: its ui snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:09.838Z"
+        },
+        {
+          "n": 5,
+          "text": "[G3Core-2] runtime_e3003 reports \"waiting in task join\" for a deadline that ends during a join, not \"waiting in a loop\" (the busy-loop poll family of #6539). Proof: ui runtime_e3003 passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:12.049Z"
+        },
+        {
+          "n": 6,
+          "text": "[G5DevX-2] contract_required_post_false says the postcondition \"is false\" (not \"has no answer\"), and call_spelling_function_dot and call_spelling_method_call keep their specific teaching text. Proof: the three ui rows pass unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:14.323Z"
+        },
+        {
+          "n": 7,
+          "text": "[G3Core-2] A thread-confined argument to a generic task spawn is refused again, and a typestate enum arm narrows to its case with its errors reported (both report no errors today, which is a safety regression). Proof: ui concurrency_boundaries/generic_task_spawn_rejects_a_thread_confined_argument and typestate/enum_arm_narrows_to_its_case pass unchanged. Typestate suspect: d68f978108.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:16.414Z"
+        },
+        {
+          "n": 8,
+          "text": "[G3Core-2] An impure validate rule reports its impurity error, not ReturnTypeMismatch or MissingBlockValue on `validate {}` (suspect 3560681764, where validate rules end in a tail Ok). Proof: ui validate_impure_rule passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:18.564Z"
+        },
+        {
+          "n": 9,
+          "text": "[G6Meta-4] number_name_module_constant reports E1003 for an out-of-range U8 constant and accepts the in-range LIMIT, rather than BindingTypeMismatch \"needs U8, value is Int\" on both. Proof: its ui row passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:20.841Z"
+        },
+        {
+          "n": 10,
+          "text": "[G3Core-2] A fixed-backing value crossing into para_map is refused with ValueNotSendable, not UseAfterMove. Proof: ui fixed_backing_crossing passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:23.049Z"
+        },
+        {
+          "n": 11,
+          "text": "[G5DevX-2] lowlevel alloc_raw, mem_copy and mem_window report one error each, with no second ReturnTypeMismatch (*U8? against mem.Ptr<U8>?) and no duplicate UnsafeCallOutsideUnsafe. Proof: the three ui rows pass unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:25.113Z"
+        },
+        {
+          "n": 12,
+          "text": "[G3Core-2] http_route_path_type reports InvalidRoute and BindingTypeMismatch for a bad path type, not AmbiguousRoute. Proof: its ui row passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:27.339Z"
+        },
+        {
+          "n": 13,
+          "text": "[G6Meta-4] A program whose derive is refused reports E0956, not UnknownName `effects`. Proof: ui build_reflects_a_program_whose_derive_is_refused passes unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:29.567Z"
+        },
+        {
+          "n": 14,
+          "text": "[G5DevX-2] Invalid ui tests are brought up to date: http_route_custom_method_invalid, _marked and _standard use the app.mount and custom-method API of 9ce313e728; E0514_any_write_keeps_colon_equals drops the retired call-site & marks; borrow_conflict and view_outlives_owner have a fixed companion that checks clean. Proof: each row passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:02:32.454Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T02:02:00.791Z",
+      "updated": "2026-11-14T02:02:36.041Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14
     }
   ],
   "decisions": [
@@ -204648,6 +204806,118 @@
   ],
   "events": [
     {
+      "at": "2026-11-14T02:02:36.041Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T02:02:32.454Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#14 [G5DevX-2] Invalid ui tests are brought up to date: http_rou"
+    },
+    {
+      "at": "2026-11-14T02:02:29.567Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#13 [G6Meta-4] A program whose derive is refused reports E0956, "
+    },
+    {
+      "at": "2026-11-14T02:02:27.340Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#12 [G3Core-2] http_route_path_type reports InvalidRoute and Bin"
+    },
+    {
+      "at": "2026-11-14T02:02:25.113Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#11 [G5DevX-2] lowlevel alloc_raw, mem_copy and mem_window repor"
+    },
+    {
+      "at": "2026-11-14T02:02:23.049Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#10 [G3Core-2] A fixed-backing value crossing into para_map is r"
+    },
+    {
+      "at": "2026-11-14T02:02:20.841Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#9 [G6Meta-4] number_name_module_constant reports E1003 for an "
+    },
+    {
+      "at": "2026-11-14T02:02:18.564Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#8 [G3Core-2] An impure validate rule reports its impurity erro"
+    },
+    {
+      "at": "2026-11-14T02:02:16.414Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#7 [G3Core-2] A thread-confined argument to a generic task spaw"
+    },
+    {
+      "at": "2026-11-14T02:02:14.323Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#6 [G5DevX-2] contract_required_post_false says the postconditi"
+    },
+    {
+      "at": "2026-11-14T02:02:12.049Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#5 [G3Core-2] runtime_e3003 reports \"waiting in task join\" for "
+    },
+    {
+      "at": "2026-11-14T02:02:09.838Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#4 [G5DevX-2] static_missing_core_member`s Fix lists only publi"
+    },
+    {
+      "at": "2026-11-14T02:02:07.720Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#3 [G5DevX-2] E2404`s Fix parenthesizes a union target: `impl ("
+    },
+    {
+      "at": "2026-11-14T02:02:05.510Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#2 [G6Meta-4] The compile-time check of Int{literal} is restore"
+    },
+    {
+      "at": "2026-11-14T02:02:03.220Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#1 [G6Meta-4] A call chain names a method as `Type.method`, nev"
+    },
+    {
+      "at": "2026-11-14T02:02:00.792Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0oe96sn",
+      "note": "ui profile regressions found by the batch-17 ui sweep"
+    },
+    {
       "at": "2026-11-14T01:57:32.804Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -208049,713 +208319,6 @@
       "action": "card.update",
       "ref": "c031o59x",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:48:00.275Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:44:59.343Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:40:53.211Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:39:08.387Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:35:36.999Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#6 No compiler-generated Jet source or unswept compiler package"
-    },
-    {
-      "at": "2026-11-13T13:32:57.786Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lmfkg7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:32:56.478Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#5 A lambda nested two deep whose one-expression body reads out"
-    },
-    {
-      "at": "2026-11-13T13:26:21.471Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02rvq7n",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-13T13:25:27.857Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vwlomv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:25:26.949Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0vwlomv",
-      "note": "#2: D-MMAP-STABLE1=A (ratified 2026-11-13) makes a mapping keep its bytes when another process writes or truncates the file, so no typed error or fault can arise; the criterion now states the ratified meaning.; was: A case truncates a mapped file from another process during safe access; the program gets a typed error or a registered fault with its diagnostic code, what/why/fix text and UI snapshot, never an unexp"
-    },
-    {
-      "at": "2026-11-13T13:24:51.367Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#4 Tools/agent-eval/RunColdContext.jet builds with no ICE. Toda"
-    },
-    {
-      "at": "2026-11-13T13:24:50.397Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#3 Examples/Collections/Iterators/FoldAssociation matches its ."
-    },
-    {
-      "at": "2026-11-13T13:24:49.453Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#2 Examples/Memory/Shared/SharedGuardProjection passes on o0/o1"
-    },
-    {
-      "at": "2026-11-13T13:24:48.528Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lmfkg7",
-      "note": "#1 Examples/Tooling/Testing/TestHistory and TestOutcomes pass t"
-    },
-    {
-      "at": "2026-11-13T13:24:40.293Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0lmfkg7",
-      "note": "Dev golden reds after the lambda-shape1 cutover: test histories, shared guard projection, fold association, RunColdContext capture ICE"
-    },
-    {
-      "at": "2026-11-13T13:13:01.632Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awq7vy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:13:00.324Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ba2y7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:12:21.249Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:12:20.023Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BYTE-TRAITS2",
-      "note": "Amending D-CORE-FILE-ADAPTERS1=A: Stdout and Stderr take Core's byte write names, and the Writer trait gains flush"
-    },
-    {
-      "at": "2026-11-13T13:08:17.962Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xnvmrf",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-13T13:05:12.082Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:05:11.211Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w8eeu5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-13T13:05:09.677Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w8eeu5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-13T13:04:45.461Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T13:04:44.585Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-HTTP-HANDLER-ENTRY1",
-      "note": "How the web package puts its app on a network port: one serve call in core.http, a public route table, the app kept in Core, or HTTP in the package"
-    },
-    {
-      "at": "2026-11-13T12:56:01.617Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0awq7vy",
-      "note": "#1 FmtCorpus --check rc 0 and the fmt_is_lossless_on_supported_"
-    },
-    {
-      "at": "2026-11-13T12:55:59.988Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0awq7vy",
-      "note": "FmtCorpus red on dev: 11,959 of 18,883 sources are not in jet fmt form"
-    },
-    {
-      "at": "2026-11-13T12:55:56.906Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ipht83",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-13T12:55:52.854Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ipht83",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-13T12:54:57.710Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ro7ubx",
-      "note": "#1: The spellings in the old text (impl<T> X<T> -> Err, impl X<Int> -> Err) are not Jet grammar: E0003, impl takes no type parameters. The bare impl on a generic type is the existing form, and it covers every instantiation.; was: A declared conversion `impl<T> X<T> -> Err` (or one for a concrete instantiation) is applied wherever an error converts into Err, just as for a non-generic error type, on O0, O1 and O2. Proof: a run c"
-    },
-    {
-      "at": "2026-11-13T12:36:20.760Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qus24o",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-13T12:35:43.748Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0098utl",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-13T12:28:15.964Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0098utl",
-      "note": "#2 Examples MarkerSettings matches its golden at o0, o1 and o2 "
-    },
-    {
-      "at": "2026-11-13T12:28:15.009Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0098utl",
-      "note": "#1 Examples CommentsAndDocs matches its golden at o0, o1 and o2"
-    },
-    {
-      "at": "2026-11-13T12:28:14.104Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0098utl",
-      "note": "Metaprogramming goldens CommentsAndDocs and MarkerSettings fail on dev at every level"
-    },
-    {
-      "at": "2026-11-13T12:24:24.147Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w8eeu5",
-      "note": "#1 tests/guards/copy_ratchet.jet passes on dev with the batch j"
-    },
-    {
-      "at": "2026-11-13T12:24:23.122Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0w8eeu5",
-      "note": "Copy ratchet red on dev: 9 compiler files over their copy ceiling since the lambda cutover"
-    },
-    {
-      "at": "2026-11-13T12:16:58.328Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c073cvg9",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-13T12:16:09.961Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#9 D-F32-RECORDS1=A is built (ratified 2026-11-13). math.rem_qu"
-    },
-    {
-      "at": "2026-11-13T12:16:08.982Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06l1r0z",
-      "note": "#85 D-SEND-ERROR1=A is built (ratified 2026-11-13). sender.send("
-    },
-    {
-      "at": "2026-11-13T12:16:07.978Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vwlomv",
-      "note": "#5 D-MMAP-STABLE1=A is built (ratified 2026-11-13). files.map g"
-    },
-    {
-      "at": "2026-11-13T12:16:07.072Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mf9ybj",
-      "note": "#9 D-HOST-NONCE2=A is built (ratified 2026-11-13). Reading the "
-    },
-    {
-      "at": "2026-11-13T12:16:06.128Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#9 D-RETAIN-BOUND1=A is built (ratified 2026-11-13). The no-lea"
-    },
-    {
-      "at": "2026-11-13T12:16:05.222Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vhdiiv",
-      "note": "#7 D-ROUND-EVEN1=A conversion half (ratified 2026-11-13). Int{}"
-    },
-    {
-      "at": "2026-11-13T12:16:04.299Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vhdiiv",
-      "note": "#6 D-ROUND-EVEN1=A is built (ratified 2026-11-13). math.trunc, "
-    },
-    {
-      "at": "2026-11-13T12:16:03.379Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ssy5wy",
-      "note": "#11 D-CORE-FILE-ADAPTERS1=A is built (ratified 2026-11-13). The "
-    },
-    {
-      "at": "2026-11-13T12:14:32.856Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-F32-RECORDS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:14:32.856Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-HOST-NONCE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:14:32.856Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MMAP-STABLE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:14:32.856Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SEND-ERROR1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:14:32.856Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RETAIN-BOUND1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:12:25.220Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ROUND-EVEN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:12:25.220Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-FILE-ADAPTERS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-13T12:04:13.527Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ro7ubx",
-      "note": "#1 A declared conversion `impl<T> X<T> -> Err` (or one for a co"
-    },
-    {
-      "at": "2026-11-13T12:04:12.555Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ro7ubx",
-      "note": "An `impl X -> Err` conversion is not applied to a generic error type"
-    },
-    {
-      "at": "2026-11-13T12:03:36.008Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06he0ee",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T12:03:30.279Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q4k1qwo1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:29.260Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q3huikf3",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:28.260Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q2i7dehp",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:27.080Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q1ma08a2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:25.843Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0tnkm9j",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:24.816Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0mbsiry",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:18.570Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-F32-RECORDS1",
-      "note": "F32 remainders: give rem_quo, remainder and fmod an F32 result under their own names, add _f32 names, or keep the Float results only"
-    },
-    {
-      "at": "2026-11-13T12:03:17.463Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GUARD-LINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:16.402Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-SEND-ERROR1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:15.403Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MMAP-STABLE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:14.428Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-HOST-NONCE2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:13.497Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-RETAIN-BOUND1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:12.342Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ROUND-EVEN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:03:11.291Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CORE-FILE-ADAPTERS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-13T12:00:30.324Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqt0kq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-13T11:59:56.673Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tg9tcf",
-      "note": "#1 Examples Reflect.jet matches its golden Reflect.out at O0, O"
-    },
-    {
-      "at": "2026-11-13T11:59:55.802Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0tg9tcf",
-      "note": "Examples Reflect.jet fails with E0956 at O0 on every current jet (derive reads info.methods[0].reflect().effects)"
-    },
-    {
-      "at": "2026-11-13T11:55:28.554Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ipht83",
-      "note": "#1 A program whose own code has a user error that leaves the re"
-    },
-    {
-      "at": "2026-11-13T11:55:27.409Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ipht83",
-      "note": "A build that reflects over a program with a user E0956 now ends in an internal compiler error"
-    },
-    {
-      "at": "2026-11-13T11:54:44.567Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c08r6ogl",
-      "note": "#32: G12Docs-5 found seed-b14 refuses any import of an unlisted export (E1341), so step (a) is runtime exports only; was: Seed-seam step (b) for the image-part read: after the first admitted seed whose RUNTIME_C_EXPORTS carries image_part, the per-word import image_part_word (7 bytes per call, the step (a) form from s4a-"
-    },
-    {
-      "at": "2026-11-13T11:46:59.886Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08r6ogl",
-      "note": "#32 Seed-seam step (b) for the image-part read: after the first "
-    },
-    {
-      "at": "2026-11-13T11:42:26.945Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xphd0i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T11:40:01.309Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T11:38:54.728Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-13T11:38:54.728Z"
-    },
-    {
-      "at": "2026-11-13T11:38:37.736Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09oub4t",
-      "note": "#1 A qualified case pattern `Name.Case{…}` parses and matches e"
-    },
-    {
-      "at": "2026-11-13T11:38:32.483Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c09oub4t",
-      "note": "Parser: a qualified case pattern with fields (`Inst.Compare{left, ..}`) fails with E0003"
-    },
-    {
-      "at": "2026-11-13T11:23:49.296Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T11:18:48.186Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ov5fau",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-13T11:18:46.415Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g93joj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-13T11:18:31.528Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qc1icb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-13T11:18:30.430Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bs5inj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-13T11:18:29.318Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bs5inj",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-13T11:18:28.271Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pmy5fy",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-13T11:18:27.289Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-13T11:18:26.285Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-13T11:18:25.257Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-13T11:18:24.246Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-13T11:18:23.210Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-13T11:18:21.966Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-13T11:18:20.433Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#82"
-    },
-    {
-      "at": "2026-11-13T11:16:57.551Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dhc7rh",
-      "note": "#20: D-CONTEXT-CALLBACK1=A ratified 2026-11-13: the clause is dropped.; was: C callbacks under F: F's clause \"until the callback installs one\" is either dropped or defined as an amendment to D-CABI-CALLBACK1, by an owner ballot posted with both forms. A UI snapshot then shows "
-    },
-    {
-      "at": "2026-11-13T11:16:56.202Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xphd0i",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-13T11:16:44.525Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kbej10",
-      "note": "#7 D-INSPECT-TARGET1=A is the shape of c1 (ratified 2026-11-13)"
-    },
-    {
-      "at": "2026-11-13T11:16:43.353Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08u6j84",
-      "note": "#5 D-GROUP-CANCEL1=A is built (ratified 2026-11-13). Cancelling"
-    },
-    {
-      "at": "2026-11-13T11:16:42.106Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#8 D-EXIT-TASKS1=A is built (ratified 2026-11-13). When run ret"
     }
   ],
   "nextNum": 368,
