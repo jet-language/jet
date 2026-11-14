@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102192,
+    "rev": 102193,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95695,6 +95695,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-14), compile speed (build.plan): the build-plan query (RootRun \"build\", running a package`s build.jet plan) loads only the sibling members the build entry reaches, through the existing jet_driver_namespace_reach scan, plus their imports. Measured by G11Speed-5 on seed-b17: Compiler/test.jet pulls in jet_testkit (164 modules, a 574-function comptime closure) that build.jet never uses; `jet inspect graph Compiler/build.jet` 7.8 s with it and 1.78 s without; `jet check Compiler/build.jet` 4.48 s and 0.61 s. Chosen over moving test.jet into its own package, because that would tailor only the measured package, while every user package with build.jet plus test.jet pays the same cost. `jet check` and `jet test` still check every member, and target compiles still check what they compile; only the build script`s plan run stops loading unreached siblings. Proof: a case where the plan runs while test.jet has a type error that `jet check` and `jet test` both report; the win on a second user package; the cold self-compile row."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "S1 boundary decision (G11Speed-5, 2026-11-13). Module identity text is also the prefix of every SymbolID key and is printed in IR names and goldens. So S1 moves module records, rows and lookups to ModuleID and one ModuleTable: the loader interns and the graph takes a copy. Symbol.module_name and key text stay text until S2 and cross at module_find. S2 moves Symbol.module_name to ModuleID together with symbol keys."
@@ -95764,7 +95769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-13T15:21:02.244Z",
+      "updated": "2026-11-14T04:54:51.300Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -204718,6 +204723,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:54:51.300Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T04:47:58.020Z",
       "by": "Main",
