@@ -3,9 +3,9 @@
 //
 // `parse` is the strict codec: objects keep insertion order, every number
 // stays its exact validated lexeme as `Dyn.Number` until a typed read
-// range-checks it (#4602), and `NaN` / `Infinity` are syntax errors. Untyped `decode`
-// applies the historical lenient coercion walk and emits an audit line for
-// each coercion. Typed `decode<T>` runs `__decode_typed`.
+// range-checks it (#4602), and `NaN` / `Infinity` are syntax errors. Untyped
+// `decode` is `parse`: a scalar keeps the JSON type it was written as, so a
+// string stays `Dyn.Text`. Typed `decode<T>` runs `__decode_typed`.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
@@ -39,7 +39,6 @@ use {
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
-    rt: jet.runtime.encoding
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -107,65 +106,14 @@ parse_with_limits: fn(text: String, limits: EncodingLimits) -> Dyn EncodingError
 /// value at the first name's position.
 parse_allow_duplicates: fn(text: String) -> Dyn EncodingError! { parse_json(text, true, safe_limits()) }
 
-/// Coerce strings that are exactly booleans or finite numbers.
-decode: fn(text: String) -> Dyn EncodingError! {
-    tree: parse(text) ?? return Err(err)
-    coerce_tree(tree, "", fn(line: String) { emit_coercion(line) })
-}
+/// Strict JSON → `Dyn`, as `parse`: a string stays `Dyn.Text` even when its
+/// text spells a number or a boolean.
+decode: fn(text: String) -> Dyn EncodingError! { parse(text) }
 
-emit_coercion: fn(line: String) Never! {
-    #Unsafe("preserve the shipped decoder's hidden stderr effect at its existing host boundary") {
-        rt.coerce_emit(line)
-    }
-}
-
-coerce_line: fn(path: String, target: String) -> String Never! {
-    label: if path == "" -> "<root>" else -> path
-    "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\"}}"
-}
-
-coerce_tree: fn(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never! {
-    if value == {
-        .Text(text) -> {
-            if text == "true" || text == "false" {
-                emit(coerce_line(path, "boolean"))
-                return Dyn.Bool(text == "true")
-            }
-            if Float.parse(text) == .Ok(number) {
-                if math.is_finite(number) {
-                    emit(coerce_line(path, "number"))
-                    return Dyn.Float(number)
-                }
-            }
-            return value.copy()
-        }
-        .Array(items) -> {
-            out := [Dyn]{}
-            loop i in 0..<items.len() -> out.push(coerce_tree(items[i], "{path}[{i}]", emit))
-            return Dyn.Array(out)
-        }
-        .Object(_) -> {
-            out := [(key: String, value: Dyn)]{}
-            loop entry in stream.object_entries(value) {
-                child_path: if path == "" -> entry.key else -> "{path}.{entry.key}"
-                out.push((key: entry.key.copy(), value: coerce_tree(entry.value, child_path, emit)))
-            }
-            return stream.object_from_entries(out)
-        }
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> return value.copy()
-    }
-}
-
-#Test("lenient JSON preserves ordered shape and coercion traversal") {
-    lines := [String]{}
-    value: parse("{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\"]}}") ?? panic("JSON")
-    actual: coerce_tree(value, "", fn(line: String) { lines.push(line.copy()) })
-    assert_eq(to_string(actual) ?? panic("encode coerced tree"), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
-    assert_eq(lines.len(), 4)
-    assert(lines[0].contains("field \"port\" string → number"))
-    assert(lines[1].contains("field \"enabled\" string → boolean"))
-    assert(lines[2].contains("field \"x[0]\" string → boolean"))
-    assert(lines[3].contains("field \"x[2]\" string → number"))
+#Test("untyped decode keeps every scalar as it was written") {
+    text: "{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\",2,true]}}"
+    value: decode(text) ?? panic("JSON")
+    assert_eq(to_string(value) ?? panic("encode decoded tree"), text)
 }
 
 /// Python-compatible spelling for JSON parsing.

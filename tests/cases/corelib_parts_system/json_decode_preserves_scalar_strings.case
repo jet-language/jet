@@ -1,5 +1,7 @@
 # tests/corelib_parts/system.rs::json_decode_preserves_scalar_strings at tests/corelib_parts/system.rs:440; hand-port (the have_rustc skip is gone with the Rust backend: the case always runs)
 # Each program is its own package (a/, b/, c/): one package can hold only one `run`.
+# Untyped `json.decode` is strict: a quoted "8080" or "true" stays `.Text` and an unquoted 8080 is `.Number`, natively and in the web build under node.
+requires: tool:node
 fixture: json_decode_preserves_scalar_strings.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -13,6 +15,13 @@ cwd: a
 exit: 0
 stdout: = json_decode_preserves_scalar_strings.1.out
 stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")
+step: jet build --target=web json_coerce_a.jet
+cwd: a
+exit: 0
+step: node app.js
+cwd: a/.jet/build
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.1.out # the web build decodes as the native build does
 
 step: jet build json_coerce_b.jet
 cwd: b
@@ -22,6 +31,13 @@ cwd: b
 exit: 0
 stdout: = json_decode_preserves_scalar_strings.1.out
 stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")
+step: jet build --target=web json_coerce_b.jet
+cwd: b
+exit: 0
+step: node app.js
+cwd: b/.jet/build
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.1.out # the web build decodes as the native build does
 
 step: jet build json_coerce_c.jet
 cwd: c
@@ -31,3 +47,10 @@ cwd: c
 exit: 0
 stdout: = json_decode_preserves_scalar_strings.2.out
 stderr: !~ "json coerce" # original predicate: !stderr.contains("json coerce")
+step: jet build --target=web json_coerce_c.jet
+cwd: c
+exit: 0
+step: node app.js
+cwd: c/.jet/build
+exit: 0
+stdout: = json_decode_preserves_scalar_strings.2.out # the web build decodes as the native build does

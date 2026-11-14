@@ -1,23 +1,22 @@
-// D-JSON3: lenient JSON decode (core.encoding.json.decode) surfaces coercions via log lines.
-// Each string value that is coerced to a number or boolean emits one structured
-// log line to stderr naming the field and the from→to types.
-// The decoded value comes back plain — usable directly (no wrapper).
+// Strict untyped JSON decode (core.encoding.json.decode): every scalar keeps
+// the JSON type it was written as. A quoted "8080" stays text and an
+// unquoted 8080 is a number, read with `.Number(text)`; nothing is coerced.
 use json: core.encoding.json
 
 run: fn() {
-    // "port" is a string in the JSON source but coerces to a number.
-    // "enabled" is a string "true" that coerces to a boolean.
-    raw: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
+    raw: "{{\"port\":8080,\"enabled\":true,\"name\":\"api\",\"build\":\"8080\"}}"
     data: json.decode(raw) ?? panic("bad json")
     if data == .Object(_) {
         port: data.field("port") ?? Dyn.Null
         name: data.field("name") ?? Dyn.Null
         enabled: data.field("enabled") ?? Dyn.Null
-        if port == .Int(n) {
-            // n is a plain Int; add 1 to prove it came back numeric
+        build: data.field("build") ?? Dyn.Null
+        if port == .Number(text) {
+            n: Int.parse(text) ?? panic("port is not an Int")
             print(n + 1)
         }
         if name == .Text(s) -> print(s)
         if enabled == .Bool(b) -> print(b)
+        if build == .Text(s) -> print(s)
     }
 }

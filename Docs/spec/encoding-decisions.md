@@ -90,11 +90,10 @@ The CBOR whole-value rows likewise execute their existing source encoders and
 parser. Alphabet decoders already use source ownership, not native dispatcher
 aliases. `tests/cases/corelib/encoding_source_cutover_retains_decoder_vectors_typed_json_and_error_ladder.case`
 records focused vectors for these routing contracts.
-Untyped `json.decode` performs the D-JSON3 coercion walk in Jet. The wall-clock
-snapshot and stderr emission remain private raw adapters to the existing seed
-operations. Their shipped hidden Time/IO effects are preserved, not promoted
-to new public effects; this truthfulness gap is tracked in the cutover ledger.
-Typed `decode<T>` remains the existing target-directed compiler lowering.
+Untyped `json.decode` is the strict `parse` (#4602): a scalar keeps the JSON
+type it was written as, so `"8080"` stays `Dyn.Text`, and there is no lenient
+coercion walk and no audit line. Typed `decode<T>` remains the existing
+target-directed compiler lowering.
 
 `EncodingLimits` has these fields:
 
@@ -1380,13 +1379,6 @@ The unused `__object_into_entries` and `__tree_tag` registry rows were removed
 along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
 any Jet codec, emitter, JS or comptime consumer.
-
-The D-JSON3 coercion audit calls the `priv` runtime binding
-`jet.runtime.encoding.coerce_emit`, the stderr leaf. Coercion traversal and
-audit formatting remain in `json.jet`, which calls it only inside its audited
-`#Unsafe` region. The audit line carries no timestamp, so the decoder reads no
-clock ([host-reads.md](reference/host-reads.md) H4). Its hidden IO effect
-remains unchanged pending the separately recorded effect-truthfulness ruling.
 
 `core.encoding.json.writer` now constructs a source `JSONWriter` around the
 existing Jet `stream.JSONPush` policy. `write`, `flush`, and `finish` delegate
