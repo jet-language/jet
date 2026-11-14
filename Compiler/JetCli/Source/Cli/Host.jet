@@ -254,7 +254,9 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
     }
     lacks_run: project && jet_cli_entry_lacks_callable(source, jet_cli_project_entry_callable(file))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine)
+    // With `finish` the process ends below with `compiled` still held, so the
+    // check's compile state need not drop first (jet_cli_compile_prepared).
+    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine, hold_check_state: finish)
     if compiled == {
         .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> {

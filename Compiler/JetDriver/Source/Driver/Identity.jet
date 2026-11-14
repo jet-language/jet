@@ -322,6 +322,12 @@ JetDriverCompileRequest: struct {
     // also finalizes again, and any difference between the two results is an
     // internal problem (BodyComptime.jet jet_driver_recheck_differences).
     recheck_verify: Bool{false}
+    // A `jet check` whose host ends the process with the result still held
+    // (JetCli Host.jet jet_cli_compile_check with `finish`): the check's
+    // compile state moves into the result (JetDriverCompileResult.held)
+    // rather than dropping as the stages return, so the process exit hands
+    // the state back to the kernel and nothing walks it.
+    hold_check_state: Bool{false}
     // `jet test` of a Core source: the Core row path (`Core/Encoding/Cbor.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),
@@ -873,6 +879,9 @@ JetDriverCompileResult: struct {
     // jet_cli_compile_executable): the `jet build` store key and `jet dev`'s
     // change test cover each, so editing one rebuilds.
     comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
+    // The check's compile state under `hold_check_state`
+    // (Pipeline.jet JetDriverHeldCheck); None otherwise. Nothing reads it.
+    held: JetDriverHeldCheck?{None}
 }
 
 // The `allocator:` policy of the entry package of `load`

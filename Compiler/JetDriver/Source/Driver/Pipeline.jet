@@ -4001,6 +4001,26 @@ JetDriverBudgetFacts: struct {
 jet_driver_budget_facts_empty: fn() -> JetDriverBudgetFacts Never! {
     JetDriverBudgetFacts{public_api_items: 0, dependency_count: 0, effect_count: 0}
 }
+// A check's compile state, held by its result (JetDriverCompileResult.held)
+// under `hold_check_state` (JetCli Host.jet jet_cli_compile_check with
+// `finish`): the host ends the process with the result still held, so this
+// state is never dropped. Dropping it as jet_driver_compile_loaded_stages
+// returned walked every row of the graphs on one thread before the host
+// could print the outcome: about 3.3 s of the last 3.7 s of the self-check
+// (`jet check Compiler/JetCli`, gate-p45 perf).
+JetDriverHeldCheck: struct {
+    load: JetDriverLoadResult
+    registration: SemaRegistrationGraph
+    checked: SemaGraphResult
+    functions: [FnBody]
+    modules: [SemaGraphModuleResult]
+    values: [SemaComptimeItemValue]
+    stage: SemaComptimeDeclarationStage
+    run: JetDriverComptimeRunResult
+    trail: SemaGraphTrail
+    core_trail: SemaGraphTrail
+}
+
 JetDriverCheckedProjectionCapture: struct {
     source_modules: [Int]{[Int]{}}
     entry_module: Int?{None}
@@ -5080,6 +5100,21 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
+        if request.hold_check_state && !capture.stop_before_lowering {
+            result.held = Val(JetDriverHeldCheck{
+                load: load.move(),
+                registration: registration_graph.move(),
+                checked: checked_graph.move(),
+                functions: checked_functions.move(),
+                modules: runtime_semantic_modules.move(),
+                values: comptime_values.move(),
+                stage: comptime_stage.move(),
+                run: comptime_run.move(),
+                trail: trail.move(),
+                core_trail: core_trail.move(),
+            })
+            return result
+        }
         // `jet prove --lens solver` reads every checked function, unpruned,
         // with the declaration table their direct calls name; the Core
         // record also writes the finalized registration modules, the
