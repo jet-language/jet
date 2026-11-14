@@ -98,6 +98,31 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     }
 }
 
+#Test("a record tree row reads its strings in any order and repeated, each block walked once") {
+    // 40 strings over three string blocks, named out of order and twice,
+    // so a block's later string is read before its earlier ones and a
+    // block is resumed past the strings already decoded; the objects share
+    // one shape.
+    items := [Dyn]{}
+    loop lap in 0..<2 {
+        loop index in 0..<40 {
+            named: (index * 7 + lap) % 40
+            items.push(Dyn.Text("core.text::item/{named}"))
+            items.push(Dyn.Object([(key: String, value: Dyn)]{(key: "name", value: Dyn.Text("core.text::item/{named}")), (key: "at", value: Dyn.Int(index))}))
+        }
+    }
+    rows: [Dyn]{Dyn.Array(items), Dyn.Text("core.text::item/39"), Dyn.Text("core.text::item/0")}
+    tables := record_tree_test_tables(rows)
+    assert_eq(tables.problem, None)
+    reader: record_tree_test_reader(tables.move(), false)
+    view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
+    loop (index, row) in rows {
+        read: record_tree_row(reader, view, 1, index)
+        assert_eq(read.problem, None)
+        assert_eq(record_tree_difference(read.value ?? panic("row {index} reads"), row), None)
+    }
+}
+
 #Test("a record tree stores a repeated subtree once and writes a single use in place") {
     tables: record_tree_test_tables(record_tree_test_rows())
     // The `push` symbol (three uses) and the span both symbols share are

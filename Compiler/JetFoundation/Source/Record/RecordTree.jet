@@ -53,7 +53,8 @@
 // the smallest ids, most used first, and the rest ids in byte order, so a
 // string follows the one it shares most with. A reader decodes a row on
 // demand from the record's own bytes, reading only the entries the row
-// names, with no table built when the record opens.
+// names, with no table built when the record opens; within a row it decodes
+// each string and reads each shape at most once (RecordTreeMemo).
 use {
     tree_math: core.math
 }
@@ -698,10 +699,57 @@ record_tree_row: fn(reader: RecordReader, view: RecordTreeView, section: Int, in
     span: record_element_bytes_span(reader, section, index)
     if span.problem != None -> return RecordTreeResult{value: None, problem: span.problem}
     cursor := RecordCursor{at: span.start, end: span.end, problem: None}
-    value: record_tree_read(reader.bytes, view, cursor, 0)
+    memo := record_tree_memo()
+    value: record_tree_read(reader.bytes, view, cursor, memo, 0)
     if cursor.problem == None && cursor.at != cursor.end -> record_malformed(cursor, "tree row has trailing bytes")
     if cursor.problem != None -> return RecordTreeResult{value: None, problem: cursor.problem}
     RecordTreeResult{value: Val(value), problem: None}
+}
+
+// What one row's read has decoded. A row names the same texts and the same
+// shapes (each object of a kind) many times over, and a string costs the
+// front-coded strings before it in its block. So a row's read decodes each
+// string at most once, walking each block it names only as far as the
+// furthest string it names there, never twice; and it reads each shape's
+// keys and value tags once.
+RecordTreeMemo: struct {
+    // String id to its place in `texts`.
+    text_slots: [Int:Int]
+    texts: [String]
+    // Block id to its place in the block columns: where its next string
+    // starts and its entry ends, how many of its strings are decoded, and
+    // the place in `texts` of the last one (the next one's front-coding
+    // prefix).
+    block_slots: [Int:Int]
+    block_at: [Int]
+    block_end: [Int]
+    block_steps: [Int]
+    block_last: [Int]
+    // Shape id to its place in `shape_starts` and `shape_ends`, which bound
+    // its keys' places in `key_texts` (each a place in `texts`) and
+    // `key_tags`.
+    shape_slots: [Int:Int]
+    shape_starts: [Int]
+    shape_ends: [Int]
+    key_texts: [Int]
+    key_tags: [Int]
+}
+
+record_tree_memo: fn() -> RecordTreeMemo Never! {
+    RecordTreeMemo{
+        text_slots: [Int:Int]{},
+        texts: [String]{},
+        block_slots: [Int:Int]{},
+        block_at: [Int]{},
+        block_end: [Int]{},
+        block_steps: [Int]{},
+        block_last: [Int]{},
+        shape_slots: [Int:Int]{},
+        shape_starts: [Int]{},
+        shape_ends: [Int]{},
+        key_texts: [Int]{},
+        key_tags: [Int]{},
+    }
 }
 
 record_tree_u32: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -745,48 +793,104 @@ record_tree_node: fn(bytes: [U8], column: RecordTreeColumn, id: Int, cursor: &Re
     RecordCursor{at: block.at, end: block.at + len, problem: None}
 }
 
-// String `id`: the first string of its block, then each later one in turn
-// from the bytes it shares with the one before it.
-record_tree_string: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor) -> String Never! {
-    if cursor.problem != None -> return ""
+// The place in `memo.texts` of string `id`, decoded the first time the row
+// names it; -1, with a problem of `cursor`, for a bad id or block.
+record_tree_text: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor, memo: &RecordTreeMemo) -> Int Never! {
+    if cursor.problem != None -> return -1
+    memo.text_slots.get(id) ?? record_tree_block(bytes, view, id, cursor, memo)
+}
+
+// Decodes string `id`'s block into `memo` up to `id`, from where the row's
+// last read of the block stopped: the block's first string, then each later
+// one from the bytes it shares with the one before it. Gives `id`'s place in
+// `memo.texts`.
+record_tree_block: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor, memo: &RecordTreeMemo) -> Int Never! {
     block: id >> RECORD_TREE_STRING_BLOCK_BITS
-    if block >= view.strings.count {
+    if id < 0 || block >= view.strings.count {
         record_malformed(cursor, "tree string {id} is out of range")
-        return ""
+        return -1
     }
-    entry := record_tree_entry(bytes, view.strings, block, cursor)
-    if cursor.problem != None -> return ""
-    text := [U8]{}
-    loop step in 0..<id % RECORD_TREE_STRING_BLOCK + 1 {
+    open := memo.block_slots.get(block) ?? -1
+    if open < 0 {
+        placed: record_tree_entry(bytes, view.strings, block, cursor)
+        if cursor.problem != None -> return -1
+        open = memo.block_at.len()
+        memo.block_at.push(placed.at)
+        memo.block_end.push(placed.end)
+        memo.block_steps.push(0)
+        memo.block_last.push(-1)
+        memo.block_slots[block] = open
+    }
+    first: block << RECORD_TREE_STRING_BLOCK_BITS
+    want: id - first
+    step := memo.block_steps[open]
+    entry := RecordCursor{at: memo.block_at[open], end: memo.block_end[open], problem: None}
+    text := if step > 0 -> memo.texts[memo.block_last[open]].bytes() else -> [U8]{}
+    loop step <= want && entry.at < entry.end {
         if step > 0 {
             shared: record_read_uvarint(bytes, entry)
-            if entry.problem == None && shared > text.len() -> record_malformed(entry, "tree string {id} shares more bytes than the string before it has")
+            if entry.problem == None && shared > text.len() -> record_malformed(entry, "tree string {first + step} shares more bytes than the string before it has")
             if entry.problem != None -> break
-            text = text.slice(0, shared)
+            if shared < text.len() -> text = text.slice(0, shared)
         }
         len: record_read_len(bytes, entry)
         if entry.problem != None -> break
         text.extend(bytes[entry.at..<entry.at + len])
         entry.at += len
+        decoded: String.from_bytes(text) ?? {
+            record_malformed(entry, "tree string {first + step} is not UTF-8")
+            break
+        }
+        memo.block_last[open] = memo.texts.len()
+        memo.text_slots[first + step] = memo.texts.len()
+        memo.texts.push(decoded)
+        step += 1
     }
     if entry.problem != None {
         cursor.problem = entry.problem.move()
-        return ""
+        return -1
     }
-    String.from_bytes(text) ?? {
-        record_malformed(cursor, "tree string {id} is not UTF-8")
-        ""
-    }
+    memo.block_at[open] = entry.at
+    memo.block_steps[open] = step
+    found: memo.text_slots.get(id) ?? -1
+    if found < 0 -> record_malformed(cursor, "tree string {id} is out of range")
+    found
 }
 
-record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, depth: Int) -> Dyn Never! {
+// The place in `memo.shape_starts` of shape `id`, its keys and value tags
+// read into `memo` the first time the row names it; -1, with a problem of
+// `cursor`, for a bad id or entry.
+record_tree_shape: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor, memo: &RecordTreeMemo) -> Int Never! {
+    if cursor.problem != None -> return -1
+    known: memo.shape_slots.get(id) ?? -1
+    if known >= 0 -> return known
+    keys := record_tree_entry(bytes, view.shapes, id, cursor)
+    if cursor.problem != None -> return -1
+    start: memo.key_texts.len()
+    loop keys.at < keys.end && keys.problem == None && cursor.problem == None {
+        text: record_tree_text(bytes, view, record_read_uvarint(bytes, keys), cursor, memo)
+        value_kind: record_read_byte(bytes, keys)
+        if keys.problem != None -> break
+        memo.key_texts.push(text)
+        memo.key_tags.push(value_kind)
+    }
+    if cursor.problem == None && keys.problem != None -> cursor.problem = keys.problem.move()
+    if cursor.problem != None -> return -1
+    slot: memo.shape_starts.len()
+    memo.shape_starts.push(start)
+    memo.shape_ends.push(memo.key_texts.len())
+    memo.shape_slots[id] = slot
+    slot
+}
+
+record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, memo: &RecordTreeMemo, depth: Int) -> Dyn Never! {
     kind: record_read_byte(bytes, cursor)
     if cursor.problem != None -> return Dyn.Null
-    record_tree_read_as(bytes, view, kind, cursor, depth)
+    record_tree_read_as(bytes, view, kind, cursor, memo, depth)
 }
 
 // The payload at `cursor` of an item tagged `kind`.
-record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &RecordCursor, depth: Int) -> Dyn Never! {
+record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &RecordCursor, memo: &RecordTreeMemo, depth: Int) -> Dyn Never! {
     if depth > RECORD_TREE_MAX_DEPTH {
         record_malformed(cursor, "tree nesting is too deep")
         return Dyn.Null
@@ -797,7 +901,11 @@ record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &R
         RECORD_TREE_TRUE -> Dyn.Bool(true)
         RECORD_TREE_INT -> Dyn.Int(record_unzigzag(record_read_uvarint(bytes, cursor)))
         RECORD_TREE_FLOAT -> Dyn.Float(tree_math.from_bits(record_unzigzag(record_read_uvarint(bytes, cursor))))
-        RECORD_TREE_TEXT -> Dyn.Text(record_tree_string(bytes, view, record_read_uvarint(bytes, cursor), cursor))
+        RECORD_TREE_TEXT -> {
+            slot: record_tree_text(bytes, view, record_read_uvarint(bytes, cursor), cursor, memo)
+            if cursor.problem != None -> return Dyn.Null
+            Dyn.Text(memo.texts[slot].copy())
+        }
         RECORD_TREE_BYTES -> {
             len: record_read_len(bytes, cursor)
             Dyn.Bytes(record_take(bytes, cursor, len))
@@ -807,7 +915,7 @@ record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &R
             items := [Dyn]{}
             loop _ in 0..<count {
                 if cursor.problem != None -> break
-                items.push(record_tree_read(bytes, view, cursor, depth + 1))
+                items.push(record_tree_read(bytes, view, cursor, memo, depth + 1))
             }
             Dyn.Array(items)
         }
@@ -818,26 +926,26 @@ record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &R
             items := [Dyn]{}
             loop _ in 0..<count {
                 if cursor.problem != None -> break
-                items.push(record_tree_read_as(bytes, view, shared, cursor, depth + 1))
+                items.push(record_tree_read_as(bytes, view, shared, cursor, memo, depth + 1))
             }
             Dyn.Array(items)
         }
         RECORD_TREE_OBJECT -> {
-            keys := record_tree_entry(bytes, view.shapes, record_read_uvarint(bytes, cursor), cursor)
+            shape: record_tree_shape(bytes, view, record_read_uvarint(bytes, cursor), cursor, memo)
+            if cursor.problem != None -> return Dyn.Null
+            end: memo.shape_ends[shape]
             entries := [(key: String, value: Dyn)]{}
-            loop keys.at < keys.end && keys.problem == None && cursor.problem == None {
-                key: record_tree_string(bytes, view, record_read_uvarint(bytes, keys), cursor)
-                value_kind: record_read_byte(bytes, keys)
-                if keys.problem != None -> break
-                entries.push((key: key, value: record_tree_read_as(bytes, view, value_kind, cursor, depth + 1)))
+            loop key in memo.shape_starts[shape]..<end {
+                if cursor.problem != None -> break
+                value: record_tree_read_as(bytes, view, memo.key_tags[key], cursor, memo, depth + 1)
+                entries.push((key: memo.texts[memo.key_texts[key]], value: value))
             }
-            if cursor.problem == None && keys.problem != None -> cursor.problem = keys.problem.move()
             Dyn.Object(entries)
         }
         RECORD_TREE_NODE -> {
             inner := record_tree_node(bytes, view.nodes, record_read_uvarint(bytes, cursor), cursor)
             if cursor.problem != None -> return Dyn.Null
-            value: record_tree_read(bytes, view, inner, depth + 1)
+            value: record_tree_read(bytes, view, inner, memo, depth + 1)
             if inner.problem == None && inner.at != inner.end -> record_malformed(inner, "tree node has trailing bytes")
             if cursor.problem == None && inner.problem != None -> cursor.problem = inner.problem.move()
             value
