@@ -169,31 +169,20 @@ os_store_byte: fn(address: Int, value: Int) {
     """
 }
 
-// Copy `bytes` to `address` one little-endian word at a time. The last word
-// is padded with zero bytes, so the destination must hold `bytes.len()`
-// rounded up to 8 bytes (a page-rounded mapping always does).
+// Copy `bytes` to `address`, then zero bytes up to the next multiple of 8,
+// so the destination must hold `bytes.len()` rounded up to 8 bytes (a
+// page-rounded mapping always does).
 os_copy_in: fn(address: Int, bytes: [U8]) {
     os_copy_in_range(address, bytes, 0, bytes.len())
 }
 
 // Like os_copy_in, but borrowing one range avoids allocating image chunks.
+// A byte at a time: a whole word whose top bit is set is Int arithmetic past
+// the inline range.
 os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
-    at := 0
-    loop at < count {
-        word := 0
-        scale := 1
-        loop k in 0..<8 {
-            byte := 0
-            if at + k < count -> byte = (Int{bytes[start + at + k]})
-            // The top byte carries the sign of the 64-bit word.
-            if k == 7 && byte >= 128 -> byte = byte - 256
-            word = word + byte * scale
-            if k < 7 -> scale = scale * 256
-        }
-        #Unsafe("the caller owns the destination words") {
-            os_store_word(address + at, word)
-        }
-        at = at + 8
+    #Unsafe("the caller owns the destination words") {
+        loop at in 0..<count -> os_store_byte(address + at, Int{bytes[start + at]})
+        loop at in count..<((count + 7) /% 8 * 8) -> os_store_byte(address + at, 0)
     }
 }
 

@@ -1,0 +1,19 @@
+# Bytes and text cross the comptime child byte for byte both ways
+# (SessionHost.jet x64_comptime_take, Linux.jet os_copy_in_range): a byte
+# list with every byte value, multibyte text and lengths that are not a
+# multiple of 8 read back whole and feed later values, so the digests the
+# compiler computes match the ones the program computes at run time.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "fill: fn(count: Int) -> [U8] {\n    table := [U8]{}\n    loop n in 0..<count {\n        table.push(checked(U8{(n * 131 + 7) % 256}) ?? U8{0})\n    }\n    table\n}\n\ndigest: fn(bytes: [U8]) -> Int {\n    sum := 0\n    loop (at, byte) in bytes {\n        sum = (sum * 31 + Int{byte} + at) % 1000000007\n    }\n    sum\n}\n\nwords: fn(count: Int) -> String {\n    joined := \"\"\n    loop n in 0..<count {\n        joined = \"{joined}é€😀{n % 10}\"\n    }\n    joined\n}\n\nTABLE: fill(70001)\nTEXT: words(1001)\nSUM: digest(TABLE)\nTEXT_SUM: digest(TEXT.bytes())\n\nrun: fn() {\n    local: words(3)\n    print(\"{TABLE.len()} {digest(TABLE)} {SUM} {TEXT.bytes().len()} {digest(TEXT.bytes())} {TEXT_SUM} {local}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "70001 567960474 567960474 10010 981414417 981414417 é€😀0é€😀1é€😀2\n"
+stderr: ~ "comptime.eval TABLE" # the byte list is computed while compiling
+stderr: ~ "comptime.eval TEXT_SUM" # and so is the digest over the text's bytes
+stderr: ~ "comptime.eval local" # and the local value
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "70001 567960474 567960474 10010 981414417 981414417 é€😀0é€😀1é€😀2\n"

@@ -317,18 +317,12 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
     true
 }
 
-// Appends the `count` bytes at `address` (in our mapping) to `bytes`.
+// Appends the `count` bytes at `address` (in our mapping) to `bytes`, a
+// byte at a time: shifting bytes out of a loaded word costs Int arithmetic
+// past the inline range on every word whose top bit is set.
 x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
-    at := 0
-    loop at < count {
-        word := 0
-        #Unsafe("the bytes lie in our scratch mapping, whose size is a multiple of eight") { word = os_load_word(address + at) }
-        bits := if word < 0 -> word + 18446744073709551616 else -> word
-        loop _ in 0..<(if count - at < 8 -> count - at else -> 8) {
-            bytes.push(U8{bits.bit_and(255)})
-            bits = bits >> 8
-        }
-        at += 8
+    #Unsafe("the bytes lie in our scratch mapping") {
+        loop at in 0..<count -> bytes.push(U8{os_load_byte(address + at).bit_and(255)})
     }
 }
 
