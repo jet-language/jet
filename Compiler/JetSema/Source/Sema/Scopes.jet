@@ -132,6 +132,9 @@ SemaScopeBinding: struct {
     // `:`: the E0111 machine edit replaces it with ` :=`, so `x: 1` becomes
     // `x := 1`.
     binding_sigil: Span?{None}
+    // A `loop name in source` item name: each pass binds it afresh, so an
+    // assignment to it is the E0111 that teaches a copy in the loop body.
+    loop_item: Bool{false}
     // A name bound to a number literal, or to arithmetic on such literals and
     // names, keeps that literal (with each name replaced by its own): where a
     // use refuses the name's type, it reads as the literal written there
@@ -2550,6 +2553,14 @@ sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, key: String
 sema_scope_mark_place_alias: fn(table: &SemaScopeTable, name: String) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     table.bindings[index].place_alias = true
+}
+
+// Marks the binding `name` just declared as a loop item (see
+// SemaScopeBinding.loop_item).
+sema_scope_mark_loop_item: fn(table: &SemaScopeTable, name: String) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].loop_item = true
 }
 
 // Marks the `:` binding `name` just declared as a window over one map value

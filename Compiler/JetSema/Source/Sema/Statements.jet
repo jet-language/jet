@@ -3095,6 +3095,7 @@ sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, o
         diagnostics.push(sema_already_defined(name, name_span))
         return None
     }
+    sema_scope_mark_loop_item(scopes, name)
     checked_ty: ty ?? return None
     sema_ownership_declare_binding(state, symbol, key, false)
     if owes_duty -> sema_single_use_note_binding(state, symbol, key, environment, program)
@@ -6338,7 +6339,10 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     }
     if binding.mutable -> sema_ownership_note_mutation(state, binding.symbol.span.start)
     if !binding.mutable && !sema_stmt_binding_is_write_window(state, binding.key) {
-        diagnostic := sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `&` can be changed", "declare it with `{name} := ...` instead")
+        // A loop variable's fix names a copy distinct from it: one function
+        // gives each name one meaning (E0118).
+        copy_name: if name == "n" -> "m" else -> "n"
+        diagnostic := if binding.loop_item -> sema_error("E0111", name_span, "`{name}` is a loop variable, so it can't change", "a loop variable holds the item of the current pass, and each pass binds it afresh", "make a changeable copy inside the loop body: `{copy_name} := {name}`") else -> sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `&` can be changed", "declare it with `{name} := ...` instead")
         if binding.binding_sigil == .Val(sigil) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
         diagnostics.push(diagnostic)
         // The refused value is still checked, so the names it reads count as

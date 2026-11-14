@@ -1,17 +1,17 @@
-Error [jet.ImmutableAssignment]: `k` was made with `:`, so it can't change
+Error [jet.ImmutableAssignment]: `k` is a loop variable, so it can't change
   --> tests/ui/iter_family_mutable_key.jet:7:9
     |
   7 |         k = "z"
     |         ^
- Why: Only `:=` bindings and parameters declared with the write mark `&` can be changed
- Fix: Declare it with `k := ...` instead
+ Why: A loop variable holds the item of the current pass, and each pass binds it afresh
+ Fix: Make a changeable copy inside the loop body: `n := k`
 More: jet-lang.dev/e/E0111
 
-Error [jet.ImmutableAssignment]: `n` was made with `:`, so it can't change
+Error [jet.ImmutableAssignment]: `n` is a loop variable, so it can't change
   --> tests/ui/iter_family_mutable_key.jet:14:9
     |
  14 |         n += 10
     |         ^
- Why: Only `:=` bindings and parameters declared with the write mark `&` can be changed
- Fix: Declare it with `n := ...` instead
+ Why: A loop variable holds the item of the current pass, and each pass binds it afresh
+ Fix: Make a changeable copy inside the loop body: `m := n`
 More: jet-lang.dev/e/E0111
