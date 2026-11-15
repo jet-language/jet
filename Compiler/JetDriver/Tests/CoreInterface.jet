@@ -64,7 +64,6 @@ interface_test_round_trip: fn(units: [JetDriverCoreInterfaceUnit], texts: [Strin
     assert_eq(bodies, [String]{"{{ 1 }}", "{{ self.width * 2 }}", "{{ self.width }}", "{{\n    value * 2\n}}"})
     held: loop declaration in unit.words.held -> declaration.name
     assert_eq(held, [String]{"twice", "nothing", "LIMIT"})
-    assert(unit.tokens > 0)
     assert_eq(unit.lines, 19)
     interface_test_round_trip(units, [String]{INTERFACE_FIXTURE})
 }
@@ -120,7 +119,8 @@ InterfaceTestReader: struct {
     }
 }
 
-// A trace sink that keeps the load's counters in `path`, one per line.
+// A trace sink that keeps the load's counters and the parse's Core token
+// deltas in `path`, one per line.
 InterfaceTestTrace: struct {
     path: String
 
@@ -132,7 +132,7 @@ InterfaceTestTrace: struct {
         end: fn(self, name: String, items: Int) Never! -[FS, Time]> {}
 
         progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]> {
-            if name.starts_with("counters.load.") -> fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
+            if name.starts_with("counters.load.") || name == "counters.parse.core_tokens" -> fs.append_all(self.path, "{name} = {done}\n") ?? panic("cannot write the trace: {err}")
         }
 
         functions: fn(self) -[]> Bool Never! {
@@ -178,7 +178,8 @@ InterfaceTestLoad: struct {
 }
 
 // The load of `source` over Core `rows`, reading `interface` (none when
-// empty), and the counters it traced, `name = value` each.
+// empty), and the counters it traced, `name = value` each, a counter traced
+// more than once (a delta) summed.
 interface_test_load: fn(source: String, rows: [JetDriverCoreSource], interface: [U8]) -> InterfaceTestLoad {
     path: fs.join(interface_sys.temp_dir(), "jet-core-interface-{interface_process.current_pid()}.trace")
     fs.write(path, "") ?? panic("cannot start the trace: {err}")
@@ -187,7 +188,7 @@ interface_test_load: fn(source: String, rows: [JetDriverCoreSource], interface: 
     counters := [String:Int]{}
     loop line in trace.split("\n") {
         parts: line.split(" = ").to_list()
-        if parts.len() == 2 -> counters[parts[0]] = Int.parse(parts[1]) ?? panic("the counter line `{line}` has no number")
+        if parts.len() == 2 -> counters[parts[0]] = (counters.get(parts[0]) ?? 0) + (Int.parse(parts[1]) ?? panic("the counter line `{line}` has no number"))
     }
     fs.remove(path) ?? panic("cannot remove the trace: {err}")
     InterfaceTestLoad{load: load, counters: counters}
@@ -317,6 +318,10 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     // The same bodies stay; the lazy load parsed fewer.
     assert_eq(lazy.counters.get("counters.load.core_bodies"), eager.counters.get("counters.load.core_bodies"))
     assert((lazy.counters.get("counters.load.core_bodies_parsed") ?? 0) < (eager.counters.get("counters.load.core_bodies_parsed") ?? 0))
+    // The lazy load counts the tokens it lexed: the heads, then the bodies
+    // it parsed back, fewer than the whole texts.
+    assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) > 0)
+    assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) < (eager.counters.get("counters.parse.core_tokens") ?? 0))
 }
 
 // An interface written for other text parses the unit whole.

@@ -8,7 +8,7 @@
 // One unit's rows (JetDriverCoreInterfaceUnit) are what
 // jet_driver_parse_core_source returns for the unit as a load parses it:
 // its spellings and held declarations (JetDriverUnitWords), its identifier
-// demand, its line and token counts. Beside them are the text's length, a
+// demand, its line count. Beside them are the text's length, a
 // 64-bit FNV-1a hash of its bytes (jet_driver_core_interface_text_hash), and
 // the `{`..`}` span of each function body (jet_driver_core_body_spans). A
 // load whose unit text hashes the same can then take the rows as the unit's
@@ -26,14 +26,14 @@
 // its elements. An Int is an i32 in two's complement (an owner row may be
 // -1). A flag is 0 or 1.
 use {
-    jet_foundation.[CompilerThreads, DIAGNOSTIC_LINT, DebugTraceSite, Diagnostic, ElseArmSpan, Func, Item, Span, TraitImplBlock, TraitMethodSig, diagnostic_with_source_path]
+    jet_foundation.[AppliedRuleApplication, CompilerThreads, DIAGNOSTIC_LINT, DebugTraceSite, Diagnostic, ElseArmSpan, FencedStatement, Func, Item, PolicyDeclaration, Program, Span, TraitImplBlock, TraitMethodSig, diagnostic_with_source_path]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
     jet_parser.[parse_lexed_with_source_threads]
 }
 
 // "JTCI" in little-endian byte order.
 JET_DRIVER_CORE_INTERFACE_MAGIC: 0x4943544A
-JET_DRIVER_CORE_INTERFACE_VERSION: 1
+JET_DRIVER_CORE_INTERFACE_VERSION: 2
 
 // One Core unit's interface rows (see above). `path` and `module_name` are
 // its JetDriverCoreSource row's. `bodies` lists each function body with
@@ -44,7 +44,6 @@ JetDriverCoreInterfaceUnit: struct {
     text_bytes: Int
     text_hash: U64
     lines: Int
-    tokens: Int
     demand: JetDriverCoreIdentifierDemand
     words: JetDriverUnitWords
     bodies: [Span]
@@ -85,7 +84,6 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
             text_bytes: text.bytes().len(),
             text_hash: jet_driver_core_interface_text_hash(text),
             lines: parsed.lines,
-            tokens: parsed.tokens,
             demand: parsed.demand.move(),
             words: parsed.words.move() ?? jet_driver_unit_no_words(),
             bodies: jet_driver_core_body_spans(text, threads),
@@ -259,7 +257,6 @@ jet_driver_core_interface_unit_bytes: fn(unit: JetDriverCoreInterfaceUnit) -> [U
     jet_driver_core_interface_put(out, Int{unit.text_hash.bit_and(U64{4294967295})})
     jet_driver_core_interface_put(out, Int{(unit.text_hash >> 32).bit_and(U64{4294967295})})
     jet_driver_core_interface_put(out, unit.lines)
-    jet_driver_core_interface_put(out, unit.tokens)
     jet_driver_core_interface_put_demand(out, unit.demand)
     jet_driver_core_interface_put_words(out, unit.words)
     jet_driver_core_interface_put(out, unit.bodies.len())
@@ -425,7 +422,7 @@ jet_driver_core_interface_block: fn(reader: JetDriverCoreInterfaceReader, index:
 
 // The rows a unit with no interface takes: they match no text.
 jet_driver_core_interface_none: fn() -> JetDriverCoreInterfaceUnit Never! {
-    JetDriverCoreInterfaceUnit{path: "", module_name: "", text_bytes: -1, text_hash: U64{0}, lines: 0, tokens: 0, demand: jet_driver_empty_core_identifier_demand(), words: jet_driver_unit_no_words(), bodies: [Span]{}}
+    JetDriverCoreInterfaceUnit{path: "", module_name: "", text_bytes: -1, text_hash: U64{0}, lines: 0, demand: jet_driver_empty_core_identifier_demand(), words: jet_driver_unit_no_words(), bodies: [Span]{}}
 }
 
 // Whether `rows` are the interface of `source`, the text of the Core unit
@@ -519,7 +516,6 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
     low: jet_driver_core_interface_u32(bytes, cursor)
     high: jet_driver_core_interface_u32(bytes, cursor)
     lines: jet_driver_core_interface_u32(bytes, cursor)
-    tokens: jet_driver_core_interface_u32(bytes, cursor)
     demand: jet_driver_core_interface_read_demand(bytes, cursor)
     words: jet_driver_core_interface_read_words(bytes, cursor)
     bodies := [Span]{}
@@ -535,7 +531,6 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
         text_bytes: text_bytes,
         text_hash: (U64{high} << 32).bit_or(U64{low}),
         lines: lines,
-        tokens: tokens,
         demand: demand,
         words: words,
         bodies: bodies,
@@ -544,29 +539,125 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
 
 // A Core module the load parsed from its declaration heads
 // (jet_driver_parse_core_source with matching interface rows): its place
-// in the load's modules, its blanked `bodies`, and how many block spans,
-// else arms and debug sites its own parse gave it (its held declarations'
-// parse appends more).
+// in the load's modules, its blanked `bodies`, where each item of its parse
+// ends (`item_ends`, jet_driver_core_item_ends), whether its hold held or
+// dropped any declaration, and how many block spans, else arms and debug
+// sites its own parse gave it (its held declarations' parse appends more).
 JetDriverCoreLazyModule: struct {
     loaded: Int
     bodies: [Span]
+    item_ends: [Int]
+    holds: Bool
     block_spans: Int
     else_arms: Int
     debug_sites: Int
 }
 
+// Where each of a parse's `items` ends, in order. The ends cut the text
+// into regions: region k runs from the end before it (0 for the first)
+// to its own end, and the last from the last end to the end of the text,
+// so each region holds one item with the comments, markers and imports
+// written before it. Empty when an item has no span or the ends go back,
+// so they cut no regions.
+jet_driver_core_item_ends: fn(items: [Item]) -> [Int] Never! {
+    ends := [Int]{}
+    loop item in items {
+        end: jet_driver_core_item_end(item) ?? return [Int]{}
+        if ends.len() > 0 && end < ends[ends.len() - 1] -> return [Int]{}
+        ends.push(end)
+    }
+    ends
+}
+
+jet_driver_core_item_end: fn(item: Item) -> Int? Never! {
+    if item == {
+        .Func(value) -> Val(value.span.end)
+        .Struct(value) -> Val(value.span.end)
+        .Enum(value) -> Val(value.span.end)
+        .Distinct(value) -> Val(value.span.end)
+        .TypeAlias(value) -> Val(value.span.end)
+        .UnitFamily(value) -> Val(value.span.end)
+        .Trait(value) -> Val(value.span.end)
+        .Tag(value) -> Val(value.span.end)
+        .EffectDecl(value) -> Val(value.span.end)
+        .Impl(value) -> Val(value.span.end)
+        .Const(value) -> Val(value.span.end)
+        .Test(value) -> Val(value.span.end)
+        .ExternRust(value) -> Val(value.span.end)
+        .Module(value) -> Val(value.span.end)
+        .CModule(value) -> Val(value.span.end)
+        .CodeModule(value) -> Val(value.span.end)
+        .Migration(value) -> Val(value.span.end)
+        .ProtocolDecl(value) -> Val(value.span.end)
+        .TemplateLoop(value) -> Val(value.span.end)
+        .GenericModule(value) -> Val(value.span.end)
+        .ModuleAlias(value) -> Val(value.span.end)
+        .MarkerDecl(value) -> Val(value.span.end)
+        .FactDecl(value) -> Val(value.span.end)
+        .ErrorConv(_) -> None
+    }
+}
+
+// The region of `ends` (jet_driver_core_item_ends) that holds byte `at`:
+// how many ends are at or before it.
+jet_driver_core_region: fn(ends: [Int], at: Int) -> Int Never! {
+    low := 0
+    high := ends.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if {
+            ends[middle] <= at -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    low
+}
+
+// The order of a side table after a partial restoring parse: the rows of
+// the module's own parse (`own`, each by the region its anchor falls in,
+// -1 for a row with no anchor), but for those in a `restored` region,
+// joined with the restoring parse's rows (`fresh`, all in restored
+// regions) where a whole parse would have put them. Each parse gives its
+// rows item by item, so both lists run in region order. A pick `p >= 0` is
+// row `p` of `own`, and `p < 0` row `-p - 1` of `fresh`.
+jet_driver_core_side_order: fn(own: [Int], restored: [Bool], fresh: [Int]) -> [Int] Never! {
+    picks := [Int]{}
+    next_fresh := 0
+    loop (index, region) in own {
+        if region >= 0 && restored[region] -> next
+        if region >= 0 {
+            loop next_fresh < fresh.len() && fresh[next_fresh] < region {
+                picks.push(-next_fresh - 1)
+                next_fresh += 1
+            }
+        }
+        picks.push(index)
+    }
+    loop next_fresh < fresh.len() {
+        picks.push(-next_fresh - 1)
+        next_fresh += 1
+    }
+    picks
+}
+
 // The load is done: the blanked bodies of the functions each lazy module
-// kept parse back. The module's text parses again as its heads did, held
-// as they were (jet_driver_reach_hold), with the interior of every body it
-// doesn't keep blanked. Each kept function and trait method whose body was
-// blanked takes its place from the new parse, and the module's side tables
-// become the new parse's, then its held declarations': those of a whole
-// parse, but for the bodies reach stripped. The modules parse on the
-// admitted threads (jet_driver_reach_parse_sources). Returns how many
-// bodies came back, or -1 when a parse failed (its diagnostics are in
-// `diagnostics`).
-jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> Int {
+// kept parse back. The module's text parses again, held as its heads were
+// (jet_driver_reach_hold), with the interior of every body it doesn't keep
+// blanked, and so is every region of its text (jet_driver_core_item_ends)
+// whose item keeps no body, so the parse reads only the items it restores.
+// Each kept function and trait method whose body was blanked takes its
+// place from the new parse. The module's side tables become those of a
+// whole parse, but for the bodies reach stripped: its own parse's rows,
+// with the new parse's in place of those of the regions it read, then its
+// held declarations'. A module whose items cut no regions parses whole
+// but for the bodies, and its side tables become the new parse's, then its
+// held declarations'. The modules parse on the admitted threads
+// (jet_driver_reach_parse_sources). Returns how many bodies came back
+// (-1 when a parse failed: its diagnostics are in `diagnostics`) and how
+// many tokens the parses lexed.
+jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> JetDriverCoreRestore {
     lazy_at := [Int]{}
+    restored_at := [[Bool]]{}
     sources := [JetDriverReachSource]{}
     loop (at, row) in lazy {
         kept := [Int:Bool]{}
@@ -576,24 +667,43 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         source := text.bytes()
         carrier: jet_driver_inline_package_threads(text, source, request.compiler_threads)
         if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
+        regions: row.item_ends.len() > 0
+        read := [Bool]{}
+        if regions {
+            loop _ in 0..<row.item_ends.len() + 1 -> read.push(false)
+        }
         wanted := false
         loop body in row.bodies {
             if kept.get(body.end) != None {
                 wanted = true
+                if regions -> read[jet_driver_core_region(row.item_ends, body.end - 1)] = true
                 next
             }
             jet_driver_blank_bytes(source, body.start + 1, body.end - 1)
         }
         if !wanted -> next
+        if regions {
+            loop region in 0..<read.len() {
+                if read[region] -> next
+                from: if region == 0 -> 0 else -> row.item_ends[region - 1]
+                to: if region == row.item_ends.len() -> source.len() else -> row.item_ends[region]
+                jet_driver_blank_bytes(source, from, to)
+            }
+        }
         core: request.core_sources[unit.file_index]
         lazy_at.push(at)
-        sources.push(JetDriverReachSource{bytes: source, hold: Val(JetDriverReachHoldRow{module_name: core.module_name, owned_members: core.owned_members, runtime: core.runtime})})
+        restored_at.push(read.move())
+        hold: if row.holds -> Val(JetDriverReachHoldRow{module_name: core.module_name, owned_members: core.owned_members, runtime: core.runtime}) else -> JetDriverReachHoldRow?{None}
+        sources.push(JetDriverReachSource{bytes: source, hold: hold})
     }
     parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
     restored := 0
+    tokens := 0
     failed := false
-    loop at in lazy_at {
-        parsed := parses.pop() ?? panic("a lazy Core module lost its parse")
+    loop (index, at) in lazy_at {
+        done: parses.pop() ?? panic("a lazy Core module lost its parse")
+        tokens += done.tokens
+        parsed := done.parsed.move()
         loaded: lazy[at].loaded
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity != DIAGNOSTIC_LINT -> diagnostics.push(diagnostic_with_source_path(diagnostic, source_units[modules[loaded].source_unit_index].path, 0))
@@ -604,44 +714,109 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         }
         funcs := [Int:Func]{}
         sigs := [Int:TraitMethodSig]{}
-        loop item in parsed.program.items.move() -> jet_driver_core_restore_index(item, funcs, sigs)
+        items: parsed.program.items.move()
+        parsed.program.items = [Item]{}
+        loop item in items.move() -> jet_driver_core_restore_index(item, funcs, sigs)
         restored += jet_driver_core_restore_items(modules[loaded].program.items, funcs, sigs)
-        // The side tables: the new parse's, then those the held
-        // declarations' parse appended after the module's own parse's.
-        held_spans := [Span]{}
-        loop modules[loaded].program.block_spans.len() > lazy[at].block_spans {
-            span := modules[loaded].program.block_spans.pop() ?? break
-            held_spans.push(span)
-        }
-        held_spans.reverse()
-        loop span in held_spans.move() -> parsed.program.block_spans.push(span)
-        modules[loaded].program.block_spans = parsed.program.block_spans.move()
-        held_arms := [ElseArmSpan]{}
-        loop modules[loaded].program.else_arms.len() > lazy[at].else_arms {
-            arm := modules[loaded].program.else_arms.pop() ?? break
-            held_arms.push(arm)
-        }
-        held_arms.reverse()
-        loop arm in held_arms.move() -> parsed.program.else_arms.push(arm)
-        modules[loaded].program.else_arms = parsed.program.else_arms.move()
-        held_sites := [DebugTraceSite]{}
-        loop modules[loaded].program.debug_sites.len() > lazy[at].debug_sites {
-            site := modules[loaded].program.debug_sites.pop() ?? break
-            held_sites.push(site)
-        }
-        held_sites.reverse()
-        loop site in held_sites.move() -> parsed.program.debug_sites.push(site)
-        modules[loaded].program.debug_sites = parsed.program.debug_sites.move()
-        modules[loaded].program.fenced_statements = parsed.program.fenced_statements.move()
-        modules[loaded].program.applied_rules = parsed.program.applied_rules.move()
-        modules[loaded].program.rule_facts = parsed.program.rule_facts.move()
-        modules[loaded].program.policy_declarations = parsed.program.policy_declarations.move()
-        loop name in parsed.program.used_import_names.move() {
+        names: parsed.program.used_import_names.move()
+        parsed.program.used_import_names = [String]{}
+        loop name in names.move() {
             if !modules[loaded].program.used_import_names.contains(name) -> modules[loaded].program.used_import_names.push(name)
         }
+        if {
+            lazy[at].item_ends.len() > 0 -> jet_driver_core_restore_regions(modules[loaded].program, parsed.program.move(), lazy[at], lazy[at].item_ends, restored_at[index])
+            else -> jet_driver_core_restore_whole(modules[loaded].program, parsed.program.move(), lazy[at])
+        }
     }
-    if failed -> return -1
-    restored
+    JetDriverCoreRestore{bodies: if failed -> -1 else -> restored, tokens: tokens}
+}
+
+// What jet_driver_core_restore_bodies did: the bodies that came back (-1
+// when a parse failed) and the tokens its parses lexed.
+JetDriverCoreRestore: struct {
+    bodies: Int
+    tokens: Int
+}
+
+// A whole restoring parse's side tables (`fresh`) in place of the module's
+// own parse's in `program`, its held declarations' rows kept after them.
+jet_driver_core_restore_whole: fn(program: &Program, &&fresh: Program, row: JetDriverCoreLazyModule) {
+    spans := fresh.block_spans.move()
+    loop index in row.block_spans..<program.block_spans.len() -> spans.push(program.block_spans[index])
+    program.block_spans = spans.move()
+    arms := fresh.else_arms.move()
+    loop index in row.else_arms..<program.else_arms.len() -> arms.push(program.else_arms[index])
+    program.else_arms = arms.move()
+    sites := fresh.debug_sites.move()
+    loop index in row.debug_sites..<program.debug_sites.len() -> sites.push(program.debug_sites[index])
+    program.debug_sites = sites.move()
+    program.fenced_statements = fresh.fenced_statements.move()
+    program.applied_rules = fresh.applied_rules.move()
+    program.rule_facts = fresh.rule_facts.move()
+    program.policy_declarations = fresh.policy_declarations.move()
+}
+
+// A partial restoring parse's side tables (`fresh`, of the `restored`
+// regions of `ends`, the module's item ends) joined with the module's own
+// parse's in `program` (jet_driver_core_side_order), its held
+// declarations' rows kept after them. A rule with no target belongs to the
+// file, so the module's own parse gives it.
+jet_driver_core_restore_regions: fn(program: &Program, &&fresh: Program, row: JetDriverCoreLazyModule, ends: [Int], restored: [Bool]) {
+    own_spans := [Int]{}
+    loop index in 0..<row.block_spans -> own_spans.push(jet_driver_core_region(ends, program.block_spans[index].start))
+    fresh_spans: loop span in fresh.block_spans -> jet_driver_core_region(ends, span.start)
+    spans := [Span]{}
+    loop pick in jet_driver_core_side_order(own_spans, restored, fresh_spans) -> spans.push(if pick >= 0 -> program.block_spans[pick] else -> fresh.block_spans[-pick - 1])
+    loop index in row.block_spans..<program.block_spans.len() -> spans.push(program.block_spans[index])
+    program.block_spans = spans.move()
+
+    own_arms := [Int]{}
+    loop index in 0..<row.else_arms -> own_arms.push(jet_driver_core_region(ends, program.else_arms[index].table.start))
+    fresh_arms: loop arm in fresh.else_arms -> jet_driver_core_region(ends, arm.table.start)
+    arms := [ElseArmSpan]{}
+    loop pick in jet_driver_core_side_order(own_arms, restored, fresh_arms) -> arms.push(if pick >= 0 -> program.else_arms[pick] else -> fresh.else_arms[-pick - 1])
+    loop index in row.else_arms..<program.else_arms.len() -> arms.push(program.else_arms[index])
+    program.else_arms = arms.move()
+
+    own_sites := [Int]{}
+    loop index in 0..<row.debug_sites -> own_sites.push(jet_driver_core_region(ends, program.debug_sites[index].name_start))
+    fresh_sites: loop site in fresh.debug_sites -> jet_driver_core_region(ends, site.name_start)
+    sites := [DebugTraceSite]{}
+    loop pick in jet_driver_core_side_order(own_sites, restored, fresh_sites) -> sites.push(if pick >= 0 -> program.debug_sites[pick] else -> fresh.debug_sites[-pick - 1])
+    loop index in row.debug_sites..<program.debug_sites.len() -> sites.push(program.debug_sites[index])
+    program.debug_sites = sites.move()
+
+    own_fenced: loop fenced in program.fenced_statements -> jet_driver_core_region(ends, fenced.span.start)
+    fresh_fenced: loop fenced in fresh.fenced_statements -> jet_driver_core_region(ends, fenced.span.start)
+    fenced_rows := [FencedStatement]{}
+    loop pick in jet_driver_core_side_order(own_fenced, restored, fresh_fenced) -> fenced_rows.push(if pick >= 0 -> program.fenced_statements[pick] else -> fresh.fenced_statements[-pick - 1])
+    program.fenced_statements = fenced_rows.move()
+
+    own_policies: loop policy in program.policy_declarations -> jet_driver_core_region(ends, policy.span.start)
+    fresh_policies: loop policy in fresh.policy_declarations -> jet_driver_core_region(ends, policy.span.start)
+    policies := [PolicyDeclaration]{}
+    loop pick in jet_driver_core_side_order(own_policies, restored, fresh_policies) -> policies.push(if pick >= 0 -> program.policy_declarations[pick] else -> fresh.policy_declarations[-pick - 1])
+    program.policy_declarations = policies.move()
+
+    program.applied_rules = jet_driver_core_restore_rules(program.applied_rules, fresh.applied_rules.move(), ends, restored)
+    program.rule_facts = jet_driver_core_restore_rules(program.rule_facts, fresh.rule_facts.move(), ends, restored)
+}
+
+// jet_driver_core_side_order over rule applications, each by its
+// target's region; the restoring parse's rules with no target leave.
+jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], &&fresh: [AppliedRuleApplication], ends: [Int], restored: [Bool]) -> [AppliedRuleApplication] {
+    own_regions: loop rule in own -> if rule.target == .Val(target) -> jet_driver_core_region(ends, target.start) else -> -1
+    fresh_rows := [AppliedRuleApplication]{}
+    fresh_regions := [Int]{}
+    loop rule in fresh.move() {
+        if rule.target == .Val(target) {
+            fresh_regions.push(jet_driver_core_region(ends, target.start))
+            fresh_rows.push(rule)
+        }
+    }
+    rules := [AppliedRuleApplication]{}
+    loop pick in jet_driver_core_side_order(own_regions, restored, fresh_regions) -> rules.push(if pick >= 0 -> own[pick] else -> fresh_rows[-pick - 1])
+    rules
 }
 
 // Files the end of each function and trait method of `item` whose body is

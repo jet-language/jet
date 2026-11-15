@@ -3656,7 +3656,9 @@ JetDriverCoreIdentifierDemand: struct {
 // `words` is what the source spells, for use-driven Core loading (CoreReach.jet).
 // `lazy` holds the body spans whose interiors the parse blanked, taking the
 // unit's words from its interface (CoreInterface.jet); the load parses back
-// the bodies it keeps (jet_driver_core_restore_bodies).
+// the bodies it keeps (jet_driver_core_restore_bodies). `item_ends` is
+// where each of a lazy parse's items ends (jet_driver_core_item_ends), and
+// `holds` whether its hold held or dropped any declaration.
 JetDriverParsedUnit: struct {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
@@ -3665,6 +3667,8 @@ JetDriverParsedUnit: struct {
     line_starts: [Int]{[Int]{}}
     words: JetDriverUnitWords?{None}
     lazy: [Span]{[Span]{}}
+    item_ends: [Int]{[Int]{}}
+    holds: Bool{false}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4257,10 +4261,11 @@ jet_driver_parse_unit: fn(job: JetDriverParseJob, threads: CompilerThreads, shar
 // unit holds back the declarations the load parses only once it reaches
 // them (jet_driver_reach_hold). A unit whose `interface` rows are its
 // text's (jet_driver_core_interface_matches) takes its words, demand and
-// counts from them and parses only its declaration heads: each body's
-// interior is blanked, and the load parses back the bodies it keeps
-// (jet_driver_core_restore_bodies). Should its heads hold other
-// declarations than its rows do, it parses whole.
+// line count from them and parses only its declaration heads: each body's
+// interior is blanked, so its token count is the heads' it lexed, and the
+// load parses back the bodies it keeps (jet_driver_core_restore_bodies).
+// Should its heads hold other declarations than its rows do, it parses
+// whole.
 jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, interface: JetDriverCoreInterfaceUnit?, threads: CompilerThreads, shared: NameTable, own: &NameTable) -> JetDriverParsedUnit {
     source := text.bytes()
     rows := interface ?? jet_driver_core_interface_none()
@@ -4272,7 +4277,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     }
     lexed := lex_generated_threads(source, threads)
     name_pool_adopt(lexed.lexed.tables.names, shared, own)
-    tokens: if lazy -> rows.tokens else -> lexed.lexed.tokens.len()
+    tokens: lexed.lexed.tokens.len()
     lines: if lazy -> rows.lines else -> lexed.line_starts.len() - 1
     spellings := JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
     if !lazy -> spellings = jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
@@ -4332,6 +4337,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     } else if !jet_driver_core_interface_same_held(words.held, held.declarations) {
         return jet_driver_parse_core_source(text, module_name, owned_members, runtime, entry, None, threads, shared, own)
     }
+    item_ends: if lazy -> jet_driver_core_item_ends(kept) else -> [Int]{}
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
@@ -4339,7 +4345,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     }
     bodies := [Span]{}
     if lazy -> bodies = rows.bodies.move()
-    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move()}
+    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move(), item_ends: item_ends, holds: held.declarations.len() > 0 || held.dropped.len() > 0}
 }
 
 // `jet check --prelude`: a Compiler/Prelude source parsed as the compiler
@@ -5396,6 +5402,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         demand := parsed_unit.demand.move()
         words := parsed_unit.words.move()
         lazy_bodies := parsed_unit.lazy.move()
+        lazy_item_ends := parsed_unit.item_ends.move()
+        lazy_holds: parsed_unit.holds
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
         // the packages they use), so each member sees the whole namespace.
@@ -5938,6 +5946,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             lazy_modules.push(JetDriverCoreLazyModule{
                 loaded: modules.len(),
                 bodies: lazy_bodies.move(),
+                item_ends: lazy_item_ends.move(),
+                holds: lazy_holds,
                 block_spans: program.block_spans.len(),
                 else_arms: program.else_arms.len(),
                 debug_sites: program.debug_sites.len(),
@@ -5975,10 +5985,15 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     if reach.enabled {
         jet_driver_reach_strip(reach, modules)
-        restored: jet_driver_core_restore_bodies(request, lazy_modules, modules, source_units, diagnostics)
+        restore: jet_driver_core_restore_bodies(request, lazy_modules, modules, source_units, diagnostics)
+        restored: restore.bodies
         if restored < 0 -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         if request.trace_sink == .Val(sink) {
             if restored > 0 -> bodies_parsed += restored
+            // The restoring parses' tokens join the Core tokens the parse
+            // waves lexed.
+            sink.progress("counters.parse.core_tokens", restore.tokens, 0)
+            sink.progress("counters.parse.tokens", restore.tokens, 0)
             sink.progress("counters.load.core_lazy_modules", lazy_modules.len(), -1)
             sink.progress("counters.load.core_bodies_restored", restored, -1)
             waiting := 0
