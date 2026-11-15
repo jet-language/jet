@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6883,
-    "rev": 103475,
+    "rev": 103500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30901,8 +30901,8 @@
     {
       "id": "c0m83e3n",
       "num": 3317,
-      "title": "Iterator capability facts must survive adaptation and type erasure",
-      "body": "Iterator capability facts must survive adaptation and type erasure.\n\nThe inspected JetIter boxes a forward iterator; ViewIter and user-defined Iterator hooks also exist. The bounded public inventory does not establish general exact-size, reverse, permanent-exhaustion, or borrowed-remainder operations across these paths. A helper name alone does not establish those capabilities.\n\nCarry verified capabilities through the existing iterable protocol and storage representations. Add precise proofs for reverse traversal, exact remaining size, exhaustion, and clone/replay only where the source and adapter support them. Do not label an upper bound as an exact size.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f005. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nThe exact final per-row contract is retained in target-mine-playlist-20260911/analyses/iterators/stable-capability-map.json. This card owns its named delta only. Current-source runtime is NOT RUN; frozen e841 receipts remain historical.",
+      "title": "Iterator capabilities survive adaptation: size_hint, fuse, by_ref, peek, back, remainder and copy",
+      "body": "Destination: Iterable and its adapters carry verified capability facts (exact or bounded size, fused end, borrowed driving, lookahead, back reads, unread remainder, copyable position) through adaptation and type erasure, without a public iterator hierarchy or mandatory dynamic allocation. An upper bound is never labelled exact.\n\nWhy it matters: generic code needs these facts to be fast and correct; a helper name alone proves nothing.\n\nDecisions: D-ITER-SIZE1=A, D-ITER-FUSED1=A, D-ITER-BORROW1=A, D-ITER-BACK1=A, D-ITER-LOOKAHEAD1=A, D-ITER-FAILCONSUME1=A, D-ITER-INTEROP1=A, D-ITER-EXACTGROUP1=A, D-ITER-REMAINDER1=A, D-ITER-COPY1=A, D-ITER-ENDLESS1=A.\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding iter-f005).\n\nMoved out 2026-11-15: borrowed views (c25-c35) to #6871; lazy demand, flatten, intersperse, replay and cycle (c18, c36-c44, c46, c47) to the lazy adapters card.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -30916,6 +30916,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: capability criteria restated with their ratified D-ITER decisions and proofs; borrowed views c25-c35 moved to #6871 (V3-V9); lazy demand, flatten, intersperse, replay and cycle (c18, c36-c44, c46, c47) moved to #6882."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -31125,11 +31130,12 @@
         {
           "n": 18,
           "text": "[#3350]  • Fast/slow branch traces measure retained items and cleanup. • A finite capacity backpressures or fails explicitly. • Cloned replayable sources are compared with buffered one-shot sources. • Any caching API goes to a separate owner ballot. • Golden `collections/fork_replay`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:26:34.393Z"
+          "evidence": "Moved to #6882 c8: fork and replay buffering is lazy-demand work",
+          "at": "2026-11-15T03:17:26.653Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
@@ -31179,173 +31185,192 @@
         {
           "n": 25,
           "text": "(was #3318) Owned, shared-borrowed, and exclusive-borrowed forms have distinct observable ownership contracts. (was #4284 c42)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:05.360Z"
+          "evidence": "Moved to #6871 c3: borrowed iteration belongs on the views card",
+          "at": "2026-11-15T03:17:27.680Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
           "text": "(was #3318) Mutating a yielded element updates the intended original collection; illegal overlap is rejected before execution. (was #4284 c43)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:07.480Z"
+          "evidence": "Merged into #6871 c3: mutation through a yielded view is part of V3",
+          "at": "2026-11-15T03:17:28.772Z",
+          "closure": "obsolete"
         },
         {
           "n": 27,
           "text": "(was #3318) Non-overlapping mutable chunks are supported safely; overlapping mutable windows are not fabricated from ordinary references. (was #4284 c44)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:09.736Z"
+          "evidence": "Moved to #6871 c4: chunks and windows belong on the views card",
+          "at": "2026-11-15T03:17:29.900Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
           "text": "(was #3318) Borrowed windows/chunks and text slices avoid per-output allocation where the source storage permits a view. (was #4284 c45)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:11.875Z"
+          "evidence": "Moved to #6871 c5: per-output allocation of views belongs on the views card",
+          "at": "2026-11-15T03:17:31.022Z",
+          "closure": "obsolete"
         },
         {
           "n": 29,
           "text": "(was #3318) An explicit loan cannot escape its owner. Default read-view stores preserve D-MEM-COPYSEM1 semantic-copy behavior; mutable-view escapes remain rejected. Explicit borrowed aggregates are F083. (was #4284 c46)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:14.071Z"
+          "evidence": "Moved to #6871 c6: loan escape belongs on the views card",
+          "at": "2026-11-15T03:17:32.069Z",
+          "closure": "obsolete"
         },
         {
           "n": 30,
           "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Golden Examples/features/collections/borrowed_iteration.jet: ViewMut over a List mutates the original, disjoint mutable chunks update the source, text split/lines views print their text rather than handles, and replaced slots drop exactly once, all on O0, O1 and O2. Proof: `jet test Compiler --profile golden collections/borrowed_iteration`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c47)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:16.248Z"
+          "evidence": "Merged into #6871 c3: the borrowed_iteration golden is V3's and V5's proof",
+          "at": "2026-11-15T03:17:33.464Z",
+          "closure": "obsolete"
         },
         {
           "n": 31,
           "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): UI fixtures for an escaping loan, overlapping mutable windows, and a resize during iteration are rejected before execution. Proof: `jet test Compiler --profile ui view_loan_`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c48)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:18.387Z"
+          "evidence": "Merged into #6871 c6: the view_loan_ UI fixtures are V6's proof",
+          "at": "2026-11-15T03:17:34.790Z",
+          "closure": "obsolete"
         },
         {
           "n": 32,
           "text": "(was #3318) [#3340]  • Exact width-zero, remainder, direction, overlap and mutability semantics. • Borrowed windows do not copy. Mutable forms are disjoint only. • JP: `collections/slice_producers`. (was #4284 c50)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:20.625Z"
+          "evidence": "Merged into #6871 c4: slice producer semantics are V4",
+          "at": "2026-11-15T03:17:36.064Z",
+          "closure": "obsolete"
         },
         {
           "n": 33,
           "text": "(was #3318) [#3359]  • Move-only items transfer exactly once. • Shared views cannot move. Exclusive-view mutation reaches the original storage. • Escaping callbacks respect their loans. • JP: `collections/map_owned_items`; `map_move_from_shared_view`. (was #4284 c51)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:22.885Z"
+          "evidence": "Moved to #6871 c7: mapping owned items through views belongs on the views card",
+          "at": "2026-11-15T03:17:37.149Z",
+          "closure": "obsolete"
         },
         {
           "n": 34,
           "text": "(was #3318) [#3391]  • Remove the parser special case at Compiler/JetParser/Source/Parser/Expressions.jet:1521-1533. • `values[range]`, `&values[range]` and `~values[range]` keep their contracts. No new `.view()`. • JP: UI `view_method_retired_e0214`. (was #4284 c53)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:25.369Z"
+          "evidence": "Moved to #6871 c8: view syntax belongs on the views card",
+          "at": "2026-11-15T03:17:38.263Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
           "text": "(was #3318) [#3393]  • An explicit `[View<T>]` materializer rooted in live storage, with no payload copies. • Temporaries cannot escape; invalidating mutation is rejected. Default `to_list` keeps D-MEM-COPYSEM1. • Golden `collections/borrowed_collect`; UI `view_collect_*`. (was #4284 c54)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:28.227Z"
+          "evidence": "Moved to #6871 c9: [View<T>] collect belongs on the views card",
+          "at": "2026-11-15T03:17:39.266Z",
+          "closure": "obsolete"
         },
         {
           "n": 36,
           "text": "(was #3320) Callback traces and a tail-failure source establish that early-exit consumers do not read beyond their semantic stop. (was #4284 c55)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:30.599Z"
+          "evidence": "Merged into #6882 c1: early stop is ITERDEM c1",
+          "at": "2026-11-15T03:17:40.247Z",
+          "closure": "obsolete"
         },
         {
           "n": 37,
           "text": "(was #3320) Each adapter documents its minimum necessary state and peak live memory; no avoidable whole-source list remains on the lazy path. (was #4284 c56)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:32.844Z"
+          "evidence": "Moved to #6882 c2: adapter state is lazy-demand work",
+          "at": "2026-11-15T03:17:41.153Z",
+          "closure": "obsolete"
         },
         {
           "n": 38,
           "text": "(was #3320) Sortedness and lexicographic comparison can stop at the first decisive item. (was #4284 c57)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:35.150Z"
+          "evidence": "Moved to #6882 c3: early stop is lazy-demand work",
+          "at": "2026-11-15T03:17:42.056Z",
+          "closure": "obsolete"
         },
         {
           "n": 39,
           "text": "(was #3320) Adjacent groups and dedup preserve item order and do not merge nonadjacent equal keys. (was #4284 c58)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:37.283Z"
+          "evidence": "Moved to #6882 c4: adjacent groups are lazy-demand work",
+          "at": "2026-11-15T03:17:42.968Z",
+          "closure": "obsolete"
         },
         {
           "n": 41,
           "text": "(was #3320) `jet test Compiler --profile golden collections/iter_demand` passes on O0, O1 and O2: pull traces stop at each adapter's semantic stop, and the tail-panicking source is never read past it. (was #4284 c60)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:41.587Z"
+          "evidence": "Moved to #6882 c1: the iter_demand golden is lazy-demand work",
+          "at": "2026-11-15T03:17:43.870Z",
+          "closure": "obsolete"
         },
         {
           "n": 42,
           "text": "(was #3320) [#3106]  • A consumer can start and stop before the whole source is materialized (`read_lines`, JSON and CSV paths). • Buffers and size limits are explicit; oversize or malformed input stops predictably. • A missing streaming API gets its own ballot. (was #4284 c61)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:43.748Z"
+          "evidence": "Moved to #6882 c5: streaming consumers are lazy-demand work",
+          "at": "2026-11-15T03:17:44.832Z",
+          "closure": "obsolete"
         },
         {
           "n": 43,
           "text": "(was #3320) [#3358]  • Nested user, view and suspended children compose with no intermediate List. • Empty children, an unbounded first child, child failure and early stop keep pull order and cleanup. • Move-only and borrowed items keep their provenance. • Golden `collections/flatten_iterable`. (was #4284 c63)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:45.834Z"
+          "evidence": "Moved to #6882 c6: flatten is lazy-demand work",
+          "at": "2026-11-15T03:17:45.831Z",
+          "closure": "obsolete"
         },
         {
           "n": 44,
           "text": "(was #3320) [#3384]  • Empty and singleton sources emit no separator. An odd prefix runs no unneeded factory. • The constant form needs lawful repeated ownership. • Golden `collections/intersperse_with` with factory counts 0, 0 and 1. (was #4284 c64)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T18:54:47.987Z"
+          "evidence": "Moved to #6882 c7: intersperse is lazy-demand work",
+          "at": "2026-11-15T03:17:46.797Z",
+          "closure": "obsolete"
         },
         {
           "n": 45,
@@ -31359,20 +31384,22 @@
         {
           "n": 46,
           "text": "`[1,2].lazy().cycle().take(5)` prints [1,2,1,2,1], an empty replayable source ends, an effectful map runs once per source item per pass, `cycle(5)` is unchanged, and replay of an effectful source is never silent or unbounded. Proof: `jet test Compiler --profile golden --filter collections/lazy_cycle` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:39.826Z"
+          "evidence": "Moved to #6882 c9: cycle is replay work",
+          "at": "2026-11-15T03:17:47.756Z",
+          "closure": "obsolete"
         },
         {
           "n": 47,
           "text": "Zero-argument `cycle()` on a Stream or other one-shot source is refused with a registered error. Proof: `jet test Compiler --profile ui --filter cycle_one_shot_source`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:41.116Z"
+          "evidence": "Moved to #6882 c10: cycle is replay work",
+          "at": "2026-11-15T03:17:48.688Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -31402,7 +31429,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-15T03:17:25.203Z",
+      "updated": "2026-11-15T03:17:52.880Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 37,
       "goals": [
@@ -102283,8 +102310,8 @@
     {
       "id": "c0fyhb2p",
       "num": 6871,
-      "title": "Borrowed views over collections: [View<T>] results, top-k without copies, loans that cannot escape",
-      "body": "Destination: selections over a collection (top-k, filters, groups) can return [View<T>] results that read the live records without copying them, keep the source unchanged, and cannot outlive or survive an invalidating change to their source.\n\nWhy it matters: copying move-only records to rank them is wrong (they cannot be copied) and slow; a view that outlives its source is a memory-safety hole.\n\nDecisions: D-MEM-COPYSEM1 (semantic copy for default read views). Related: #3317 (iterator capabilities and borrowed iteration).\n\nSource: #5976 c69, c70, c72 (archived #3041 c2-c5; option A of its ballot).",
+      "title": "Borrowed views over collections: [View<T>] results, chunks and windows, loans that cannot escape",
+      "body": "Destination: selections and iteration over a collection (top-k, filters, groups, chunks, windows, text splits) can work through views that read or mutate the live storage without copying it, keep the source's provenance, and cannot outlive or survive an invalidating change to their source.\n\nWhy it matters: copying move-only records to rank or walk them is wrong (they cannot be copied) and slow; a view that outlives its source is a memory-safety hole.\n\nDecisions: D-MEM-COPYSEM1 (semantic copy for default read views), D-ITER-BORROW1=A, D-ITER-SLICEPRODUCERS1=A, D-ITER-MAPOWN1=A, D-ITER-VIEWCOLLECT1=A. Related: #3317 (iterator capabilities).\n\nSource: #5976 c69, c70, c72 (archived #3041 c2-c5; option A of its ballot); #3317 c25-c35 (archived #3318, #3340, #3359, #3391, #3393).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -102393,7 +102420,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:06.731Z",
-      "updated": "2026-11-15T03:17:06.516Z",
+      "updated": "2026-11-15T03:17:51.953Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
@@ -208752,6 +208779,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:17:52.880Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0m83e3n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:17:51.953Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0fyhb2p",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:17:50.340Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0m83e3n",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:17:48.688Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-15T03:17:47.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-15T03:17:46.797Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T03:17:45.832Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-15T03:17:44.832Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T03:17:43.870Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-15T03:17:42.969Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-15T03:17:42.056Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-15T03:17:41.153Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-15T03:17:40.247Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-15T03:17:39.266Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-15T03:17:38.264Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T03:17:37.149Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T03:17:36.064Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-15T03:17:34.790Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-15T03:17:33.465Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-15T03:17:32.070Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T03:17:31.022Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-15T03:17:29.900Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-15T03:17:28.772Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T03:17:27.681Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T03:17:26.654Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#18"
+    },
     {
       "at": "2026-11-15T03:17:25.204Z",
       "by": "TowerKeeper-1",
