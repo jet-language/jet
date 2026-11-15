@@ -15215,6 +15215,52 @@ BuiltinsOutsideCore: struct {
     }
 }
 
+DuplicateCoreRole: struct {
+    name: String
+    role: String
+    first: String
+
+    impl Diagnostic {
+        code: "E1014"
+        safety_class: .Soundness
+        safety_reason: "Lowering runs a role's Core function, found by the role alone, so a role two functions fill would run whichever lowering found first."
+        expert_path: "none: each role has one Core function"
+        meaning: "Two Core functions fill one jet_builtins role"
+        no_fix: .Ambiguous
+
+        what: fn(self) -> String {
+            "`{self.name}` fills role `{self.role}`, which `{self.first}` already fills"
+        }
+
+        why: fn(self) -> String {
+            "The compiler runs the one Core function that fills a role, so each role is filled exactly once."
+        }
+
+        fix: fn(self) -> String { "Remove `#Builtin.Role(.{self.role})` from one of the two functions." }
+    }
+}
+
+MissingCoreRole: struct {
+    role: String
+
+    impl Diagnostic {
+        code: "E1015"
+        safety_class: .Soundness
+        safety_reason: "Lowering runs a role's Core function, so with none filling it an operation that needs the role has no code to run."
+        expert_path: "none: each role has one Core function"
+        meaning: "No Core function fills a jet_builtins role"
+        no_fix: .Ambiguous
+
+        what: fn(self) -> String { "no Core function fills role `{self.role}`" }
+
+        why: fn(self) -> String {
+            "The compiler runs the one Core function that fills a role, so each role is filled exactly once."
+        }
+
+        fix: fn(self) -> String { "Mark the Core function that does `{self.role}` with `#Builtin.Role(.{self.role})`." }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

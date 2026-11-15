@@ -2107,7 +2107,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         written_row = Val(names)
     }
     effect_scope: effect_scope_descriptor(func.name, owner_key, func.params.len() > 0 && func.params[0].name == "path", written_row)
-    endpoint: if program.registration_graph == .Val(graph) -> sema_function_endpoint(func, graph, module_identity) else -> ""
+    endpoint := ""
+    role := ""
+    if program.registration_graph == .Val(graph) {
+        endpoint = sema_function_endpoint(func, graph, module_identity)
+        role = sema_core_role(func.markers, graph, module_identity)
+    }
     built := TFunc{
         name: func.name,
         module_name: module_name,
@@ -2120,6 +2125,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         web_bucket: None,
         web_marker: func.web_marker,
         endpoint: endpoint,
+        role: role,
         visibility: visibility,
         foreign: None,
         params: params,

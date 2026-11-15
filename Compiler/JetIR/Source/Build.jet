@@ -568,6 +568,10 @@ IRProgram: struct {
     // row (-1: the program does not hold it), found once by ir_program_bind
     // (BuildDyn.jet ir_codec_decode_key).
     decode_helpers: [Int]{[Int]{}}
+    // The function rows of the Core functions that fill a jet_builtins role
+    // (FnBody.role), in row order, found once by ir_program_bind: a precise
+    // operation finds its helper among them (ir_core_role_row).
+    core_roles: [Int]{[Int]{}}
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
     // call that reads ambient host or process state with no system call the
@@ -938,6 +942,10 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
             }
         }
     }
+    core_roles := [Int]{}
+    loop (index, function) in owned {
+        if function.role != "" -> core_roles.push(index)
+    }
     p.spawn_sites = ir_spawn_sites(owned)
     p.functions = owned.move()
     p.rows = rows
@@ -945,7 +953,17 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
+    p.core_roles = core_roles
     p.intrinsics = ir_core_intrinsics(p.functions)
+}
+
+// The function row of the Core function that fills jet_builtins role `role`
+// (`AbsF32`), when the program holds it.
+ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
+    loop row in p.core_roles {
+        if p.functions[row].role == role -> return Val(row)
+    }
+    None
 }
 
 // Core's builder intrinsics, by declaration: a call of Core function `name`

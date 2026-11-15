@@ -133,6 +133,10 @@ use {
         sema_effect_chain_name,
         sema_check_registered_module_text,
         sema_source_file_at,
+        sema_core_role,
+        sema_core_role_functions,
+        sema_core_roles_check,
+        sema_core_roles_check_filled,
         SemaCompilerModuleSource,
         sema_inline_member_module,
         sema_inline_member_source_name,
@@ -1162,10 +1166,11 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
 }
 
 // Codegen lowers a precise operation to its `Core/Math/Math.jet` helper by
-// name (`jet_codegen_lower_precise_builtin`), and Sema records no call fact
-// for it, so the closure queues each helper `roots` and `body` lower to (as
-// Rust `is_core_precise_source_target` roots it): it is checked and lowered
-// with the item, together with its own callees.
+// name (`jet_codegen_lower_precise_builtin`) or to the Core function that
+// fills its jet_builtins role, and Sema records no call fact for either, so
+// the closure queues each helper `roots` and `body` lower to (as Rust
+// `is_core_precise_source_target` roots it): it is checked and lowered with
+// the item, together with its own callees.
 jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
     // Function values the body stores, Core source functions Sema rewrote a
     // Core call to, and the error conversions its `?` calls are lowered with
@@ -1179,19 +1184,25 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
             }
         }
     }
-    names: ir_precise_helper_names(tree, roots, body)
-    if names.len() == 0 {
+    helpers: ir_precise_helper_names(tree, roots, body)
+    if helpers.names.len() == 0 && helpers.roles.len() == 0 {
         return
     }
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
     loop module_row in graph.modules {
         if module_row.module_name != "core.math" -> next
         module_text_value: module_text(graph.module_table, module_row.module_identity)
-        loop name in names {
+        loop name in helpers.names {
             key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
                 refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
             }
+        }
+    }
+    loop filler in sema_core_role_functions(graph, helpers.roles) {
+        key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, filler.module_identity), "", filler.name)
+        if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
+            refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
 }
@@ -4342,10 +4353,11 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 // The Core functions and methods a compile that lowers checks up front under
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
 // top-level functions lowering keeps with no keyed call in a checked body
-// (ir_core_lowered_by_name), every top-level function of a Core module with
-// foreign rows, which jet_driver_prunable_core_modules leaves rooted, the
-// methods lowering selects by owner type (ir_core_method_lowered_by_owner)
-// and the `__Decoding` reads it selects by target (ir_core_decoding_read).
+// (ir_core_lowered_by_name) or finds by the jet_builtins role they fill
+// (sema_core_role), every top-level function of a Core module with foreign
+// rows, which jet_driver_prunable_core_modules leaves rooted, the methods
+// lowering selects by owner type (ir_core_method_lowered_by_owner) and the
+// `__Decoding` reads it selects by target (ir_core_decoding_read).
 jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool] Never! {
     roots := [String:Bool]{}
     loop module_row in graph.modules {
@@ -4359,7 +4371,7 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool
         loop item in module_row.program.items {
             if item == .Func(func) {
                 source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
-                if rooted || ir_core_lowered_by_name(true, source_file, func.name) {
+                if rooted || ir_core_lowered_by_name(true, source_file, func.name) || sema_core_role(func.markers, graph, identity) != "" {
                     roots[symbol_key_text(SymbolKind.Function, identity_text, "", func.name)] = true
                 }
             }
@@ -5281,6 +5293,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // The legacy `run: fn` contract fails the check without stopping it.
     loop diagnostic in sema_output_legacy_run_contract(registration_graph, output_intent) {
         load.diagnostics.push(diagnostic)
+    }
+    // Each jet_builtins role is filled once, and every role is filled when
+    // all of Core is loaded (`jet check Core`, the Core library's check).
+    role_problems_from: registration_graph.diagnostics.len()
+    role_fill: sema_core_roles_check(registration_graph)
+    if request.every_core_body -> sema_core_roles_check_filled(registration_graph, role_fill)
+    if registration_graph.diagnostics.len() > role_problems_from {
+        registration_graph.complete = false
     }
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     register_lookups: sema_registration_lookup_counts(registration_graph)

@@ -102,6 +102,21 @@ ir_precise_source_helper: fn(owner: String, operation: String) -> String? Never!
     None
 }
 
+// The jet_builtins role (Core/Builtins/Builtins.jet `RoleKind`) whose Core
+// function a typed `abs` or a Float or F32 `pow` runs: lowering finds that
+// function by the role it fills (ir_core_role_row), not by its name.
+ir_precise_source_role: fn(owner: String, operation: String) -> String? Never! {
+    if operation == "abs" {
+        if owner == "F32" -> return Val("AbsF32")
+        if owner == "I64" -> return Val("AbsI64")
+    }
+    if operation == "pow" {
+        if owner == "Float" -> return Val("PowFloat")
+        if owner == "F32" -> return Val("PowF32")
+    }
+    None
+}
+
 ir_failure_carrier_for_type: fn(ty: Type) -> TFailureCarrier Never! {
     if ty == {
         // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
@@ -243,4 +258,13 @@ ir_numeric_bound_constant: fn(ty: Type, member: String) -> IRNumericBound? {
     assert_eq(ir_precise_source_helper("Float", "pow"), Val("__pow_float"))
     assert_eq(ir_precise_source_helper("F32", "pow"), Val("__pow_f32"))
     assert_eq(ir_precise_source_helper("Int", "pow"), None)
+}
+
+#Test("the typed abs and the Float and F32 powers are jet_builtins roles") {
+    assert_eq(ir_precise_source_role("F32", "abs"), Val("AbsF32"))
+    assert_eq(ir_precise_source_role("I64", "abs"), Val("AbsI64"))
+    assert_eq(ir_precise_source_role("Float", "pow"), Val("PowFloat"))
+    assert_eq(ir_precise_source_role("F32", "pow"), Val("PowF32"))
+    assert_eq(ir_precise_source_role("Int", "abs"), None)
+    assert_eq(ir_precise_source_role("Fraction", "add"), None)
 }

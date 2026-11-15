@@ -3164,8 +3164,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     // A precise method whose core.math source helper the program holds calls
     // it; only a precise type that is still a runtime handle crosses a route.
     if operation == .PreciseMethod(type_name, method) {
-        helper: ir_precise_source_helper(type_name, method) ?? ""
-        if helper != "" && ir_function_row(p, "function:<corelib>/core.math::{helper}") != None {
+        if ir_precise_helper_row(p, type_name, method) != None {
             slots := [Int]{}
             subject: ir_expr(m, p, b, receiver)
             if ir_failed(b) -> return -1
@@ -4609,9 +4608,8 @@ ir_precise_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type
     if type_name == "Fraction" && (function == "quotient" || function == "div") && args.len() == 2 {
         return ir_precise_division(m, p, b, ty, function, args[0], args[1], span)
     }
-    helper: ir_precise_source_helper(type_name, function) ?? ""
-    key: "function:<corelib>/core.math::{helper}"
-    if helper == "" || ir_function_row(p, key) == None {
+    row: ir_precise_helper_row(p, type_name, function) ?? -1
+    if row < 0 {
         slots := [Int]{}
         loop argument in args {
             slot: ir_expr(m, p, b, argument)
@@ -4625,7 +4623,7 @@ ir_precise_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type
         // copy: `argument` is an element of read parameter `args`, which keeps the original; the call argument owns this one
         call_args.push(BodyCallArg{value: argument.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
     }
-    ir_call(m, p, b, key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
+    ir_call(m, p, b, p.functions[row].key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
 }
 
 // The `jet_<type>_<function>` route of a precise builtin on evaluated
@@ -4649,12 +4647,22 @@ ir_precise_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_n
 // A precise builtin on evaluated `slots`: its core.math source helper when
 // the program holds it, else its route.
 ir_precise_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, slots: [Int], span: Span) -> Int Never! {
-    helper: ir_precise_source_helper(type_name, function) ?? ""
-    if helper != "" {
-        row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? -1
-        if row >= 0 -> return ir_call_row_values(m, p, b, row, slots, span)
+    if ir_precise_helper_row(p, type_name, function) == .Val(row) {
+        return ir_call_row_values(m, p, b, row, slots, span)
     }
     ir_precise_route(m, p, b, ty, type_name, function, slots, span)
+}
+
+// The function row of the core.math source helper a precise operation runs:
+// the Core function that fills its jet_builtins role (ir_core_role_row),
+// else the helper of its registered name (ir_precise_source_helper); None
+// when the program holds neither.
+ir_precise_helper_row: fn(p: IRProgram, type_name: String, function: String) -> Int? Never! {
+    if ir_precise_source_role(type_name, function) == .Val(role) {
+        if ir_core_role_row(p, role) == .Val(row) -> return Val(row)
+    }
+    helper: ir_precise_source_helper(type_name, function) ?? return None
+    ir_function_row(p, "function:<corelib>/core.math::{helper}")
 }
 
 // A Fraction division: `Int / Int` (`quotient`, the Fraction of the two

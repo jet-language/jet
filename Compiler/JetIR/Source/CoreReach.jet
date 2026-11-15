@@ -192,8 +192,11 @@ ir_precise_source_name: fn(name: String) -> Bool Never! {
     ir_precise_source_family_owner(name) != None
 }
 
+// A precise-operation source helper, by its registered name, or a Core
+// function that fills a jet_builtins role (FnBody.role), which lowering finds
+// by that role.
 ir_precise_source_target: fn(function: FnBody) -> Bool Never! {
-    ir_core_reach_is_top_level(function.kind) && ir_precise_source_function(module_is_core(function.module_identity), function.source_file, function.name)
+    (function.role != "" && module_is_core(function.module_identity)) || (ir_core_reach_is_top_level(function.kind) && ir_precise_source_function(module_is_core(function.module_identity), function.source_file, function.name))
 }
 
 // Whether a top-level Core function with these header fields is one of the
@@ -549,26 +552,52 @@ ir_precise_expr_helper: fn(expression: BodyNode) -> String? Never! {
 }
 
 // The distinct precise source helpers a checked body and its root expressions
-// lower to by name. A comptime closure holds only explicitly called functions,
-// so it adds these (`jet_driver_comptime_function_closure`).
-ir_precise_helper_names: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [String] Never! {
-    names := [String]{}
-    loop root in roots -> ir_precise_tree_names(tree, root, names)
+// lower to: by name, and by the jet_builtins role whose Core function they
+// run. A comptime closure holds only explicitly called functions, so it adds
+// these (`jet_driver_comptime_function_closure`).
+IRPreciseHelpers: struct {
+    names: [String]
+    roles: [String]
+}
+
+ir_precise_helper_names: fn(tree: BodyTree, roots: [Int], body: [Int]) -> IRPreciseHelpers Never! {
+    found := IRPreciseHelpers{names: [String]{}, roles: [String]{}}
+    loop root in roots -> ir_precise_tree_names(tree, root, found)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_precise_tree_names(tree, child, names) })
+        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_precise_tree_names(tree, child, found) })
     }
-    names
+    found
+}
+
+// The jet_builtins role a precise expression's Core function fills (a typed
+// `abs`), or None.
+ir_precise_expr_role: fn(expression: BodyNode) -> String? Never! {
+    if expression.kind == .PreciseBuiltin(owner, operation, _) {
+        return ir_precise_source_role(owner, operation)
+    }
+    if expression.kind == .MathBuiltin(owner, operation, _) {
+        return ir_precise_source_role(owner, operation)
+    }
+    if expression.kind == .HandleMethod(_, operation, _) {
+        if operation == .PreciseMethod(owner, method) {
+            return ir_precise_source_role(owner, method)
+        }
+    }
+    None
 }
 
 // The Core power a Float or F32 `value.pow(y)` of type `ty` calls (BuildTypes
 // ir_binary), added once; nothing for an integer power.
-ir_precise_power_name: fn(ty: Type, names: &[String]) Never! {
+ir_precise_power_name: fn(ty: Type, found: &IRPreciseHelpers) Never! {
     bare: ir_untag(ty)
     owner := ""
     if bare == Type.Float -> owner = "Float"
     if bare == Type.Float32 -> owner = "F32"
+    if ir_precise_source_role(owner, "pow") == .Val(role) {
+        if !found.roles.contains(role) -> found.roles.push(role)
+    }
     helper: ir_precise_source_helper(owner, "pow") ?? return
-    if !names.contains(helper) -> names.push(helper)
+    if !found.names.contains(helper) -> found.names.push(helper)
 }
 
 // The precise helpers one checked expression and every expression below it
@@ -700,30 +729,33 @@ ir_comptime_expression_types_tree: fn(tree: BodyTree, expression: Int, seen: &[B
 // of a precise type may render (an interpolation, `print`, a List's text),
 // and its rendering calls its owner's `to_string` helper by name
 // (ir_render_push).
-ir_precise_tree_names: fn(tree: BodyTree, expression: Int, names: &[String]) Never! {
+ir_precise_tree_names: fn(tree: BodyTree, expression: Int, found: &IRPreciseHelpers) Never! {
     node: body_node(tree, expression)
     helper: ir_precise_expr_helper(node)
     if helper == .Val(name) {
-        if !names.contains(name) -> names.push(name)
+        if !found.names.contains(name) -> found.names.push(name)
+    }
+    if ir_precise_expr_role(node) == .Val(role) {
+        if !found.roles.contains(role) -> found.roles.push(role)
     }
     if node.kind == .PreciseBuiltin(owner, operation, _) {
         if owner == "Fraction" && operation == "div" {
             zero_test: ir_precise_source_helper("Fraction", "is_zero") ?? ""
-            if zero_test != "" && !names.contains(zero_test) -> names.push(zero_test)
+            if zero_test != "" && !found.names.contains(zero_test) -> found.names.push(zero_test)
         }
     }
     if node.kind == .Binary(op, _, _, _, _) {
-        if op == .Pow -> ir_precise_power_name(body_type(tree, expression), names)
+        if op == .Pow -> ir_precise_power_name(body_type(tree, expression), found)
     }
     if checked_expr_type_id(tree.expr_types, expression) == .Val(type_id) {
         owners := [String]{}
         ir_precise_rendered_owners(tree.types.types[type_id], owners)
         loop owner in owners {
             rendering: ir_precise_source_helper(owner, "to_string") ?? next
-            if !names.contains(rendering) -> names.push(rendering)
+            if !found.names.contains(rendering) -> found.names.push(rendering)
         }
     }
-    body_each_expr_child(tree, node, fn(child: Int) { ir_precise_tree_names(tree, child, names) })
+    body_each_expr_child(tree, node, fn(child: Int) { ir_precise_tree_names(tree, child, found) })
 }
 
 // The core.math precise types (`Decimal`, `Fraction`, `Complex`) a value of
@@ -1058,8 +1090,18 @@ ir_core_reach_row_targets: fn(functions: [FnBody], symbols: SymbolTable, by_key:
     decimal: BodyNode{id: 1, kind: NodeKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [Int]{0}}, span: span}
     converted: BodyNode{id: 2, kind: NodeKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [Int]{1}}, span: span}
     tree: BodyTree{nodes: [BodyNode]{spelling, decimal, converted}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
-    names: ir_precise_helper_names(tree, [Int]{2}, [Int]{})
-    assert_eq(names.len(), 2)
-    assert(names.contains("__decimal_to_float"))
-    assert(names.contains("__decimal_from_str"))
+    found: ir_precise_helper_names(tree, [Int]{2}, [Int]{})
+    assert_eq(found.names.len(), 2)
+    assert(found.names.contains("__decimal_to_float"))
+    assert(found.names.contains("__decimal_from_str"))
+    assert_eq(found.roles.len(), 0)
+}
+
+#Test("A comptime closure finds the role a typed abs runs") {
+    span: Span{start: 0, end: 1}
+    value: BodyNode{id: 0, kind: NodeKind.FloatLit{value: 1.5}, span: span}
+    absolute: BodyNode{id: 1, kind: NodeKind.MathBuiltin{type_name: "F32", function: "abs", args: [Int]{0}}, span: span}
+    tree: BodyTree{nodes: [BodyNode]{value, absolute}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
+    found: ir_precise_helper_names(tree, [Int]{1}, [Int]{})
+    assert_eq(found.roles, [String]{"AbsF32"})
 }

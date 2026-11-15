@@ -884,8 +884,9 @@ sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args:
 // `("core.math", "abs")`: `abs` takes Int, Float, F32, I64 and Complex,
 // returning the argument type (Float for Complex). The Int form stays the
 // routed source `abs`; any other argument is the MathBuiltin `abs`, which
-// lowers to its Core/Math source helper (`fabs`, `__abs_f32`, `__abs_i64`, the
-// Complex magnitude). Anything else is not handled here.
+// lowers to its Core/Math source helper (`fabs`, the Core function that fills
+// role `AbsF32` or `AbsI64`, the Complex magnitude). Anything else is not
+// handled here.
 sema_call_try_core_math_abs: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None {

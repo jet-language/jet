@@ -2388,12 +2388,11 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
     if kind == .Float || kind == .Float32 {
         // Float `%` and floor division call the runtime's libm exports, never
         // a libm symbol. A Float and F32 `value.pow(y)` calls its correctly
-        // rounded `Core/Math/Math.jet` power (ir_precise_source_helper), so
+        // rounded `Core/Math/Math.jet` power (ir_precise_helper_row), so
         // every tier and the comptime builder compute the same bits.
         if op == .Pow {
             owner: if kind == .Float -> "Float" else -> "F32"
-            helper: ir_precise_source_helper(owner, "pow") ?? ""
-            power_row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(b, span, "{owner} power without core.math {helper}")
+            power_row: ir_precise_helper_row(p, owner, "pow") ?? return ir_fail_slot(b, span, "{owner} power without its core.math power")
             if kind == .Float {
                 return ir_call_row_values(m, p, b, power_row, [Int]{left, right}, span)
             }
