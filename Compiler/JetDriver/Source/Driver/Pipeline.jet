@@ -5675,7 +5675,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // #3980: lower only the Core source bodies the program reaches (Rust
     // reference lowering's `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads)
+    lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads, request.trace_sink)
     symbols := symbol_rows.pop() ?? panic("the run's symbol table left core reachability")
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}

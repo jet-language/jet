@@ -1,0 +1,19 @@
+// Writes main.jet: one module of 3,000 small functions, each calling the
+// next, and a `run` that calls the first, so a traced build has one large
+// module whose bodies its compiler threads check.
+use {
+    core.files
+}
+
+STEPS: 3000
+
+run: fn() {
+    parts := [String]{}
+    loop k in 0..<STEPS {
+        next: k + 1
+        body: if next == STEPS -> "value" else -> "step_{next}((value * 7 + {k}) % 1000003)"
+        parts.push("step_{k}: fn(value: Int) -> Int {{\n    {body}\n}}\n\n")
+    }
+    parts.push("run: fn() {{\n    print(step_0(1))\n}}\n")
+    files.write("main.jet", parts.join("")) ?? panic("gen.jet: write main.jet: {err}")
+}
