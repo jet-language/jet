@@ -8322,12 +8322,16 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     captures := [IRCaptureSlot]{}
     offset := if task_body -> IR_TASK_STARTED + 8 else -> 24
-    loop capture in lambda.captures {
+    loop (index, capture) in lambda.captures {
         binding: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(b, span, "capture of unknown local {capture.source}")
         moved: lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name)
         value_row: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
         shares_cell: (task_body || !lambda.capture_facts.escapes) && !moved && ir_holds_atomic(m, p, value_row)
-        by_ref: shares_cell || ((!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name)))
+        // A scoped task's read loan of an aggregate (sema's lent captures)
+        // is the owner's storage, untouched until the join: the box holds
+        // its address instead of a deep copy.
+        lent: !moved && m.types[value_row].kind == .Aggregate && lambda.capture_facts.lent.contains(index)
+        by_ref: shares_cell || lent || ((!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name)))
         size: if by_ref -> 8 else -> ir_align8(m.types[value_row].size)
         owned_row := -1
         // A window sema materialized for the lambda (it outlives the window's

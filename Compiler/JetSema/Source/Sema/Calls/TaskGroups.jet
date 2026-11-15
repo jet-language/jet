@@ -477,7 +477,7 @@ sema_taskgroup_callable_wrapper: fn(value: TExpr, signature: Type, span: Span, c
     }
     result_ty := ret ?? Type.Named{name: "Unit"}
     captures := [TCapture]{}
-    capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
+    capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}, lent: [Int]{}}
     if value.kind == {
         // A function or constant reference is a flat row (sema_node).
         .Flat(index) -> if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
@@ -532,8 +532,9 @@ sema_taskgroup_task_group_expr: fn(context: &SemaCheckContext, environment: Sema
     group
 }
 
-sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    loop capture in lambda.captures {
+sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    lent := [Int]{}
+    loop (index, capture) in lambda.captures {
         if capture.ty == (Type.Named{name: "Group"}) {
             diagnostics.push(sema_error("E1110", span, "`{capture.source}` is a `Group` and cannot escape in a task", "a group is a scoped spawn authority and only lives until its owning block joins", "pass `group: Group` to a direct helper instead of capturing the handle"))
             next
@@ -574,6 +575,12 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
             element_problem: sema_ownership_crossing_problem(element, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context)
             if element_problem == .Val(value) -> diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, element, value, SemaSendCrossing.TaskCapture, span))
         }
+        // A borrowed read of a sendable value needs no copy of its own: the
+        // owner cannot write or move the place before the join, so the task
+        // reads it by address beside its siblings.
+        if borrowed == (Val(true)) && window_element == None && !materialized && !sema_taskgroup_contains_name(lambda.capture_facts.mutable, capture.source) {
+            if sema_ownership_crossing_problem(capture.ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context) == None -> lent.push(index)
+        }
         // A scoped `task.group` borrow is admitted, but a detached task could
         // outlive it (Rust `view_borrow_escape_tasks`).
         if borrowed == (Val(true)) -> sema_taskgroup_note_detach_problem(context, true)
@@ -596,6 +603,7 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
             diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(capture.source, "task capture", span))
         }
     }
+    lambda.capture_facts.lent = lent
 }
 
 sema_taskgroup_window_owner: fn(lambda: TLambda, owner: String, state: SemaOwnershipState) -> Bool Never! {

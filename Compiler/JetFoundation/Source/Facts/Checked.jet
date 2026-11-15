@@ -837,6 +837,11 @@ TCaptureFacts: struct {
     frozen: [String]
     materialized: [String]
     moved: [String]
+    // The positions in the lambda's captures that a `task.group` child, or a
+    // branch of a scoped `task.all`, `task.race` or `task.any`, borrows from an
+    // owner that outlives the join, with a sendable type: IR holds each by
+    // address instead of copying it into the task's box.
+    lent: [Int]
 }
 
 TCapture: struct {
