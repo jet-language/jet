@@ -42,6 +42,17 @@ hole_error_codes: fn(source: String) -> String {
     )
 }
 
+#Test("a hole table at the end of a body is its value") {
+    hole_same_as(
+        "parity: fn(text: String) -> String ReadError! {{\n    if width(text) % _ == 0 {{\n        2 -> \"even\"\n        else -> \"odd\"\n    }}\n}}\n",
+        "parity: fn(text: String) -> String ReadError! {{\n    if {{\n        width(text) % 2 == 0 -> \"even\"\n        else -> \"odd\"\n    }}\n}}\n",
+    )
+    hole_same_as(
+        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if r == _ {{\n        .Val(n) -> n\n        None -> 0\n    }}\n}}\n",
+        "pick: fn(r: Int?) -> Int {{\n    if r == .Val(_) {{\n        return 1\n    }}\n    if r == {{\n        .Val(n) -> n\n        None -> 0\n    }}\n}}\n",
+    )
+}
+
 #Test("a statement hole table is the guard table of filled headers") {
     hole_same_as(
         "pick: fn(n: Int) {{\n    if n % _ == 0 {{\n        15 -> print(\"FizzBuzz\")\n        3 -> print(\"Fizz\")\n        else -> print(\"{{n}}\")\n    }}\n}}\n",

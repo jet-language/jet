@@ -82,6 +82,25 @@ area: fn(shape: Shape) -> Int {
     }
 }
 
+// An error raised while the header runs leaves the table and the function,
+// as any other call's error would. A table at the end of a body is its value.
+#Error
+ReadError: enum {
+    Empty
+}
+
+width: fn(text: String) -> Int ReadError! {
+    if text == "" -> return Err(ReadError.Empty)
+    text.count_bytes()
+}
+
+parity: fn(text: String) -> String ReadError! {
+    if width(text) % _ == 0 {
+        2 -> "even"
+        else -> "odd"
+    }
+}
+
 run: fn() {
     print(label(9))
     print(label(10))
@@ -101,6 +120,12 @@ run: fn() {
     print(first_longer(60))
     print(area(Shape.Circle(2)))
     print(area(Shape.Square(3)))
+    print(parity("ab") ?? "failed")
+    print(parity("abc") ?? "failed")
+    if parity("") == {
+        .Ok(word) -> print(word)
+        .Err(_) -> print("the header's error reached the caller")
+    }
 }
 // --- expected output --------------------------------------------------
 // Fizz
@@ -131,3 +156,6 @@ run: fn() {
 // none
 // 12
 // 9
+// even
+// odd
+// the header's error reached the caller

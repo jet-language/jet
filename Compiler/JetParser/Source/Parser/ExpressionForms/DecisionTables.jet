@@ -86,7 +86,8 @@ parser_if_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
     loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
     if index >= state.tokens.len() -> return false
     if state.tokens[index].kind != TOKEN_LBRACE {
-        index = parser_dispatch_table_open(state, index)
+        open: parser_dispatch_table_open(state, index)
+        index = if open >= 0 -> open else -> parser_hole_table_open(state, index)
         if index < 0 -> return false
     }
     index += 1
@@ -114,6 +115,42 @@ parser_if_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
         index += 1
     }
     false
+}
+
+// The token index of a hole table's `{` (`if n % _ == 0 {`), scanning the
+// header from `start`: the first `{` outside parentheses and brackets, once
+// the header has held a `_`; -1 when the `if` has no hole table.
+parser_hole_table_open: fn(state: JetParserState, start: Int) -> Int Never! {
+    index := start
+    parens := 0
+    brackets := 0
+    hole := false
+    loop index < state.tokens.len() {
+        kind: state.tokens[index].kind
+        if kind == TOKEN_EOF -> return -1
+        if kind == TOKEN_IDENT && parser_value(state, state.tokens[index]) == PARSER_DISPATCH_HOLE -> hole = true
+        if parens == 0 && brackets == 0 {
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_UNIFIED_ARROW -> return -1
+            if kind == TOKEN_LBRACE -> return if hole -> index else -> -1
+        }
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        index += 1
+    }
+    -1
+}
+
+// Whether the `if` at the cursor opens a hole table. Like any other table,
+// it gives a value unless an arm returns or breaks. The scan is lexical, so
+// a `_` inside a pattern (`.Val(_)`) also passes; the tail reader then finds
+// no value form and reads the `if` again as a statement.
+parser_if_hole_table_ahead: fn(state: JetParserState) -> Bool Never! {
+    index := state.position
+    loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
+    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_KW_IF -> return false
+    parser_hole_table_open(state, index + 1) >= 0 && !parser_if_table_has_statement_arm(state)
 }
 
 // The token index of a dispatch table's `{` (`if subject == {`), scanning the
@@ -158,7 +195,7 @@ parser_expression_form_if_ahead: fn(state: &JetParserState) -> Bool Never! {
         if kind == TOKEN_LBRACKET -> brackets += 1
         if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
         if kind == TOKEN_LBRACE {
-            if parens == 0 && brackets == 0 && braces == 0 -> return false
+            if parens == 0 && brackets == 0 && braces == 0 -> return parser_if_hole_table_ahead(state)
             braces += 1
         }
         if kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
