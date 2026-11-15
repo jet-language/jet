@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6893,
-    "rev": 103775,
+    "rev": 103800,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29922,11 +29922,12 @@
         {
           "n": 42,
           "text": "(was #3290) [#3294] The interactive prompt runs on the same canonical command model. One command fixture, driven once through argv and once through interactive selection, gives identical ParsedArgs and validation. • Nested navigation, invalid input, EOF/cancel, secret input and IO failure are exercised under a real PTY (`args_prompt_matches_argv_parse`, `args_prompt_cancel_eof_invalid_secret`). Source menu text alone is not proof. • No handler runs before the caller explicitly dispatches. No second command schema, buffer or scheduler is added. (was #4275 c114)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:36:45.557Z"
+          "evidence": "Moved to #6891 c2: the interactive prompt belongs with guided input",
+          "at": "2026-11-15T03:36:42.485Z",
+          "closure": "obsolete"
         },
         {
           "n": 43,
@@ -29986,8 +29987,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-14T00:45:04.594Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:36:42.485Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 141,
       "goals": [
         "G5"
@@ -35767,12 +35768,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every system declaration has a real Jet body or typed provider leaf.",
+          "text": "Every declaration in the system Core modules (archive, net, service, sys, log, http, term, sync, db, event, process, tasks, watcher, email) has a Jet body or a typed, policy-free provider leaf. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` reports no bodiless row for those modules.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:54.214Z"
+          "at": "2026-11-15T03:37:41.584Z"
         },
         {
           "n": 2,
@@ -35785,12 +35786,12 @@
         },
         {
           "n": 3,
-          "text": "System APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core --filter <module>`).",
+          "text": "System APIs pass their failure and effect proofs on O0, O1 and O2 through their Core/<module> Jet bodies. Proof: `jet test Compiler --profile core --filter Core/Net`, then the same for Sys, Log, Http, Term, Process and Db.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:19.743Z"
+          "at": "2026-11-15T03:37:42.514Z"
         },
         {
           "n": 4,
@@ -35839,12 +35840,12 @@
         },
         {
           "n": 11,
-          "text": "{\"decisionIds\": [\"D-FILES-HANDLE-ABI1\"], \"text\": \"Make FileReader, FileWriter, and FileLock source-visible opaque values whose live state belongs to the provider. Keep TempDir, TempFile, and FileLock cleanup ownership with their provider values.\", \"proof\": {\"testName\": \"v06_ratified_contract\", \"suite\": \"tests/ratified/V06.jet (proposed Jet-side production integration suite)\", \"golden\": \"tests/ratified/expected/V06/V06.out (proposed; security/process/measurement outcomes attach identity-bound receipts)\", \"requiredCases\": [\"constructing/reading FileReader/FileWriter/FileLock path/state from source rejected\", \"opaque alias close/replace/drop/task capture keeps provider alive lawfully and releases exactly once at final owner\", \"TempDir/TempFile/FileLock cleanup before next statement on replacement and on exit/failure\"]}}",
+          "text": "FileReader, FileWriter and FileLock are opaque source-visible values whose live state belongs to the provider, and TempDir, TempFile and FileLock cleanup stays with their provider values (D-FILES-HANDLE-ABI1=A): constructing or reading their path or state from source is refused, and alias close, replace, drop and task capture release exactly once at the final owner. Proof: `jet test Compiler --profile cases --filter files/handle_abi_` and `jet test Compiler --profile ui --filter file_handle_state_private`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-02T18:27:12.186Z"
+          "at": "2026-11-15T03:37:43.465Z"
         },
         {
           "n": 13,
@@ -35922,7 +35923,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-15T03:14:10.381Z",
+      "updated": "2026-11-15T03:37:43.465Z",
       "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -39107,12 +39108,12 @@
         },
         {
           "n": 3,
-          "text": "[#3224] The rooted file lifecycle matrix covers directory escape and replacement races, partial IO, early iteration exit, close failure, symlink traversal, metadata, lock failure/release and an ignore-aware walk, all through the generic iterator protocol.",
+          "text": "The rooted file lifecycle matrix covers directory escape and replacement races, partial I/O, early iteration exit, close failure, symlink traversal, metadata, lock failure and release, and an ignore-aware walk, all through the generic iterator protocol. Proof: `jet test Compiler --profile cases --filter files/rooted_lifecycle_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:19.397Z"
+          "at": "2026-11-15T03:37:44.345Z"
         },
         {
           "n": 4,
@@ -39282,7 +39283,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-15T03:03:18.639Z",
+      "updated": "2026-11-15T03:37:44.345Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -72793,6 +72794,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c3 and c4 restated with their decisions; c7 met as a duplicate of archived #2049 c2; guided input c9-c13 moved to #6891; c14 to #6875."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -72843,65 +72849,72 @@
         {
           "n": 7,
           "text": "(was #2049 c2) Each surface scored against named interaction patterns (responsiveness, keyboard model, progressive disclosure, color/NO_COLOR discipline, resize behavior) with concrete gap list [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:46:11.714Z"
+          "evidence": "Duplicate of archived #2049 c2 (met): the TUI DX audit scored every surface at `git show 2b160ee885:docs/audits/tui-dx-audit-2026-08-20.md` (## Scorecard at line 397, ## Ranked gap list at line 470); its principles live on as Docs/spec/reference/tui-interaction.md on dev 7259131021 (`git ls-files Docs/spec/reference/tui-interaction.md`).",
+          "at": "2026-11-15T03:36:35.853Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
           "text": "(was #2468 c1) A `#CLI` declaration derives a guided field sequence whose values, defaults, environment inputs, and final typed result match the ordinary parser, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:24.428Z"
+          "evidence": "Moved to #6891 c1: guided input from #CLI gets its own card",
+          "at": "2026-11-15T03:36:36.904Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #2468 c2) A multi-page form validates on field change and submit, preserves the invalid value, and reports a semantic correction without invoking the command body, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:25.450Z"
+          "evidence": "Moved to #6891 c3: guided input from #CLI gets its own card",
+          "at": "2026-11-15T03:36:37.797Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #2468 c3) Single-line and multiline fields accept Unicode paste, cursor movement, and scrolling without splitting a code point or losing visible text, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:26.444Z"
+          "evidence": "Moved to #6891 c4: guided input from #CLI gets its own card",
+          "at": "2026-11-15T03:36:38.687Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(was #2468 c4) TTY, accessible, NO_COLOR, CI, and non-TTY modes produce labeled deterministic prompts, do not require an alternate screen, and return a stable status for invalid input, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:27.415Z"
+          "evidence": "Moved to #6891 c5: guided input from #CLI gets its own card",
+          "at": "2026-11-15T03:36:39.576Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #2468 c5) A small prompt operation composes in a shell pipeline, keeps machine output separate from human prompts, and does not require a full-screen application, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:28.380Z"
+          "evidence": "Moved to #6891 c6: guided input from #CLI gets its own card",
+          "at": "2026-11-15T03:36:40.516Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "(was #2469 c1) Canonical human output is implemented across the CLI, compiler, Prelude, runtime and every Jet-owned status callsite, proven by tests and goldens on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:29.779Z"
+          "evidence": "Moved to #6875 c6: human output modes sit with progress output (#6875)",
+          "at": "2026-11-15T03:36:41.519Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -72912,7 +72925,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-15T03:36:23.952Z",
+      "updated": "2026-11-15T03:36:48.555Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
@@ -75168,57 +75181,57 @@
         },
         {
           "n": 4,
-          "text": "(was #6375) F1: each of the 20 undocumented workers is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1 rules (base64, log and regex first).",
+          "text": "Each of the 20 undocumented worker functions found by the API audit is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1=A rules (base64, log and regex first). Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` reports no undocumented public function in those modules.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:00.642Z"
+          "at": "2026-11-15T03:37:35.484Z"
         },
         {
           "n": 5,
-          "text": "(was #6375) F4: the unjoinable wrapper families (period, pad, hex.encode, archive codecs, http session fields, the Jetpack _with_ families) are each one function with label-only defaulted options, as D-API-COMPOSE1 rules.",
+          "text": "The unjoinable wrapper families (period, pad, hex.encode, archive codecs, http session fields, the Jetpack _with_ families) each become one function with label-only defaulted options (D-API-COMPOSE1=A: options, not siblings). Proof: `git grep -n -E '^[a-z_]+_with_[a-z_]*: fn' -- Core Jetpack` prints nothing and the affected goldens pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:01.563Z"
+          "at": "2026-11-15T03:37:36.471Z"
         },
         {
           "n": 6,
-          "text": "(was #6375) F6/F7: the build API takes label-only b.action arguments, typed effects and probe kinds, and defaulted deps.",
+          "text": "The build API takes label-only `b.action` arguments, typed effects and probe kinds, and defaulted deps (D-API-COMPOSE1=A). Proof: `jet test Compiler --profile cases --filter build/action_labelled_options`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:02.493Z"
+          "at": "2026-11-15T03:37:37.674Z"
         },
         {
           "n": 7,
-          "text": "(was #6375) F5/F8: labelled options after a variadic work as D-CALL-VARTAIL1 rules, and the F8 variadics use them.",
+          "text": "Label-only parameters after a variadic, written after `*`, work (D-CALL-VARTAIL1=A), and the variadic APIs the audit named use them. Proof: `jet test Compiler --profile cases --filter calls/label_only_after_variadic` and `jet test Compiler --profile ui --filter variadic_tail_label_missing`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:03.417Z"
+          "at": "2026-11-15T03:37:38.810Z"
         },
         {
           "n": 8,
-          "text": "(was #6375) The api lint group and Docs/spec/contributing/api-review.md exist, with the lints' ratchet on Core and Jetpack, and Law 9 replaced in stdlib-api-laws.md.",
+          "text": "The `api` lint group and Docs/spec/contributing/api-review.md exist, the lints ratchet Core and Jetpack, and Law 9 in stdlib-api-laws.md is replaced by D-API-COMPOSE1=A's pillar 9 (lints are errors under D-NO-WARNINGS1=A). Proof: `git ls-files Docs/spec/contributing/api-review.md` lists it and `jet test tests/guards --filter api_` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:04.355Z"
+          "at": "2026-11-15T03:37:39.755Z"
         },
         {
           "n": 9,
-          "text": "(was #6375) Research note: build outputs declared two ways (audit section 3, not ranked), with a recommendation.",
+          "text": "A research note under Docs/research compares the two ways build outputs are declared (API audit section 3) and recommends one. Proof: the note exists (`git ls-files Docs/research | grep build-outputs`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:46:05.188Z"
+          "at": "2026-11-15T03:37:40.678Z"
         },
         {
           "n": 11,
@@ -75247,7 +75260,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:54.632Z",
-      "updated": "2026-11-15T03:14:13.872Z",
+      "updated": "2026-11-15T03:37:40.678Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -79508,7 +79521,7 @@
     {
       "id": "c0isxyo3",
       "num": 6446,
-      "title": "core.tui leaves Core for a first-party `tui` package, and #Live becomes #term.Live declared by core.term",
+      "title": "tui leaves Core for the first-party `tui` package (D-TUI-HOME1=A): managed run loop, widgets, styles, key bindings and a typed test driver",
       "body": "Move card for #6147 (D-TUI-HOME1=A, ratified).\n\n- Moves Core/Tui (layouts, widgets) to the first-party battery Jetpack/Provider/Batteries/tui/; `jet add tui` writes the dependency line. Printing, keys and raw mode stay in core.term.\n- Deletes the #Live syntax-registry row; core.term declares `Live` as a library marker (struct Live implementing the marker API), spelled `#term.Live`.\n- ANSI text lands in core.term.\n- `use core.tui` becomes a registered error naming `jet add tui` (what/why/fix and a UI snapshot); `jet fix` rewrites imports and #Live uses.\n- One greenfield cutover of every in-repo caller, example, golden and doc.",
       "kind": "task",
       "track": "epoch",
@@ -79523,6 +79536,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: criteria restated with proofs; c6 merged into c9; c9 and c10 came from #3551."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -79635,7 +79653,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-15T03:36:25.225Z",
+      "updated": "2026-11-15T03:36:46.796Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 10
     },
@@ -82172,8 +82190,8 @@
     {
       "id": "c0ks5561",
       "num": 6523,
-      "title": "`log.Level` enum, a `core.metrics` instrument API, and one deployable service value",
-      "body": "Log levels are strings (Core/Log/Log.jet:38-58). Core has no metrics API: grep finds only Collections.Counter (Core/Collections/Collections.jet:197-205). Services are described separately for dev (D-DEV-SERVICES1), JetOS systemd units and infrastructure (D-INFRA1).\n\nDone when: `log.Level` replaces level strings; `metrics.counter/gauge/histogram` declare instruments as constants, exported through a provider (D-CORE-PROVIDER1); `ops.service(...)` feeds the dev runner and JetOS unit generation from one value.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.10.",
+      "title": "core.metrics instruments and one deployable Service value (D-SERVICE-WORD1=A)",
+      "body": "Destination: core.metrics declares counter, gauge and histogram instruments as constants exported through a provider, and one Service record (D-SERVICE-WORD1=A) feeds the dev runner and JetOS unit generation from one value, including a package's own built output.\n\nWhy it matters: services are described three times today (dev services D-DEV-SERVICES1, JetOS systemd units, infrastructure D-INFRA1), and Core has no metrics API (only Collections.Counter).\n\nDone already: log levels are the typed LogLevel enum (dev ff909aea78, #6056 c2).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.10 (card #6513).\n\nMoved out 2026-11-15: tracing, redaction and log source identity to the core.log boundaries card.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -82187,6 +82205,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: log.Level is done (LogLevel, ff909aea78). Tracing and log source criteria c1-c9 moved to #6892; metrics criterion added; c12 (Service) stays."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -82315,7 +82338,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:03.436Z",
-      "updated": "2026-11-15T03:36:34.518Z",
+      "updated": "2026-11-15T03:36:47.681Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 13
     },
@@ -104010,6 +104033,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 7,
+          "text": "TLS consumes one opaque connected TCP stream carrier (no redial from host and port, no descriptor alias), and TLS typed success and failure agree on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter net/tls_over_connected_stream`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:37:33.574Z"
+        },
+        {
+          "n": 8,
+          "text": "The TCPStream defects found proving #3127 are fixed: a read through a by-value parameter no longer ICEs (\"MIR place is not writable\"), or sema requires `&`; net.set_timeout no longer copies the stream; slice semantics hold. Proof: `jet test Compiler --profile cases --filter net/tcp_stream_param_read` and `jet test Compiler --profile ui --filter tcp_stream_by_value_read`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:37:34.538Z"
         }
       ],
       "refs": [],
@@ -104023,8 +104064,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
-      "updated": "2026-11-15T03:22:53.996Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:37:34.538Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 8
     },
     {
       "id": "c0r8ohhq",
@@ -210254,6 +210296,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:37:44.346Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0iiv9ft",
+      "note": "#3: strip debris; proof; was: [#3224] The rooted file lifecycle matrix covers directory escape and replacement races, partial IO, early iteration exit, close failure, symlink traversal, metadata, lock failure/release and an ignore"
+    },
+    {
+      "at": "2026-11-15T03:37:43.465Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fi6uj5",
+      "note": "#11: replace the JSON blob and the retired tests/ratified proof; was: {\"decisionIds\": [\"D-FILES-HANDLE-ABI1\"], \"text\": \"Make FileReader, FileWriter, and FileLock source-visible opaque values whose live state belongs to the provider. Keep TempDir, TempFile, and FileLock "
+    },
+    {
+      "at": "2026-11-15T03:37:42.514Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fi6uj5",
+      "note": "#3: exact proof; was: System APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core --filter <module>`)."
+    },
+    {
+      "at": "2026-11-15T03:37:41.584Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0fi6uj5",
+      "note": "#1: one outcome with proof; was: Every system declaration has a real Jet body or typed provider leaf."
+    },
+    {
+      "at": "2026-11-15T03:37:40.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#9: strip debris; proof; was: (was #6375) Research note: build outputs declared two ways (audit section 3, not ranked), with a recommendation."
+    },
+    {
+      "at": "2026-11-15T03:37:39.755Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#8: strip debris; proof; was: (was #6375) The api lint group and Docs/spec/contributing/api-review.md exist, with the lints' ratchet on Core and Jetpack, and Law 9 replaced in stdlib-api-laws.md."
+    },
+    {
+      "at": "2026-11-15T03:37:38.810Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#7: strip debris; proof; was: (was #6375) F5/F8: labelled options after a variadic work as D-CALL-VARTAIL1 rules, and the F8 variadics use them."
+    },
+    {
+      "at": "2026-11-15T03:37:37.674Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#6: strip debris; proof; was: (was #6375) F6/F7: the build API takes label-only b.action arguments, typed effects and probe kinds, and defaulted deps."
+    },
+    {
+      "at": "2026-11-15T03:37:36.471Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#5: strip debris; proof; was: (was #6375) F4: the unjoinable wrapper families (period, pad, hex.encode, archive codecs, http session fields, the Jetpack _with_ families) are each one function with label-only defaulted options, as "
+    },
+    {
+      "at": "2026-11-15T03:37:35.484Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ov7lce",
+      "note": "#4: strip debris; proof; was: (was #6375) F1: each of the 20 undocumented workers is promoted to a typed, documented primitive or moved into a priv module, as D-API-COMPOSE1 rules (base64, log and regex first)."
+    },
+    {
+      "at": "2026-11-15T03:37:34.538Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0v54mn1",
+      "note": "#8 The TCPStream defects found proving #3127 are fixed: a read "
+    },
+    {
+      "at": "2026-11-15T03:37:33.574Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0v54mn1",
+      "note": "#7 TLS consumes one opaque connected TCP stream carrier (no red"
+    },
+    {
+      "at": "2026-11-15T03:36:48.555Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0vqsfl8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:36:47.681Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ks5561",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:36:46.796Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0isxyo3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:36:45.803Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ks5561",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:36:44.149Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0isxyo3",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T03:36:42.485Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ym70o1",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T03:36:41.519Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T03:36:40.516Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:36:39.576Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T03:36:38.687Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:36:37.797Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:36:36.904Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:36:35.853Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#7"
+    },
     {
       "at": "2026-11-15T03:36:34.518Z",
       "by": "TowerKeeper-1",
