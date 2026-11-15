@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 105975,
+    "rev": 106000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62436,30 +62436,30 @@
         },
         {
           "n": 4,
-          "text": "In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs).",
+          "text": "In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs). Proof: `jet test Compiler --profile ui --filter data/frame_column_check`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:07:21.356Z"
+          "at": "2026-11-15T05:46:28.810Z"
         },
         {
           "n": 5,
-          "text": "Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test).",
+          "text": "Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test). Proof: `jet test Compiler --profile ui --filter data/frame_units`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:07:23.984Z"
+          "at": "2026-11-15T05:46:29.887Z"
         },
         {
           "n": 7,
-          "text": "`jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test).",
+          "text": "`jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test). Proof: `jet test Compiler --profile cases --filter notebook/frame_table_plot`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:07:28.724Z"
+          "at": "2026-11-15T05:46:30.950Z"
         },
         {
           "n": 8,
@@ -62516,7 +62516,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:17.509Z",
-      "updated": "2026-11-15T05:46:27.546Z",
+      "updated": "2026-11-15T05:46:30.950Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -73488,57 +73488,57 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A gap census: every capability Tower uses (HTTP server and routing, file-backed JSON store with atomic writes and locking, CLI argument parsing, live web UI, markdown rendering, the test suite) is mapped to a Jet Core API that exists or to a named gap, committed under Docs/research with file:line evidence.",
+          "text": "A gap census: every capability Tower uses (HTTP server and routing, file-backed JSON store with atomic writes and locking, CLI argument parsing, live web UI, markdown rendering, the test suite) is mapped to a Jet Core API that exists or to a named gap, committed under Docs/research with file:line evidence. Proof: `git ls-files \"Docs/research/*tower-in-jet*\"` names the census.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:49.884Z"
+          "at": "2026-11-15T05:46:31.972Z"
         },
         {
           "n": 2,
-          "text": "The Tower CLI is a Jet program with the same commands, flags, output and exit codes; Tools/tower's own test suite, ported to jet test, passes against it, and the board files it writes are byte-identical to the Node version's on the same operations.",
+          "text": "The Tower CLI is a Jet program with the same commands, flags, output and exit codes; Tools/tower's own test suite, ported to jet test, passes against it, and the board files it writes are byte-identical to the Node version's on the same operations. Proof: `jet test Tools/tower` passes against the Jet CLI and a byte comparison of board files with the Node version is empty.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:51.276Z"
+          "at": "2026-11-15T05:46:32.962Z"
         },
         {
           "n": 3,
-          "text": "tower serve is a Jet web application serving the same board UI and live updates; a scripted browser test drives the main flows (cards, criteria, decisions, ballots, questions) on the Jet server.",
+          "text": "tower serve is a Jet web application serving the same board UI and live updates; a scripted browser test drives the main flows (cards, criteria, decisions, ballots, questions) on the Jet server. Proof: the scripted browser test of tower serve on the Jet server.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:52.272Z"
+          "at": "2026-11-15T05:46:33.916Z"
         },
         {
           "n": 4,
-          "text": "Cutover: Tools/tower holds no .mjs/.js/.ts outside generated browser output (per the #5201 rule); AGENTS.md, skills and docs name the Jet commands; nothing falls back to Node.",
+          "text": "Cutover: Tools/tower holds no .mjs/.js/.ts outside generated browser output (per the #5201 rule); AGENTS.md, skills and docs name the Jet commands; nothing falls back to Node. Proof: `git ls-files \"Tools/tower/*.mjs\" \"Tools/tower/*.js\" \"Tools/tower/*.ts\"` prints only generated browser output.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:53.263Z"
+          "at": "2026-11-15T05:46:34.980Z"
         },
         {
           "n": 5,
-          "text": "A Tower workload cell in the perf manifest compares the Jet server with the Node one (request latency and memory) under the performance gate.",
+          "text": "A Tower workload cell in the perf manifest compares the Jet server with the Node one (request latency and memory) under the performance gate. Proof: `node Tools/gauntlet/harness/run.mjs --entry tower-server`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:20:54.119Z"
+          "at": "2026-11-15T05:46:36.025Z"
         },
         {
           "n": 6,
-          "text": "One `tower report` command prints counts and card lists for: open cards with no epoch; open cards with no criteria (by phase); open cards with no log entry in 30+ days; open cards whose blockers are all done; near-duplicate open titles; open cards in arrived epochs.",
+          "text": "One `tower report` command prints counts and card lists for: open cards with no epoch; open cards with no criteria (by phase); open cards with no log entry in 30+ days; open cards whose blockers are all done; near-duplicate open titles; open cards in arrived epochs. Proof: `jet test Tools/tower --filter report`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:55:39.382Z"
+          "at": "2026-11-15T05:46:37.052Z"
         },
         {
           "n": 7,
@@ -73577,7 +73577,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:20:40.809Z",
-      "updated": "2026-11-15T05:29:20.043Z",
+      "updated": "2026-11-15T05:46:37.052Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 55
     },
@@ -73834,12 +73834,12 @@
         },
         {
           "n": 3,
-          "text": "D-CONVERT-TRAIT1=A is built: From(S) is a Core trait with one method from(value: S) -> Self; impl Celsius.From(Float) makes Celsius{x} and Celsius.from(x) work; To(T) is only a bound (prep S: To(Float) means Float.From(S) exists), and writing impl X.To(Y) is an error whose fix writes impl Y.From(X). Every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot or jet fix rule (owner order 2026-11-06), and the examples pass on O0, O1 and O2.",
+          "text": "D-CONVERT-TRAIT1=A is built: From(S) is a Core trait with one method from(value: S) -> Self; impl Celsius.From(Float) makes Celsius{x} and Celsius.from(x) work; To(T) is only a bound (prep S: To(Float) means Float.From(S) exists), and writing impl X.To(Y) is an error whose fix writes impl Y.From(X). Every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot or jet fix rule (owner order 2026-11-06), and the examples pass on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter convert/from_trait` on O0, O1 and O2 and `jet test Compiler --profile ui --filter convert/impl_to_refused`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:01:23.425Z"
+          "at": "2026-11-15T05:46:38.027Z"
         },
         {
           "n": 4,
@@ -73886,7 +73886,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-15T03:42:22.138Z",
+      "updated": "2026-11-15T05:46:38.027Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
@@ -73991,12 +73991,12 @@
         },
         {
           "n": 9,
-          "text": "I2 defect found by G3Ctx, 2026-11-11, on seed-t20: passing a raw-pointer dereference as a borrowed place is ICE 101, \"ir.build unlowered: write place Deref\". The trigger is `bump(pointer.*)` where `bump: fn(c: &Counter) { c.n += 1 }` and `pointer := mem.from_addr<Counter>(mem.address_of(c))` inside #Unsafe. A generic `pointer.*.bump(by)` through a trait `&self` method fails the same way. The repros are $JET_SCRATCH_ROOT/lanes/G3Ctx/probe/derefw.jet and a2fn.jet. IR lowering handles a Deref write place (a borrow of the pointee) on O0/O1/O2, and both repros become cases that print the bumped value.",
+          "text": "I2 defect found by G3Ctx, 2026-11-11, on seed-t20: passing a raw-pointer dereference as a borrowed place is ICE 101, \"ir.build unlowered: write place Deref\". The trigger is `bump(pointer.*)` where `bump: fn(c: &Counter) { c.n += 1 }` and `pointer := mem.from_addr<Counter>(mem.address_of(c))` inside #Unsafe. A generic `pointer.*.bump(by)` through a trait `&self` method fails the same way. The repros are $JET_SCRATCH_ROOT/lanes/G3Ctx/probe/derefw.jet and a2fn.jet. IR lowering handles a Deref write place (a borrow of the pointee) on O0/O1/O2, and both repros become cases that print the bumped value. Proof: `jet test Compiler --profile cases --filter ice_regressions/deref_write_place`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T07:34:54.601Z"
+          "at": "2026-11-15T05:46:38.993Z"
         },
         {
           "n": 10,
@@ -74034,7 +74034,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-15T03:46:21.920Z",
+      "updated": "2026-11-15T05:46:38.993Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -80035,21 +80035,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged.",
+          "text": "Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged. Proof: `jet test Compiler --profile golden --filter ui/surface` on O0, O1 and O2 with `use font`, goldens unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T05:09:38.433Z"
+          "at": "2026-11-15T05:46:39.946Z"
         },
         {
           "n": 2,
-          "text": "The `UI.FontShaping` host power is no longer a Core power. The font package reaches its host edge through the mechanisms that any package can use.",
+          "text": "The `UI.FontShaping` host power is no longer a Core power. The font package reaches its host edge through the mechanisms that any package can use. Proof: `git grep -n FontShaping -- Compiler Core` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T05:09:39.571Z"
+          "at": "2026-11-15T05:46:41.006Z"
         }
       ],
       "refs": [],
@@ -80060,8 +80060,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:37.133Z",
-      "updated": "2026-11-13T17:58:34.786Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:46:41.006Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c06wbg4r",
@@ -80921,21 +80921,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.web no longer exists in Core; Examples and tests that used it import the `web` package and their goldens pass on O0/O1/O2; `use core.web` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06).",
+          "text": "core.web no longer exists in Core; Examples and tests that used it import the `web` package and their goldens pass on O0/O1/O2; `use core.web` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06). Proof: `jet test Compiler --profile golden --filter web` on O0, O1 and O2 importing the `web` package, and `git ls-files Core/Web` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T14:10:59.389Z"
+          "at": "2026-11-15T05:46:42.182Z"
         },
         {
           "n": 2,
-          "text": "D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.storage.local/.session become core.browser.storage.local/.session (get, set, remove, clear). Live<T, E> and app.live, subscribe, push, invalidate, state and live_stats move into Core's app module with their signatures, and the jet.runtime.web bindings stay priv under app. web.openapi(site) returns String OpenAPIError! (no E2805 stop). The compiler rules key on four markers the battery declares (#Form, #RouteTable, #ColumnOf, #WebApp), not on module names. Every caller moves in the same cutover.",
+          "text": "D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.storage.local/.session become core.browser.storage.local/.session (get, set, remove, clear). Live<T, E> and app.live, subscribe, push, invalidate, state and live_stats move into Core's app module with their signatures, and the jet.runtime.web bindings stay priv under app. web.openapi(site) returns String OpenAPIError! (no E2805 stop). The compiler rules key on four markers the battery declares (#Form, #RouteTable, #ColumnOf, #WebApp), not on module names. Every caller moves in the same cutover. Proof: `jet test Compiler --profile golden --filter browser` on O0, O1 and O2 and `git grep -n \"core.web\" -- Core Compiler Examples` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T11:16:40.886Z"
+          "at": "2026-11-15T05:46:43.287Z"
         },
         {
           "n": 3,
@@ -81018,7 +81018,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-15T03:03:31.581Z",
+      "updated": "2026-11-15T05:46:43.287Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 10
     },
@@ -83187,12 +83187,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases.",
+          "text": "The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases. Proof: `jet test Compiler --profile cases --filter ffi/js_gallery` in the browser test host.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:29:34.181Z"
+          "at": "2026-11-15T05:46:44.352Z"
         }
       ],
       "refs": [],
@@ -83207,8 +83207,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:41.628Z",
-      "updated": "2026-11-09T20:16:18.463Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:46:44.352Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 1
     },
     {
@@ -84911,21 +84911,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it.",
+          "text": "A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable example, the gap, and each known downside of the best implementation with the Jet design that removes it. Proof: `git ls-files \"Docs/audits/*web-framework-parity*\"` names the dated audit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T00:55:27.555Z"
+          "at": "2026-11-15T05:46:45.317Z"
         },
         {
           "n": 2,
-          "text": "Every owner choice the audit raises is on a Tower ballot with same-program alternatives, and every ratified choice has a child card under this card.",
+          "text": "Every owner choice the audit raises is on a Tower ballot with same-program alternatives, and every ratified choice has a child card under this card. Proof: each audit row names its ballot ID and child card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T00:55:28.044Z"
+          "at": "2026-11-15T05:46:46.499Z"
         },
         {
           "n": 3,
@@ -84938,21 +84938,21 @@
         },
         {
           "n": 4,
-          "text": "Every audited element at parity or better has an executable example with golden output on every applicable tier, and the audit row cites it.",
+          "text": "Every audited element at parity or better has an executable example with golden output on every applicable tier, and the audit row cites it. Proof: each parity row of the audit names its example, and `jet test Compiler --profile golden --filter web` on O0, O1 and O2 passes on every applicable tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T00:55:28.981Z"
+          "at": "2026-11-15T05:46:47.605Z"
         },
         {
           "n": 6,
-          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review).",
+          "text": "Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is engineered away and re-reviewed before the element is presented to the owner or built (AGENTS.md, Adversarial design review). Proof: each better-than claim in the audit names its passing adversarial review under Docs/audits.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T01:06:13.742Z"
+          "at": "2026-11-15T05:46:48.655Z"
         },
         {
           "n": 7,
@@ -85123,12 +85123,12 @@
         },
         {
           "n": 31,
-          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858).",
+          "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858). Proof: `git ls-files \"Docs/research/*jet-dev-vs-incumbents*\"` names the dated rerun report.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:52:22.422Z"
+          "at": "2026-11-15T05:46:49.624Z"
         },
         {
           "n": 32,
@@ -85217,8 +85217,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-15T05:06:48.347Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:46:49.624Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 39
     },
     {
@@ -87536,21 +87536,21 @@
         },
         {
           "n": 4,
-          "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences.",
+          "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences. Proof: `jet test Compiler --profile cases --filter runtime/declared_rows_match` shows zero differences.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T21:43:30.015Z"
+          "at": "2026-11-15T05:46:50.551Z"
         },
         {
           "n": 5,
-          "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime.",
+          "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime. Proof: `git grep -n dispatcher_row -- Compiler/Prelude/Core.jet` prints nothing, and `jet test Compiler --profile golden --filter runtime/one_call_per_core_module` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T21:43:30.998Z"
+          "at": "2026-11-15T05:46:51.466Z"
         },
         {
           "n": 6,
@@ -87599,12 +87599,12 @@
         },
         {
           "n": 11,
-          "text": "The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority_right_covers), not a C import. Compiler/JetFoundation/Source/Policy/EffectScope.jet declares no #Import(c) and no #Unsafe, tests/guards/c_imports.jet has no CI_ALLOWED row for it, the C-string export jet_authority_covers is gone, and jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet passes the 33-row covers table on a jet built with it. SUBs: G8Scope-1c (any train), then G8Scope-1d (after a seed with 1c). Placed on #6615 rather than #6129 so this follow-up to G8Scope-1b's interim CI_ALLOWED row doesn't hold G8's closure.",
+          "text": "The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority_right_covers), not a C import. Compiler/JetFoundation/Source/Policy/EffectScope.jet declares no #Import(c) and no #Unsafe, tests/guards/c_imports.jet has no CI_ALLOWED row for it, the C-string export jet_authority_covers is gone, and jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet passes the 33-row covers table on a jet built with it. SUBs: G8Scope-1c (any train), then G8Scope-1d (after a seed with 1c). Placed on #6615 rather than #6129 so this follow-up to G8Scope-1b's interim CI_ALLOWED row doesn't hold G8's closure. Proof: `jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet` passes the 33-row table and `git grep -n jet_authority_covers -- Compiler` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:36:32.591Z"
+          "at": "2026-11-15T05:46:52.361Z"
         },
         {
           "n": 12,
@@ -87679,7 +87679,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-15T02:47:01.266Z",
+      "updated": "2026-11-15T05:46:52.361Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 18
     },
@@ -91569,12 +91569,12 @@
         },
         {
           "n": 4,
-          "text": "Remaining rows PASS, with stale fixtures updated to the current grammar where the case predates it: control_and_data/discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, corelib/game_run_needs_mutable_scene_lvalue, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty, solve_solver_type_name_is_reserved, ice_regressions/b3_map_get_through_object_pattern.",
+          "text": "Remaining rows PASS, with stale fixtures updated to the current grammar where the case predates it: control_and_data/discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, corelib/game_run_needs_mutable_scene_lvalue, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty, solve_solver_type_name_is_reserved, ice_regressions/b3_map_get_through_object_pattern. Proof: `jet test Compiler --profile cases --filter <each named row>` passes, with no row left in tests/known-failing.tsv naming #6661.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T08:09:43.483Z"
+          "at": "2026-11-15T05:46:53.269Z"
         },
         {
           "n": 5,
@@ -91603,7 +91603,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-15T03:11:24.729Z",
+      "updated": "2026-11-15T05:46:53.269Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
@@ -218274,6 +218274,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:46:53.269Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m4deiq",
+      "note": "#4: proof; was: Remaining rows PASS, with stale fixtures updated to the current grammar where the case predates it: control_and_data/discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_li"
+    },
+    {
+      "at": "2026-11-15T05:46:52.361Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#11: proof; was: The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority"
+    },
+    {
+      "at": "2026-11-15T05:46:51.466Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#5: proof; was: Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions a"
+    },
+    {
+      "at": "2026-11-15T05:46:50.551Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#4: proof; was: Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function "
+    },
+    {
+      "at": "2026-11-15T05:46:49.624Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#31: proof; was: The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or ex"
+    },
+    {
+      "at": "2026-11-15T05:46:48.656Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#6: proof; was: Every claim that the Jet framework or any of its elements is better than an existing framework is backed by a passing adversarial review in Docs/audits, and every downside that review finds is enginee"
+    },
+    {
+      "at": "2026-11-15T05:46:47.605Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#4: proof; was: Every audited element at parity or better has an executable example with golden output on every applicable tier, and the audit row cites it."
+    },
+    {
+      "at": "2026-11-15T05:46:46.499Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#2: proof; was: Every owner choice the audit raises is on a Tower ballot with same-program alternatives, and every ratified choice has a child card under this card."
+    },
+    {
+      "at": "2026-11-15T05:46:45.317Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vxf4u0",
+      "note": "#1: proof; was: A dated parity audit in Docs/audits lists every element of the reference frameworks named in the body, the best framework for each element, Jet's current state cited by code path and executable exampl"
+    },
+    {
+      "at": "2026-11-15T05:46:44.352Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c015lbud",
+      "note": "#1: proof; was: The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases."
+    },
+    {
+      "at": "2026-11-15T05:46:43.287Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#2: proof; was: D-WEB-RUNTIME-API1=A is built (ratified 2026-11-13). core.web.browser becomes core.browser, members unchanged. core.web.on and core.web.value become core.browser.host.on and .value, and core.web.stora"
+    },
+    {
+      "at": "2026-11-15T05:46:42.182Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#1: proof; was: core.web no longer exists in Core; Examples and tests that used it import the `web` package and their goldens pass on O0/O1/O2; `use core.web` fails as an ordinary unknown module, with no teaching err"
+    },
+    {
+      "at": "2026-11-15T05:46:41.006Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0byuovb",
+      "note": "#2: proof; was: The `UI.FontShaping` host power is no longer a Core power. The font package reaches its host edge through the mechanisms that any package can use."
+    },
+    {
+      "at": "2026-11-15T05:46:39.946Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0byuovb",
+      "note": "#1: proof; was: Examples/features/ui/surface.jet and the gui battery build with `use font`. Their goldens are unchanged."
+    },
+    {
+      "at": "2026-11-15T05:46:38.993Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ct4a0i",
+      "note": "#9: proof; was: I2 defect found by G3Ctx, 2026-11-11, on seed-t20: passing a raw-pointer dereference as a borrowed place is ICE 101, \"ir.build unlowered: write place Deref\". The trigger is `bump(pointer.*)` where `bu"
+    },
+    {
+      "at": "2026-11-15T05:46:38.027Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vhdiiv",
+      "note": "#3: proof; was: D-CONVERT-TRAIT1=A is built: From(S) is a Core trait with one method from(value: S) -> Self; impl Celsius.From(Float) makes Celsius{x} and Celsius.from(x) work; To(T) is only a bound (prep S: To(Float"
+    },
+    {
+      "at": "2026-11-15T05:46:37.052Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#6: proof; was: One `tower report` command prints counts and card lists for: open cards with no epoch; open cards with no criteria (by phase); open cards with no log entry in 30+ days; open cards whose blockers are a"
+    },
+    {
+      "at": "2026-11-15T05:46:36.025Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#5: proof; was: A Tower workload cell in the perf manifest compares the Jet server with the Node one (request latency and memory) under the performance gate."
+    },
+    {
+      "at": "2026-11-15T05:46:34.980Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#4: proof; was: Cutover: Tools/tower holds no .mjs/.js/.ts outside generated browser output (per the #5201 rule); AGENTS.md, skills and docs name the Jet commands; nothing falls back to Node."
+    },
+    {
+      "at": "2026-11-15T05:46:33.916Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#3: proof; was: tower serve is a Jet web application serving the same board UI and live updates; a scripted browser test drives the main flows (cards, criteria, decisions, ballots, questions) on the Jet server."
+    },
+    {
+      "at": "2026-11-15T05:46:32.962Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#2: proof; was: The Tower CLI is a Jet program with the same commands, flags, output and exit codes; Tools/tower's own test suite, ported to jet test, passes against it, and the board files it writes are byte-identic"
+    },
+    {
+      "at": "2026-11-15T05:46:31.972Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c059ge5n",
+      "note": "#1: proof; was: A gap census: every capability Tower uses (HTTP server and routing, file-backed JSON store with atomic writes and locking, CLI argument parsing, live web UI, markdown rendering, the test suite) is map"
+    },
+    {
+      "at": "2026-11-15T05:46:30.950Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#7: proof; was: `jet notebook` shows a frame as a table and draws `frame.plot(x, y)` with no package install (test)."
+    },
+    {
+      "at": "2026-11-15T05:46:29.887Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#5: proof; was: Columns can carry units: adding a `Meters` column to a `Seconds` column is a compile error (test)."
+    },
+    {
+      "at": "2026-11-15T05:46:28.810Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#4: proof; was: In a frame built from `csv.decode<Row>`, a misspelled column name or a column type mismatch is a compile error; the paired Polars and pandas programs fail only at run time (test pairs)."
+    },
     {
       "at": "2026-11-15T05:46:27.546Z",
       "by": "TowerKeeper-1",
