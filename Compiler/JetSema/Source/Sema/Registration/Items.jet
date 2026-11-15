@@ -2548,8 +2548,32 @@ sema_registration_push_declaration: fn(module_row: &SemaRegistrationModule, item
     if item == .Impl(definition) {
         if definition.trait_name == .Val(trait_name) -> module_row.declared_trait_impls[sema_type_metadata_impl_key(definition.type_name, trait_name)] = true
     }
-    // copy: the declaration registry owns its item; the program keeps its own.
-    module_row.declarations.push(item.copy())
+    module_row.declarations.push(sema_registration_declared_item(item))
+}
+
+// The declaration registry's row for `item`. Its readers take names, spans
+// and signatures, never a function body, so a function and an impl's methods
+// are kept without their bodies: the program items hold the only bodies.
+sema_registration_declared_item: fn(item: Item) -> Item Never! {
+    // copy: the declaration registry owns its row; the program keeps its own item.
+    declared := item.copy()
+    if item == .Func(_) {
+        if declared.move() == .Func(source) {
+            header := source.move()
+            header.body = [Stmt]{}
+            return Item.Func{value: header.move()}
+        }
+        panic("a copied function item is not a function")
+    }
+    if item == .Impl(_) {
+        if declared.move() == .Impl(source) {
+            header := source.move()
+            loop index in 0..<header.methods.len() -> header.methods[index].body = [Stmt]{}
+            return Item.Impl{value: header.move()}
+        }
+        panic("a copied impl item is not an impl")
+    }
+    declared
 }
 
 // E0106: the Rust reference's `register_struct`/`register_enum`/

@@ -501,7 +501,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             key: found ?? next
             item: items.get(key) ?? next
             trail.entries.push(SemaGraphUndo.DeclarationRow{module_index: module_index, position: index, old: graph.modules[module_index].declarations[index]})
-            graph.modules[module_index].declarations[index] = item
+            graph.modules[module_index].declarations[index] = sema_registration_declared_item(item)
         }
         loop index in 0..<graph.modules[module_index].program.items.len() {
             found := U32?{None}
