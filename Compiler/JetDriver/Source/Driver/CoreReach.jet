@@ -218,6 +218,36 @@ jet_driver_reach_variant_head: fn(lexed: &Lexed, at: Int) -> Bool Never! {
     after == TOKEN_LPAREN || (after == TOKEN_RPAREN && jet_driver_reach_upper(name_text(lexed.tables.names, lexed.tokens[at].decoded)))
 }
 
+// Whether the statement's tokens `code..<to` are markers alone (`#Name` or
+// `@Name`, each with an optional `( … )`), the line that marks the
+// declaration below it.
+jet_driver_reach_marker_line: fn(lexed: &Lexed, code: Int, to: Int) -> Bool Never! {
+    at := code
+    markers := 0
+    loop at < to {
+        kind: lexed.tokens[at].kind
+        if kind == TOKEN_SEMI || jet_driver_reach_trivia(kind) {
+            at += 1
+            next
+        }
+        if (kind != TOKEN_HASH && kind != TOKEN_AT) || at + 1 >= to || lexed.tokens[at + 1].kind != TOKEN_IDENT -> return false
+        at += 2
+        if at < to && lexed.tokens[at].kind == TOKEN_LPAREN {
+            depth := 0
+            loop at < to {
+                inner: lexed.tokens[at].kind
+                if inner == TOKEN_LPAREN -> depth += 1
+                if inner == TOKEN_RPAREN -> depth -= 1
+                at += 1
+                if depth == 0 -> break
+            }
+            if depth != 0 -> return false
+        }
+        markers += 1
+    }
+    markers > 0
+}
+
 // Holds the declarations of a lazy Core unit's `lexed` tokens (see above)
 // and drops each function `cutover_module` hands to the compiler's route
 // (a member of its export outside `owned_members`). `part_members` are a
@@ -261,7 +291,11 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
     out := [Token]{}
     cursor := 0
     // Whether the last statement with code was a marker line (`#Overflow(…)`
-    // ahead of the declaration it marks, a line of its own).
+    // ahead of the declaration it marks, a line of its own,
+    // jet_driver_reach_marker_line). A declaration whose marker shares its
+    // line (`#ContextKey logger: …`) marks nothing below it, so a
+    // parse that reads the item after it alone (jet_driver_core_restore_bodies)
+    // holds that item as the whole unit's parse does.
     marked := false
     loop at in 0..<starts.len() {
         from: starts[at]
@@ -269,7 +303,7 @@ jet_driver_reach_hold: fn(lexed: &Lexed, cutover_module: String, owned_members: 
         code := from
         loop code < to && jet_driver_reach_trivia(lexed.tokens[code].kind) -> code += 1
         follows_marker: marked
-        if code < to && lexed.tokens[code].kind != TOKEN_SEMI -> marked = lexed.tokens[code].kind == TOKEN_HASH || lexed.tokens[code].kind == TOKEN_AT
+        if code < to && lexed.tokens[code].kind != TOKEN_SEMI -> marked = jet_driver_reach_marker_line(lexed, code, to)
         // A plain `priv` stays on the stub, so the stub is as private as the
         // declaration that takes its place.
         private: code + 1 < to && lexed.tokens[code].kind == TOKEN_KW_PRIV && lexed.tokens[code + 1].kind == TOKEN_IDENT

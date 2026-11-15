@@ -341,3 +341,30 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     eager: interface_test_load(source, interface_test_fixture_rows(), [U8]{})
     assert_eq(interface_test_differ(eager.load, fresh.load, units), [String]{})
 }
+
+// A unit whose first item's marker shares its line (`#SingleUse Token: …`),
+// then a function, a type with a method and a second function. The unit
+// holds a declaration either way, so the parse that reads its kept bodies
+// back holds too.
+interface_test_marked_rows: fn() -> [JetDriverCoreSource] {
+    text: "#SingleUse Token: struct {{\n    id: Int\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    [JetDriverCoreSource]{
+        {module_name: "core.devtools", alias: "core_devtools", path: "Core/interface-marked.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(text)},
+    }
+}
+
+// A declaration whose marker shares its line marks nothing below it: the
+// unit's own parse holds the function under it, and so does the parse that
+// reads back the bodies a lazy load keeps with the marked item's text
+// blanked, so the function parses whole as in a load that parses Core whole.
+#Test("a function below a declaration whose marker shares its line parses whole in a load that reads the Core interface") {
+    source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
+    units: jet_driver_core_interface_units(interface_test_marked_rows(), compiler_threads_single())
+    lazy: interface_test_load(source, interface_test_marked_rows(), jet_driver_core_interface_bytes(units))
+    assert_eq(lazy.counters.get("counters.load.core_lazy_modules"), Val(1))
+    assert((lazy.counters.get("counters.load.core_bodies_restored") ?? 0) > 0)
+    eager: interface_test_load(source, interface_test_marked_rows(), [U8]{})
+    assert_eq(interface_test_differ(eager.load, lazy.load, units), [String]{})
+    held: loop declaration in units[0].words.held -> declaration.name
+    assert_eq(held, [String]{"twice", "plain"})
+}
