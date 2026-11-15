@@ -99,23 +99,53 @@ coll_copy: fn(source: I64, target: I64, size: I64) {
 
 // memmove for native lowering: moves `count` bytes from `source` to `target`;
 // the ranges may overlap. List growth, Map insertion and Map removal move
-// their entries with one call instead of a per-element IR loop. A forward
-// move (or a disjoint one) is one ascending string move; a backward overlap
-// moves the bytes above the last whole word, then the words, descending.
+// their entries with one call instead of a per-element IR loop. Up to 128
+// bytes, one leaf of the count's class moves them, loading every byte before
+// it stores any, so an overlap either way moves as if through a buffer. A
+// longer move steps 64 bytes at a time, each step's loads before its stores:
+// downward from the end when the target starts inside the source, else
+// upward. The steps leave under 64 bytes, at the bottom or the top, to the
+// short classes. A longer move between disjoint ranges of at least
+// RT_MOVE_STRING_FROM bytes is one ascending string move instead.
+RT_MOVE_STRING_FROM: I64{2048}
+
 #Export(c) jet_rt_mem_move: fn(target: I64, source: I64, count: I64) {
-    if (count <= I64{0} || target == source) -> return
-    #Unsafe("native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires") {
-        if (target < source || target >= wrapping(source + count)) {
-            os_copy_ascending_i64(target, source, count)
-            return
+    #Unsafe("native lowering owns both live ranges of count bytes; each leaf loads all its bytes before it stores any, and the steps run in the order the overlap requires") {
+        to := target
+        from := source
+        left := count
+        if (left > I64{128}) {
+            if (from < to && to < wrapping(from + left)) {
+                loop left >= (I64{64}) {
+                    left = wrapping(left - I64{64})
+                    os_move_64_i64(wrapping(to + left), wrapping(from + left))
+                }
+            } else if (left >= RT_MOVE_STRING_FROM && (wrapping(to + left) <= from || wrapping(from + left) <= to)) {
+                os_copy_ascending_i64(to, from, left)
+                return
+            } else {
+                loop left >= (I64{64}) {
+                    os_move_64_i64(to, from)
+                    to = wrapping(to + I64{64})
+                    from = wrapping(from + I64{64})
+                    left = wrapping(left - I64{64})
+                }
+            }
         }
-        tail: count.bit_and(I64{7})
-        if (tail > I64{0}) {
-            os_copy_descending_bytes_i64(wrapping(target + count - I64{1}), wrapping(source + count - I64{1}), tail)
-        }
-        words: count >> I64{3}
-        if (words > I64{0}) {
-            os_copy_descending_words_i64(wrapping(target + count - tail - I64{8}), wrapping(source + count - tail - I64{8}), words)
+        if (left <= I64{16}) {
+            if (left >= I64{8}) {
+                os_move_8_16_i64(to, from, left)
+            } else if (left >= I64{4}) {
+                os_move_4_7_i64(to, from, left)
+            } else if (left > I64{0}) {
+                os_move_1_3_i64(to, from, left)
+            }
+        } else if (left <= I64{32}) {
+            os_move_16_32_i64(to, from, left)
+        } else if (left <= I64{64}) {
+            os_move_32_64_i64(to, from, left)
+        } else {
+            os_move_64_128_i64(to, from, left)
         }
     }
 }

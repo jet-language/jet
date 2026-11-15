@@ -1469,9 +1469,10 @@ os_stack_address_i64: fn() -> I64 {
     """
 }
 
-// String moves for the runtime's memmove (Collections.jet jet_rt_mem_move).
-// Ascending copies `count` bytes from `source` to `target` in increasing
-// address order, so an overlap must have target below source.
+// The ascending string move for the runtime's memmove and fill
+// (Collections.jet jet_rt_mem_move, jet_rt_mem_fill): copies `count` bytes
+// from `source` to `target` in increasing address order, so an overlap must
+// have target below source.
 #[Unsafe("the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source"), FFI(asm)]
 os_copy_ascending_i64: fn(target: I64, source: I64, count: I64) {
     """
@@ -1487,39 +1488,140 @@ os_copy_ascending_i64: fn(target: I64, source: I64, count: I64) {
     """
 }
 
-// Descending copies `count` bytes (movsb) or 8-byte words (movsq) in
-// decreasing address order from the units starting at `target_last` and
-// `source_last`, then clears the direction flag again: an overlap must have
-// target above source.
-#[Unsafe("the caller owns count readable bytes ending at source_last and count writable bytes ending at target_last; an overlap has target above source"), FFI(asm)]
-os_copy_descending_bytes_i64: fn(target_last: I64, source_last: I64, count: I64) {
+// The short moves of the runtime's memmove (Collections.jet
+// jet_rt_mem_move): each moves `count` bytes, a count inside the class its
+// name gives, from `source` to `target`, and loads every byte before it
+// stores any, so the two ranges may overlap either way. A class covers its
+// bytes with two overlapping runs, the first from the start and the last
+// to the end; the 1 to 3 byte class moves the first, middle and last byte.
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 1 through 3"), FFI(asm)]
+os_move_1_3_i64: fn(target: I64, source: I64, count: I64) {
     """
-    push {target_last}
-    push {source_last}
-    push {count}
-    pop rcx
-    pop rsi
-    pop rdi
-    std
-    rep movsb
-    cld
-    ; clobbers rcx, rsi, rdi
+    movzx rax, byte ptr [{source}]
+    mov rcx, {source}
+    add rcx, {count}
+    movzx r10, byte ptr [rcx + -1]
+    mov rcx, {count}
+    shr rcx, 1
+    add rcx, {source}
+    movzx r11, byte ptr [rcx]
+    mov byte ptr [{target}], al
+    mov rcx, {count}
+    shr rcx, 1
+    add rcx, {target}
+    mov byte ptr [rcx], r11b
+    mov rcx, {target}
+    add rcx, {count}
+    mov byte ptr [rcx + -1], r10b
+    ; clobbers rax, rcx, r10, r11
     """
 }
 
-#[Unsafe("the caller owns count readable words whose last starts at source_last and count writable words whose last starts at target_last; an overlap has target above source"), FFI(asm)]
-os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64) {
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 4 through 7"), FFI(asm)]
+os_move_4_7_i64: fn(target: I64, source: I64, count: I64) {
     """
-    push {target_last}
-    push {source_last}
-    push {count}
-    pop rcx
-    pop rsi
-    pop rdi
-    std
-    rep movsq
-    cld
-    ; clobbers rcx, rsi, rdi
+    mov rax, {source}
+    add rax, {count}
+    mov ecx, dword ptr [{source}]
+    mov eax, dword ptr [rax + -4]
+    mov r10, {target}
+    add r10, {count}
+    mov dword ptr [{target}], ecx
+    mov dword ptr [r10 + -4], eax
+    ; clobbers rax, rcx, r10
+    """
+}
+
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 8 through 16"), FFI(asm)]
+os_move_8_16_i64: fn(target: I64, source: I64, count: I64) {
+    """
+    mov rax, {source}
+    add rax, {count}
+    mov rcx, qword ptr [{source}]
+    mov rax, qword ptr [rax + -8]
+    mov r10, {target}
+    add r10, {count}
+    mov qword ptr [{target}], rcx
+    mov qword ptr [r10 + -8], rax
+    ; clobbers rax, rcx, r10
+    """
+}
+
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 16 through 32"), FFI(asm)]
+os_move_16_32_i64: fn(target: I64, source: I64, count: I64) {
+    """
+    mov rax, {source}
+    add rax, {count}
+    mov rcx, {target}
+    add rcx, {count}
+    movups xmm0, xmmword ptr [{source}]
+    movups xmm1, xmmword ptr [rax + -16]
+    movups xmmword ptr [{target}], xmm0
+    movups xmmword ptr [rcx + -16], xmm1
+    ; clobbers rax, rcx, xmm0, xmm1
+    """
+}
+
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 32 through 64"), FFI(asm)]
+os_move_32_64_i64: fn(target: I64, source: I64, count: I64) {
+    """
+    mov rax, {source}
+    add rax, {count}
+    mov rcx, {target}
+    add rcx, {count}
+    movups xmm0, xmmword ptr [{source}]
+    movups xmm1, xmmword ptr [{source} + 16]
+    movups xmm2, xmmword ptr [rax + -32]
+    movups xmm3, xmmword ptr [rax + -16]
+    movups xmmword ptr [{target}], xmm0
+    movups xmmword ptr [{target} + 16], xmm1
+    movups xmmword ptr [rcx + -32], xmm2
+    movups xmmword ptr [rcx + -16], xmm3
+    ; clobbers rax, rcx, xmm0, xmm1, xmm2, xmm3
+    """
+}
+
+#[Unsafe("the caller owns count readable bytes at source and count writable bytes at target, and count is 64 through 128"), FFI(asm)]
+os_move_64_128_i64: fn(target: I64, source: I64, count: I64) {
+    """
+    mov rax, {source}
+    add rax, {count}
+    mov rcx, {target}
+    add rcx, {count}
+    movups xmm0, xmmword ptr [{source}]
+    movups xmm1, xmmword ptr [{source} + 16]
+    movups xmm2, xmmword ptr [{source} + 32]
+    movups xmm3, xmmword ptr [{source} + 48]
+    movups xmm4, xmmword ptr [rax + -64]
+    movups xmm5, xmmword ptr [rax + -48]
+    movups xmm6, xmmword ptr [rax + -32]
+    movups xmm7, xmmword ptr [rax + -16]
+    movups xmmword ptr [{target}], xmm0
+    movups xmmword ptr [{target} + 16], xmm1
+    movups xmmword ptr [{target} + 32], xmm2
+    movups xmmword ptr [{target} + 48], xmm3
+    movups xmmword ptr [rcx + -64], xmm4
+    movups xmmword ptr [rcx + -48], xmm5
+    movups xmmword ptr [rcx + -32], xmm6
+    movups xmmword ptr [rcx + -16], xmm7
+    ; clobbers rax, rcx, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7
+    """
+}
+
+// One 64-byte step of the runtime's long memmove: the 64 bytes at `source`
+// to `target`, every load before any store.
+#[Unsafe("the caller owns 64 readable bytes at source and 64 writable bytes at target"), FFI(asm)]
+os_move_64_i64: fn(target: I64, source: I64) {
+    """
+    movups xmm0, xmmword ptr [{source}]
+    movups xmm1, xmmword ptr [{source} + 16]
+    movups xmm2, xmmword ptr [{source} + 32]
+    movups xmm3, xmmword ptr [{source} + 48]
+    movups xmmword ptr [{target}], xmm0
+    movups xmmword ptr [{target} + 16], xmm1
+    movups xmmword ptr [{target} + 32], xmm2
+    movups xmmword ptr [{target} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3
     """
 }
 

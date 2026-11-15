@@ -73,6 +73,23 @@ x64_asm_byte_register: fn(text: String) -> Int Never! {
     }
 }
 
+// The 32-bit names of the same registers: a dword load writes the low half
+// and clears the high one, a dword store writes four bytes.
+x64_asm_dword_register: fn(text: String) -> Int Never! {
+    if text == {
+        "eax" -> 0
+        "ecx" -> 1
+        "edx" -> 2
+        "esi" -> 6
+        "edi" -> 7
+        "r8d" -> 8
+        "r9d" -> 9
+        "r10d" -> 10
+        "r11d" -> 11
+        else -> -1
+    }
+}
+
 x64_asm_reg: fn(s: X64AsmState, text: String, read: Bool) -> Int Never! {
     operand: text.trim()
     if operand.starts_with("{{") && operand.ends_with("}}") {
@@ -349,6 +366,12 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         } else if mnemonic == "mov" && x64_asm_byte_register(second) >= 0 && x64_asm_memory(s, first, "byte") == .Val(mem) {
             byte_reg: x64_asm_byte_register(second)
             x64_store_u8(s.code, mem.base, mem.disp, byte_reg)
+        } else if mnemonic == "mov" && x64_asm_dword_register(first) >= 0 && x64_asm_memory(s, second, "dword") == .Val(mem) {
+            dword_reg: x64_asm_dword_register(first)
+            x64_load_indexed(s.code, dword_reg, mem.base, -1, 1, mem.disp, 4)
+            written = dword_reg
+        } else if mnemonic == "mov" && x64_asm_dword_register(second) >= 0 && x64_asm_memory(s, first, "dword") == .Val(mem) {
+            x64_store_indexed(s.code, mem.base, -1, 1, mem.disp, x64_asm_dword_register(second), 4)
         } else { return Val("unsupported mov operands or stale placeholder") }
     } else if mnemonic == "shl" || mnemonic == "shr" || mnemonic == "sar" {
         // A register shifted by an imm8 count (0 through 63) or by cl.

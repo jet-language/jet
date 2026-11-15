@@ -59,6 +59,16 @@ inline_assembly_test_problem: fn(template: String, names: [String], returns: Boo
     assert(inline_assembly_test_problem("shl rax, 64", [String]{}, false).contains("shift count is outside 0 through 63"))
 }
 
+#Test("a dword load and store move four bytes through a 32-bit register") {
+    template: "mov r10d, dword ptr [{{source}} + -4]\nmov eax, dword ptr [{{source}}]\nmov dword ptr [{{target}}], r10d\nmov dword ptr [{{target}} + 4], eax\n; clobbers rax, r10"
+    assembled: x64_assemble_template(template, [String]{"target", "source"}, false, false)
+    assert(assembled.error == None)
+    // 44 8B 56 FC, 8B 06, 44 89 17, 89 47 04: REX.R only for r10d, no REX.W.
+    assert(assembled.code == [U8]{0x44, 0x8b, 0x56, 0xfc, 0x8b, 0x06, 0x44, 0x89, 0x17, 0x89, 0x47, 0x04})
+    assert(assembled.quiet)
+    assert(inline_assembly_test_problem("mov rax, dword ptr [{{source}}]", [String]{"source"}, false).contains("unsupported source"))
+}
+
 #Test("sema's scan names each unencoded word with its range in the body") {
     found: inline_assembly_x64_unencoded("    rdtsc\n1:\n    ; clobbers rax\n    bswap rax ; -> return\n")
     assert(found.len() == 1)

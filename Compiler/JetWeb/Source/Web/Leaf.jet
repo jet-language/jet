@@ -70,19 +70,6 @@ web_zeros: fn(e: &WebEmitter, count: Int) Never! {
     loop _ in 0..<count -> web_i64(e, 0)
 }
 
-// Pushes `base` - `scale` * (local `count` - 1): the first unit of a run
-// whose last starts at local `last`.
-web_run_start: fn(e: &WebEmitter, last: Int, count: Int, scale: Int) Never! {
-    web_get(e, last)
-    web_get(e, count)
-    web_i64(e, 1)
-    web_op(e, 0x7d)
-    web_i64(e, scale)
-    web_op(e, 0x7e)
-    web_op(e, 0x7d)
-    web_wrap(e)
-}
-
 // Pushes `old` := the word at local `address` and leaves it in t0.
 web_read_old: fn(e: &WebEmitter, address: Int) Never! {
     web_at(e, address)
@@ -163,25 +150,17 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
         // The stack pointer; the stack mark's (JetIR Build.jet
         // ir_stack_mark) is its caller's, with no leaf frame between them.
         "os_stack_address_i64" | "jet_ir_stack_mark" -> web_global_get(e, WEB_GLOBAL_SP)
-        "os_copy_ascending_i64" -> {
+        // Every move leaf is memory.copy, which moves as if through a buffer.
+        "os_copy_ascending_i64" | "os_move_1_3_i64" | "os_move_4_7_i64" | "os_move_8_16_i64" | "os_move_16_32_i64" | "os_move_32_64_i64" | "os_move_64_128_i64" -> {
             web_at(e, args[0])
             web_at(e, args[1])
             web_at(e, args[2])
             web_memory_copy(e)
         }
-        "os_copy_descending_bytes_i64" -> {
-            web_run_start(e, args[0], args[2], 1)
-            web_run_start(e, args[1], args[2], 1)
-            web_at(e, args[2])
-            web_memory_copy(e)
-        }
-        "os_copy_descending_words_i64" -> {
-            web_run_start(e, args[0], args[2], 8)
-            web_run_start(e, args[1], args[2], 8)
-            web_get(e, args[2])
-            web_i64(e, 8)
-            web_op(e, 0x7e)
-            web_wrap(e)
+        "os_move_64_i64" -> {
+            web_at(e, args[0])
+            web_at(e, args[1])
+            web_i32(e, 64)
             web_memory_copy(e)
         }
         // count words from target, each the word: an i64.store loop over
