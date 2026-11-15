@@ -1,0 +1,72 @@
+// `T.reflect().values` lists every case of a payload-free enum once, in
+// declaration order, as a `[T]`. A grouped case is listed by its path, a
+// written case number leaves no gap, and a case added to the enum joins the
+// list with no other edit.
+Direction: enum {
+    North
+    East
+    South
+    West
+}
+
+Damage: enum {
+    Physical {
+        Blunt
+        Pierce
+    }
+    Cold
+}
+
+#Layout(U8)
+Opcode: enum {
+    Nop
+    Load = 16
+    Halt = 255
+}
+
+// A method of the enum's own named `values` is untouched by the catalog.
+Weekend: enum {
+    Saturday
+    Sunday
+
+    values: fn() -> Int { 2 }
+}
+
+DIRECTION_COUNT: #run Direction.reflect().values.len()
+
+direction_name: fn(d: Direction) -> String {
+    if d == {
+        .North -> "North"
+        .East -> "East"
+        .South -> "South"
+        .West -> "West"
+    }
+}
+
+damage_name: fn(d: Damage) -> String {
+    if d == {
+        .Physical.Blunt -> "Physical.Blunt"
+        .Physical.Pierce -> "Physical.Pierce"
+        .Cold -> "Cold"
+    }
+}
+
+run: fn() {
+    print("directions at compile time: {DIRECTION_COUNT}")
+    directions: Direction.reflect().values
+    print("directions: {directions.len()}")
+    loop d in directions -> print(direction_name(d))
+    // Each read is a list of its own; walking one leaves the other at its start.
+    first := 0
+    second := 0
+    loop d in Direction.reflect().values {
+        if d == .East -> first += 1
+    }
+    loop d in Direction.reflect().values {
+        if d == .East -> second += 1
+    }
+    print("east seen: {first} and {second}")
+    loop d in Damage.reflect().values -> print(damage_name(d))
+    loop op in Opcode.reflect().values -> print("opcode {op.to_int()}")
+    print("weekend days: {Weekend.values()} of {Weekend.reflect().values.len()}")
+}

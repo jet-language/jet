@@ -634,6 +634,11 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         fact: sema_fact_read_check(base, member, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if fact.handled -> return fact.value
     }
+    // `T.reflect().values` is enum `T`'s typed catalog of case values.
+    if member == "values" {
+        catalog: sema_fact_enum_values(base, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if catalog.handled -> return catalog.value
+    }
     // Rust reports the E0220 owner read at the member name.
     member_span: Span{start: span.end - member.len(), end: span.end}
     // (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,

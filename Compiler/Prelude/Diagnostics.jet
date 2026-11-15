@@ -1667,6 +1667,25 @@ DispatchHoleCandidatePattern: struct {
     }
 }
 
+EnumValuesUnavailable: struct {
+    impl Diagnostic {
+        code: "E0949"
+        safety_class: .Soundness
+        safety_reason: "A case with a payload, a generic enum or a type that is no enum has no fixed list of values, so a catalog of it would hold values that do not exist."
+        expert_path: "none: list the values you need yourself"
+        meaning: "`T.reflect().values` on a type that is not an enum of payload-free cases"
+        detail: true
+
+        what: fn(self) -> String { "`T.reflect().values` needs an enum whose cases carry no payload" }
+
+        why: fn(self) -> String {
+            "`.values` lists every case of one enum type once as a value; a case with a payload is no value until its data is given, and any other type has no fixed set of values to list."
+        }
+
+        fix: fn(self) -> String { "Read `.values` on an enum whose cases carry no payload, or list the values you need yourself." }
+    }
+}
+
 RetiredPredicateArmHead: struct {
     impl Diagnostic {
         code: "E0993"

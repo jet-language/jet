@@ -7,6 +7,7 @@
 // `reflected_fact_type`, `Comptime::reflected_fact_field` and the reflection
 // rows of `CheckerCoreLib::core_struct_field`.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     COMPILER_BUILD_CPU_CACHE_LINE_GENERIC,
     Diagnostic,
     EnumLitArg,
@@ -36,6 +37,7 @@ use jet_foundation.[
     TextEdit,
     Type,
     TypeTupleField,
+    TypedLitBody,
     UnitScaleProvenance,
     VariantPayload,
     ViewProvenance,
@@ -43,6 +45,7 @@ use jet_foundation.[
     core_record_field,
     diagnostic_with_edit,
     jet_target_layout_cache_line,
+    foundation_named_type,
     jet_target_layout_cpu_features,
     jet_target_layout_pointer_size,
     type_name,
@@ -1554,4 +1557,62 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
     }
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields -> return sema_fact_read_unhandled()
     sema_fact_read_no_value(member, span, diagnostics)
+}
+
+// `T.reflect().values`: every case of enum `T` once, in declaration order, a
+// grouped leaf by its path (`T.Group.Leaf`). It is checked as the list
+// literal `[T]{T.A, T.Group.B}`, so each item is the ordinary case value, and
+// every read builds its own list. Only a reflected type is a subject: a value
+// named `values` and a user `values` method are untouched.
+sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    if base == .MethodCall(receiver, method, _, owner_type_args, type_args, args, _) {
+        if method != "reflect" || owner_type_args.len() > 0 || type_args.len() > 0 || args.len() > 0 -> return sema_fact_read_unhandled()
+        written: sema_fact_expr_path(receiver) ?? return sema_fact_read_unhandled()
+        at: Span{start: span.end - "values".len(), end: span.end}
+        // A builtin type (`Int`, `String`) is never an enum.
+        if !(foundation_named_type(written) == .Named(_)) {
+            diagnostics.push(sema_fact_enum_values_not_enum(written, at))
+            return sema_fact_read_failed()
+        }
+        symbol: sema_expression_type_symbol(scopes, environment, program, written) ?? return sema_fact_read_unhandled()
+        shape: sema_scope_declaration_enum(environment, program, symbol.id) ?? {
+            diagnostics.push(sema_fact_enum_values_not_enum(written, at))
+            return sema_fact_read_failed()
+        }
+        if shape.type_params.len() > 0 {
+            diagnostics.push(sema_error("E0949", at, "`{written}` is generic, so its cases have no one type to list", "`.values` lists each case as a value of one enum type, and a generic enum is a family of types", "list the values of the specialization you need yourself"))
+            return sema_fact_read_failed()
+        }
+        elements := [Expr]{}
+        loop variant in shape.variants {
+            if !(variant.payload == .Unit) {
+                diagnostics.push(sema_error("E0949", at, "`{written}.{variant.name}` carries a payload, so `{written}` has no list of case values", "`.values` lists every case once as a value, and a case with a payload is no value until its data is given", "remove the payload from `{variant.name}`, or list the values you need yourself"))
+                return sema_fact_read_failed()
+            }
+            elements.push(sema_fact_enum_value_path(written, variant.name, span))
+        }
+        head: Type.List{element: Type.Named{name: written}}
+        catalog: Expr.TypedLit{head: Val(head), body: TypedLitBody.Elements{elements: elements}, span: span, id: AST_NODE_GENERATED}
+        return SemaFactReadCheck{handled: true, value: sema_check_expression(catalog, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
+    }
+    sema_fact_read_unhandled()
+}
+
+sema_fact_enum_values_not_enum: fn(written: String, at: Span) -> Diagnostic {
+    sema_error("E0949", at, "`{written}` is not an enum, so it has no case values", "`.values` lists the cases of an enum that carry no payload; any other type has no fixed set of values to list", "read `.values` on an enum whose cases carry no payload, or list the values you need yourself")
+}
+
+// `Owner.Group.Leaf` as source: `owner` is the type as the program wrote it
+// (`Kind` or `types.Kind`), `path` the case's declared path.
+sema_fact_enum_value_path: fn(owner: String, path: String, span: Span) -> Expr Never! {
+    value := Expr.Ident{name: "", span: span, id: AST_NODE_GENERATED}
+    first := true
+    loop segment in "{owner}.{path}".split(".") {
+        value = if {
+            first -> Expr.Ident{name: segment, span: span, id: AST_NODE_GENERATED}
+            else -> Expr.Field{base: value, member: segment, span: span, id: AST_NODE_GENERATED}
+        }
+        first = false
+    }
+    value
 }
