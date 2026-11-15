@@ -643,9 +643,10 @@ SemaGraphResult: struct {
     // SemaRegistrationGraph.core_seal: the Core seal's lines
     // (sema_core_seal_lines); empty otherwise.
     core_seal: [String]{[String]{}}
-    // SemaRegistrationGraph.core_seal: the Prelude's function checks as
-    // packets, in module order (CoreBodies.jet); empty otherwise.
-    core_bodies: [SemaCoreBody]{[SemaCoreBody]{}}
+    // SemaRegistrationGraph.core_seal: the Prelude's function checks as the
+    // bodies file (CoreBodies.jet sema_core_bodies_bytes), in module order;
+    // empty otherwise.
+    core_bodies: [U8]{[U8]{}}
     // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
     // how many Core functions its demand checked as stand-ins, and, when
     // something they assume did not hold, why the finalization must run
@@ -3978,11 +3979,13 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 }
             }
             check_diagnostic_start: result.diagnostics.len()
-            checked := sema_check_module_function(ready, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
+            capturing: sema_core_body_capturing(program, module_index)
+            if capturing -> sema_core_body_capture_open(program, ready, item_index)
+            checked := sema_core_body_loaded(program, host_hooks, module_index, owner_id, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references) ?? sema_check_module_function(ready, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
             }
-            if sema_core_body_capturing(program, module_index) {
+            if capturing {
                 checked = sema_core_body_capture(program, owner_id, checked, result.diagnostics, check_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, result.core_bodies)
             }
             sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
@@ -4064,6 +4067,8 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         .None -> {}
     }
     function_diagnostic_start: diagnostics.len()
+    capturing: sema_core_body_capturing(program, module_index)
+    if capturing -> sema_core_body_capture_open(program, ready, ordinal)
     prepared := sema_check_take_body(ready, ordinal)
     if prepared == .Val(body) {
         if body.wanted_hooks -> prepared = None
@@ -4086,6 +4091,9 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         function_call_facts = packet.call_facts.move()
         function_comptime_requests = packet.comptime_requests.move()
         function_name_references = packet.name_references.move()
+    }
+    if checked_result == None {
+        checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     }
     if input == None {
         memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
@@ -4116,7 +4124,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     checked_result = None
     // A captured method packet's diagnostics hold its preparation's, as a
     // prepared one's do.
-    if sema_core_body_capturing(program, module_index) {
+    if capturing {
         checked = sema_core_body_capture(program, owner_id, checked, diagnostics, function_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, core_bodies)
     }
     memory_complete: owned_input.memory_complete
@@ -11640,7 +11648,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     after_body_graph := owned.move()
     held := bodies.move()
     sema_core_demand_counters(after_body_graph, held.core_tally, trace_sink)
-    sema_core_text_counters(after_body_graph, held.modules, trace_sink)
+    sema_core_text_counters(after_body_graph, held.modules, sema_host_hook_access(host_hooks), trace_sink)
     // A run bound to the Core image checked `stood_in` Core functions as
     // stand-ins (CoreDemand.jet); `rerun` is why this finalization must run
     // again without them, else "": its demand named one where a stand-in
@@ -12039,6 +12047,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     core_bodies := [SemaCoreBody]{}
     loop position in 0..<modules.len() -> compiler_transfer_rows<SemaCoreBody>(core_bodies, modules[position].core_bodies)
+    bodies_file: if final_graph.core_seal -> sema_core_bodies_bytes(core_bodies.move(), sema_core_bodies_context(final_graph)) else -> [U8]{}
     result := SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
@@ -12056,7 +12065,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         complete: complete,
         inferred_infallible: inferred_infallible,
         core_seal: core_seal,
-        core_bodies: core_bodies.move(),
+        core_bodies: bodies_file,
         core_stand_ins: stood_in,
         core_stand_in_rerun: rerun,
         programs: programs,

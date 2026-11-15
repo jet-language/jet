@@ -321,7 +321,10 @@ sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDeman
 // `core.prelude`, module `core` and the compiler-owned Prelude modules
 // (Prelude/Errors, Prelude/Effects.jet), checked from their build-time
 // syntax rows. A body checked by its signature alone (FnBody.stand_in) is
-// not one. Each body counts under the first kind it is, in this order:
+// not one, nor is a Prelude body loaded from the Core library's check
+// (CoreBodies.jet, SemaRegistrationHostHooks.core_bodies_loaded), which
+// counts as `counters.core.bodies_loaded`. Each body counts under the first
+// kind it is, in this order:
 // `prelude`, a Prelude body; `generic`, a body with type parameters;
 // `impl`, a trait-impl method; `generated`, a compiler-generated body (a
 // derive or codec one); `root`, a lowering root
@@ -329,8 +332,20 @@ sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDeman
 // `demand`, a body a demand wave checked (graph.core_checked, which
 // sema_core_bound_counters splits by why a run keeps it); `upfront`, any
 // other.
-sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], trace_sink: CompilerTraceSink?) Never! {
+sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], host_hooks: SemaHostHookAccess?, trace_sink: CompilerTraceSink?) {
+    if trace_sink == None -> return
+    access: host_hooks ?? return
+    if access == .Callbacks(hooks) {
+        permit: hooks.guard_read()
+        sema_core_text_count(graph, modules, permit.value.core_bodies, permit.value.core_bodies_loaded, trace_sink)
+    }
+}
+
+// sema_core_text_counters, with `bodies` and `loaded_rows` the bodies file
+// and the rows of it the compile loaded.
+sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], bodies: SemaCoreBodies?, loaded_rows: [Bool], trace_sink: CompilerTraceSink?) Never! {
     sink: trace_sink ?? return
+    loaded := 0
     prelude := 0
     generic := 0
     trait_impl := 0
@@ -343,6 +358,10 @@ sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         if !in_prelude && !module_is_core(checked.module_identity) -> next
         loop function in checked.functions {
             if function.stand_in -> next
+            if in_prelude && sema_core_body_was_loaded(bodies, loaded_rows, function.key) {
+                loaded += 1
+                next
+            }
             lowering_root := false
             if graph.core_lowering_roots == .Val(roots) -> lowering_root = roots.get(function.key) != None
             if in_prelude {
@@ -362,6 +381,7 @@ sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             }
         }
     }
+    sink.progress("counters.core.bodies_loaded", loaded, -1)
     sink.progress("counters.core.bodies_from_text", prelude + generic + trait_impl + generated + root + demand + upfront, -1)
     sink.progress("counters.core.bodies_from_text.demand", demand, -1)
     sink.progress("counters.core.bodies_from_text.generated", generated, -1)

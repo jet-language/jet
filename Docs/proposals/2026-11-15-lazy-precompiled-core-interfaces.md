@@ -552,6 +552,25 @@ identities). The library writes the captures, in module order, as
 `{prefix}.bodies`. A body the comptime pass checked first and the module
 pass reused is not captured, and is checked from text as before.
 
+**The load.** The toolchain ships the bodies file as `core.bodies` beside
+the Core seal, a part of every jet the compiler build makes. The file
+opens with the facts of the capturing compile that a check reads beyond
+the Core text: target triple, profile, OS, artifact build, keep-going and
+test modes (`sema_core_bodies_context`). A native compile already bound to
+the built-in Core without `--deep-checks` (`JetCli/Request.jet`) reads the
+file's index into `SemaRegistrationHostHooks.core_bodies`. In place of a
+Prelude function's check, on the module pass's thread, it loads that
+function's packet (`sema_core_body_loaded`) when the facts are its own and
+every key resolves in its tables. The packet then drains as a prepared one
+does. Any miss checks the function from text. A captured check runs on the
+module pass's thread, never from a thread's prepared packet, so the codecs
+and derived methods it demanded are recorded with it. A load records them
+again (`sema_demand_capture_replay`), as a reused comptime check does. A
+loaded body counts as `core.bodies_loaded`, not under `bodies_from_text`.
+A run whose tree's Core has not been compared yet checks the Prelude from
+text. That run still reads its tree's Core only when its demand names a
+deferred body.
+
 #### 3.3.1 Fields that whole-program passes write (H10)
 
 These `FnBody` fields are written after a body's own check by passes that

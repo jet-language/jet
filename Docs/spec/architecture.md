@@ -249,11 +249,11 @@ threads through the runtime. A Core build failure fails the step with
 section of its own, past the 16-bit section indices through section 0 and
 `.symtab_shndx`. The step installs `jet-runtime/` beside the compiler:
 `native.key`, `jet_runtime.pack.o`, the library `jet_core.o` and its four
-lists, `core.interface`, and `jet_runtime.image`, the runtime object and the Core object
+lists, `core.interface`, `core.bodies`, and `jet_runtime.image`, the runtime object and the Core object
 linked once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
 index of its defined global symbols. jet carries `jet_core.o`, the four
-lists and `core.interface` as parts; `jet self devtools embed` refuses Core facts that disagree
+lists, `core.interface` and `core.bodies` as parts; `jet self devtools embed` refuses Core facts that disagree
 with the export list (an export without a facts row, or a facts row of a
 function the exports lack). `core.interface` (`JetDriver/Driver/CoreInterface.jet`)
 holds, for each unit of the Core built into jet, what a load learns from
@@ -269,7 +269,16 @@ blanked, and counts the tokens it lexed; once reach has stripped the
 module, the bodies it kept parse again on the compiler threads, reading
 only the text of the items that hold them, and take their functions'
 places (`jet_driver_core_restore_bodies`). Any other unit, or any unit of a load
-without reach or of jet-bare, which carries no part, parses whole. A `jet run` whose Core is jet's built-in Core sources (a
+without reach or of jet-bare, which carries no part, parses whole.
+`core.bodies` (`JetSema/Sema/CoreBodies.jet`) holds the checks of the
+Prelude's functions as the Core library's check left them, each as the
+packet a compiler thread hands the module pass, its ids written as keys,
+with the facts of that check's compile (target, profile, OS, artifact
+build, keep-going and test modes). A native compile already bound to the
+built-in Core, without `--deep-checks`, loads a Prelude function's packet
+in place of checking its body when those facts are its own and every key
+resolves, and records again the codecs and derived methods the check
+demanded; any other function is checked from text. A `jet run` whose Core is jet's built-in Core sources (a
 compile outside a toolchain tree) binds its Core calls to that Core code
 (`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
 call of a non-generic Core function whose bounds checks are the stock ones
