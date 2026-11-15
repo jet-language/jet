@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104350,
+    "rev": 104375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60566,8 +60566,8 @@
     {
       "id": "c0c209zc",
       "num": 5931,
-      "title": "JetDevserver: finish the port (jet dev --canvas, run --app/--share, self devtools, self LSP)",
-      "body": "Census by O0Image-3, 2026-10-24 ($JET_SCRATCH_ROOT/lanes/O0Image/g3/CENSUS.md). Compiler/JetDevserver is a 15.4k-line port of the deleted crates/jet-devserver; it does not build (1626 check errors) and is outside the build. Every intended caller refuses with E2104 'use the Rust-hosted jet': jet dev --canvas, jet run --app/--share, jet self devtools, and jet self lsp (JetLSP depends on it). Plain jet dev (watch plus rerun) works without it. Core/Web/Devserver.jet declares jet_devserver_* routes that have no runtime implementation. Deleting it would orphan JetCanvas/JetDebug and touch JetLSP. This is an owner decision (product surface); ballot D-DEVSERVER1.",
+      "title": "JetDevserver: finish the port, so jet dev serves the app preview, canvas, devtools and web hot swap from the self-hosted toolchain",
+      "body": "Destination: Compiler/JetDevserver checks clean, is built into `jet`, and serves:\n- `jet dev`'s app preview on a stable port;\n- `jet dev --canvas`, `jet run --app` and `jet run --share`;\n- the browser host's workbench and in-app devtools;\n- web hot swap for `jet dev --target=web`.\n\nPlain `jet dev` (watch plus rerun) lives in JetCli and works without it.\n\nOwner ruling 2026-11-09: do not delete JetDevserver; finish the port. The ratified D-DEVSERVER1=A (delete and rebuild lean, 2026-10-24) predates that ruling, and its record has not been updated.\n\nState 2026-11-13: G5DevX-2 owns the port in hour-sized steps, and the registration errors are cleared (34e02ff42f). The hot-swap paths refuse with not-available until #6625 lands. The 67 undeclared imports take path (b) (Main's log 2026-11-13).\n\nSource: O0Image-3's census 2026-10-24 and CFreeLead3's census 2026-11-09.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e14",
@@ -60748,7 +60748,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-15T03:58:31.519Z",
+      "updated": "2026-11-15T04:15:06.400Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -87358,8 +87358,8 @@
     {
       "id": "c0xhxet9",
       "num": 6619,
-      "title": "Reactive notebook (`jet notebook`)",
-      "body": "The reactive notebook kernel: dependency-ordered cell reruns, typed input controls, browser reconnect and output attachment. Moved out of #6418 by owner ruling 2026-11-06.",
+      "title": "Reactive notebook: `jet notebook` reruns only affected cells, with typed controls, reconnect, attached outputs and diff-friendly .jetnb files",
+      "body": "Destination: `jet notebook` runs a reactive kernel. Editing a cell reruns its pure descendants and marks effectful ones for confirmation (D-DX-CELLS1=A). Typed function arguments render as controls. A browser reconnects only with matching identity and authority. Outputs stay attached to their cells. A `.jetnb` file holds only source, so `git diff` shows one cell's change. The notebook runs and builds like a program, and a Jupyter kernel adapter exists.\n\nThe notebook rows in tests/known-failing.tsv are on #6418 (unbuilt `jet notebook`, E2104).\n\nMoved out of #6418 by owner ruling 2026-11-06. The notebook app moved to #6922 on 2026-11-15.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -87372,7 +87372,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. The notebook app (c11-c14) went to #6922. c10 (the D-DX-CELLS1 proof stub) merged into c1."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -87394,30 +87400,30 @@
         },
         {
           "n": 3,
-          "text": "(was #2445 c3) Proof: a tests/cases notebook row on the self-hosted jet notebook. Deleting a defining cell scrubs its bindings, invalidates dependent outputs, and never displays an old cached value as current. Deferred runtime proof (#2919): tests/notebook_reactivity.rs (moved from #6418 c112)",
+          "text": "Deleting a defining cell scrubs its bindings and invalidates the dependent outputs, and an old cached value is never shown as current. Proof: `jet test Compiler --profile cases --filter notebook/notebook_declarations_are_file_wide_but_state_cells_stay_ordered`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:09.120Z"
+          "at": "2026-11-15T04:14:52.481Z"
         },
         {
           "n": 4,
-          "text": "(was #2445 c4) Proof: a tests/cases notebook row on the self-hosted jet notebook. Closing and reopening the browser reconnects to the same bounded kernel only when source/build identity and authority checks pass; an unauthorized reconnect is rejected with a structured diagnostic. Deferred runtime proof (#2919): tests/notebook_live.rs (moved from #6418 c113)",
+          "text": "Closing and reopening the browser reconnects to the same bounded kernel only when the source and build identity and the authority checks pass, and an unauthorized reconnect is rejected with a registered error. Proof: `jet test Compiler --profile cases --filter notebook/headless_protocol_interrupt_stdin_debug_perf_and_clients`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:10.548Z"
+          "at": "2026-11-15T04:14:53.434Z"
         },
         {
           "n": 5,
-          "text": "(was #2445 c5) Proof: a tests/cases notebook row on the self-hosted jet notebook. Text, HTML, SVG, and table results remain attached to their executable cell, imported output stays quarantined, and exports report any dropped semantics. Deferred runtime proof (#2919): tests/notebook.rs (moved from #6418 c114)",
+          "text": "Text, HTML, SVG and table results stay attached to their cell, imported output stays quarantined, and exports report any semantics they drop. Proof: `jet test Compiler --profile cases --filter notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:12.010Z"
+          "at": "2026-11-15T04:14:54.442Z"
         },
         {
           "n": 6,
@@ -87430,75 +87436,80 @@
         },
         {
           "n": 7,
-          "text": "(was #6020) A Jupyter kernel adapter runs Jet cells: a scripted `jupyter nbconvert --execute` run of a three-cell notebook passes in a test where Jupyter is installed and is skipped with a reason elsewhere. (was #6386 c7)",
+          "text": "A Jupyter kernel adapter runs Jet cells: a scripted `jupyter nbconvert --execute` of a three-cell notebook passes where Jupyter is installed and is SKIP-HOST with a reason elsewhere. Proof: `jet test Compiler --profile cases --filter notebook/jupyter_kernel_runs_three_cells`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:38.910Z"
+          "at": "2026-11-15T04:14:55.756Z"
         },
         {
           "n": 8,
-          "text": "(was #6020) `jet run nb.jetnb` and `jet build nb.jetnb` print the same output as running every cell in order; a test corpus of 20 notebooks reruns from a clean state with identical output 20/20 (Jupyter study baseline: 4% reproduce; marimo cannot build a native binary). (was #6386 c8)",
+          "text": "`jet run nb.jetnb` and `jet build nb.jetnb` print the same output as running every cell in order, and a corpus of 20 notebooks reruns from a clean state with identical output 20 of 20 times. For comparison, 4% of Jupyter notebooks reproduce, and marimo cannot build a native binary. Proof: `jet test Compiler --profile cases --filter notebook/run_and_build_match_cell_order` and `--filter notebook/corpus_reruns_identically`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:41.313Z"
+          "at": "2026-11-15T04:14:56.915Z"
         },
         {
           "n": 9,
-          "text": "(was #6020) Editing one cell of a 10-cell notebook reruns only its dependents and shows the new output sooner than marimo on the equivalent notebook (Jet/marimo < 1.00, numbers logged). (was #6386 c9)",
+          "text": "Editing one cell of a 10-cell notebook reruns only its dependents and shows the new output sooner than marimo does on the equivalent notebook (Jet time over marimo time below 1.00). Proof: a committed measurement under Docs/audits with both timings and the commands.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:43.688Z"
+          "at": "2026-11-15T04:14:58.019Z"
         },
         {
           "n": 10,
           "text": "(was #4272) {\"decisionId\": \"D-DX-CELLS1\", \"text\": \"Rerun pure descendants automatically and mark effectful work for confirmation; Gains: Only affected cells rerun.; Deleted bindings are scrubbed.; Stale output is always labeled.. Losses: A live kernel keeps bounded state..\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_dx_cells1_contract\", \"suite\": \"tests/ratified/P08.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P08/d_dx_cells1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"edit pure ancestor reruns only pure descendants; effectful cells require confirmation; delete binding scrubs it; stale output labeled; bounded retained kernel state\", \"one resident game source/runtime session with identical headless/rendered events and authoritative Canvas routes\", \"typed local SQL interactive and CI command with plans/limits; optional browser projection; remote engine requires explicit provider authority\", \"local app selection shares reload/reconnect and serves real requests; local-only default; close shuts down resident process\"]}} (was #4275 c77)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:34:37.089Z"
+          "evidence": "Merged into #6619 c1: D-DX-CELLS1=A's required cases (pure descendants rerun, effectful confirmation, deleted bindings scrubbed, stale output labeled) are c1 and c3",
+          "at": "2026-11-15T04:14:59.113Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "`jet notebook --app` starts a loopback server that renders the notebook's cell outputs, layouts and controls from the running notebook kernel, with no second evaluator. Proof: `jet test Compiler --profile cases --filter notebook_app_serves_cells`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:16.041Z"
+          "evidence": "Moved to #6922 c1: the notebook app has its own card",
+          "at": "2026-11-15T04:15:00.168Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "Two browser tabs on one notebook app get separate typed session state, run callbacks in a fixed order, and reset or reconnect independently; one tab cannot read or change the other's state. Proof: `jet test Compiler --profile cases --filter notebook_app_tabs_are_isolated`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:17.719Z"
+          "evidence": "Moved to #6922 c2: the notebook app has its own card",
+          "at": "2026-11-15T04:15:01.207Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "Editing the notebook or one of its typed functions under `jet dev` updates the running app, keeps state whose type did not change, and names the reason when it resets state or shows a stale output. Proof: `jet test Compiler --profile cases --filter notebook_app_dev_keeps_state`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:19.034Z"
+          "evidence": "Moved to #6922 c3: the notebook app has its own card",
+          "at": "2026-11-15T04:15:02.215Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
           "text": "The notebook app binds to loopback only unless sharing is asked for, and prints a machine-readable receipt of its bind address, sharing, data it reads and trust grants. Proof: `jet test Compiler --profile cases --filter notebook_app_receipt`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:20.341Z"
+          "evidence": "Moved to #6922 c4: the notebook app has its own card",
+          "at": "2026-11-15T04:15:03.211Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -87509,7 +87520,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:24:24.911Z",
-      "updated": "2026-11-15T04:14:51.059Z",
+      "updated": "2026-11-15T04:15:07.473Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
@@ -87833,30 +87844,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #2426 c1) Implementation-only closure: every live edit computes per-key canonical #Persist retention from checked type identity, validates payload shape through one Foundation migration boundary, preserves only unchanged typed values, and records explicit Fresh/Reset reasons for changed or unavailable keys across tiers (moved from #5454 c66)",
+          "text": "On every live edit, each #Persist key's retention comes from its checked type identity, and its payload shape is validated at one Foundation migration boundary. Only unchanged typed values are kept, and changed or unavailable keys record an explicit Fresh or Reset reason, on O0 and O2. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/persist_binding_survives_hot_swap_and_resets_on_shape_change` on O0 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:25.014Z"
+          "at": "2026-11-15T04:15:08.522Z"
         },
         {
           "n": 2,
-          "text": "(was #2489 c1) Game hot swap is source-complete through production WatchSession facts, one shared Foundation swap kernel, typed asset/script/world decisions, resident CmdDevTools application, and canonical event publication; runtime proof is deferred to #2919 (moved from #5454 c67)",
+          "text": "Game hot swap runs through the production WatchSession facts and one shared swap kernel. Asset, script and world changes get typed decisions, the resident dev tools apply them, and each is published as an event. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/game_hot_swap_applies_typed_decisions`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:25.811Z"
+          "at": "2026-11-15T04:15:09.474Z"
         },
         {
           "n": 3,
-          "text": "(was #2504 c1) Execution selection, composed O0/O2 source paths, content-digest watching and resident live execution with Persist semantics are integrated; long-lived tier proof remains #2919 (moved from #5454 c68)",
+          "text": "`jet dev` selects the tier, runs the O0 and O2 source paths, watches by content digest, and keeps #Persist semantics in resident live execution across a long-lived session. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/ul6_native_watch_matrix_budget_and_reconnect` and `--filter dev_parts_routine/persist_example_survives_hot_reload` on O0 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:26.625Z"
+          "at": "2026-11-15T04:15:10.398Z"
         },
         {
           "n": 4,
@@ -87869,21 +87880,21 @@
         },
         {
           "n": 5,
-          "text": "(was #2504 c3) Default swap, explicit session/project restart opt-outs and retained existing field values are implemented with typed save outcomes (moved from #5454 c70)",
+          "text": "A save swaps by default, the explicit session and project restart opt-outs work, existing field values are kept, and each save reports a typed outcome. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/save_outcomes_swap_and_restart_optout`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:28.204Z"
+          "at": "2026-11-15T04:15:11.689Z"
         },
         {
           "n": 6,
-          "text": "(was #2504 c4) Live inspection exposes typed pinned values and their shapes at the ratified inspect build live route, with source fixtures (moved from #5454 c71)",
+          "text": "Live inspection shows typed pinned #Persist values and their shapes through the ratified live inspect route. Proof: `jet test Compiler --profile cases --filter live_inspect/pinned_persist_values_and_shapes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T23:25:29.269Z"
+          "at": "2026-11-15T04:15:12.863Z"
         },
         {
           "n": 7,
@@ -87896,57 +87907,57 @@
         },
         {
           "n": 8,
-          "text": "(was #6024) Under `jet dev`, editing a function body in a running program applies the change and keeps every `#Persist` value whose type is unchanged; the Rust-era tests of #2426 and #765 are ported and pass. (was #6386 c13)",
+          "text": "Under `jet dev`, editing a function body in a running program applies the change and keeps every #Persist value whose type is unchanged, on O0 and O2. The Rust-era tests of #2426 and #765 are ported as cases. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/persist_` on O0 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:46.166Z"
+          "at": "2026-11-15T04:15:14.147Z"
         },
         {
           "n": 10,
-          "text": "(was #6024) A type change to a persisted value follows D-LIVE-PERSIST1=A and is reported, never silently reinterpreted (test). (was #6386 c15)",
+          "text": "D-LIVE-PERSIST1=A: when a persisted value's type changes and the type is #PublishedSchema with a migration that covers the change, the value migrates in place through the same step function decode uses, and the save line says so. Otherwise `jet dev` announces a restart. A value is never silently reinterpreted. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/persist_published_schema_migrates_in_place` and `--filter dev_parts_routine/persist_unpublished_change_announces_restart`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:50.704Z"
+          "at": "2026-11-15T04:15:15.384Z"
         },
         {
           "n": 11,
-          "text": "(was #3196) [#3113] One declared rule for which state survives an edit. A failed edit never silently repeats external work. The displayed active revision agrees with machine diagnostics (real failed-edit transcript). (was #4275 c73)",
+          "text": "One declared rule decides which state survives an edit. A failed edit never silently repeats external work, and the displayed active revision agrees with the machine diagnostics. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/failed_edit_keeps_revision_and_skips_external_work`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:34:25.509Z"
+          "at": "2026-11-15T04:15:16.581Z"
         },
         {
           "n": 12,
-          "text": "(was #4272) {\"decisionId\": \"D-DX-GAMELOOP1\", \"text\": \"Add game state and controls to the existing resident development session; Gains: One session owns source and runtime.; Canvas routes stay authoritative.; Headless and rendered runs share events.. Losses: A rendered session consumes host resources..\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_dx_gameloop1_contract\", \"suite\": \"tests/ratified/P08.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P08/d_dx_gameloop1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"edit pure ancestor reruns only pure descendants; effectful cells require confirmation; delete binding scrubs it; stale output labeled; bounded retained kernel state\", \"one resident game source/runtime session with identical headless/rendered events and authoritative Canvas routes\", \"typed local SQL interactive and CI command with plans/limits; optional browser projection; remote engine requires explicit provider authority\", \"local app selection shares reload/reconnect and serves real requests; local-only default; close shuts down resident process\"]}} (was #4275 c78)",
+          "text": "D-DX-GAMELOOP1=A: game state and controls live in the existing resident `jet dev` session. One session owns source and runtime, Canvas routes stay authoritative, and headless and rendered runs share events. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/game_loop_in_dev_session`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:34:39.785Z"
+          "at": "2026-11-15T04:15:17.942Z"
         },
         {
           "n": 13,
-          "text": "D-HOTSTATE1=A is built: on a hot swap, added fields take their declared default, removed fields are dropped, renames and type changes use `migration` blocks, and when no rule applies `jet dev` restarts and names the field that blocked the swap. Proof: a jet dev case per rule. (was #3239 c35)",
+          "text": "D-HOTSTATE1=A: on a hot swap, an added field takes its declared default, a removed field is dropped, renames and type changes use `migration` blocks, and a renamed binding resets. When no rule applies, `jet dev` restarts and names the field that blocked the swap. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/hot_state_`, with one case per rule.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:38.579Z"
+          "at": "2026-11-15T04:15:18.938Z"
         },
         {
           "n": 14,
-          "text": "D-DEV-STATE1=A is built: the jet process holds the #Persist store and gives each program child a private pipe through the session, and a runtime thread in the child copies every JetPersistCell whole on a stop request, so #Persist values survive a jet dev restart. Proof: a jet dev case edits a body, the program restarts, and a #Persist counter keeps its value, on O0, with the store never written to disk.",
+          "text": "D-DEV-STATE1=A: the jet process holds the #Persist store and gives each program child a private pipe through the session. On a stop request, a runtime thread in the child copies every JetPersistCell whole, so #Persist values survive a `jet dev` restart without the store ever being written to disk. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/persist_survives_restart_through_session_pipe` on O0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T04:52:20.640Z"
+          "at": "2026-11-15T04:15:19.885Z"
         }
       ],
       "refs": [],
@@ -87957,8 +87968,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:24.209Z",
-      "updated": "2026-11-13T22:32:14.074Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:15:19.885Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
     {
@@ -213836,6 +213847,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:15:19.885Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#14: proof; was: D-DEV-STATE1=A is built: the jet process holds the #Persist store and gives each program child a private pipe through the session, and a runtime thread in the child copies every JetPersistCell whole o"
+    },
+    {
+      "at": "2026-11-15T04:15:18.938Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#13: strip debris; proof; was: D-HOTSTATE1=A is built: on a hot swap, added fields take their declared default, removed fields are dropped, renames and type changes use `migration` blocks, and when no rule applies `jet dev` restart"
+    },
+    {
+      "at": "2026-11-15T04:15:17.942Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#12: replace the decision proof stub with the outcome and a proof; was: (was #4272) {\"decisionId\": \"D-DX-GAMELOOP1\", \"text\": \"Add game state and controls to the existing resident development session; Gains: One session owns source and runtime.; Canvas routes stay authorit"
+    },
+    {
+      "at": "2026-11-15T04:15:16.581Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#11: strip debris; proof; was: (was #3196) [#3113] One declared rule for which state survives an edit. A failed edit never silently repeats external work. The displayed active revision agrees with machine diagnostics (real failed-e"
+    },
+    {
+      "at": "2026-11-15T04:15:15.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#10: spell out the decision; proof; was: (was #6024) A type change to a persisted value follows D-LIVE-PERSIST1=A and is reported, never silently reinterpreted (test). (was #6386 c15)"
+    },
+    {
+      "at": "2026-11-15T04:15:14.147Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#8: strip debris; proof; was: (was #6024) Under `jet dev`, editing a function body in a running program applies the change and keeps every `#Persist` value whose type is unchanged; the Rust-era tests of #2426 and #765 are ported a"
+    },
+    {
+      "at": "2026-11-15T04:15:12.863Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#6: strip debris; proof; was: (was #2504 c4) Live inspection exposes typed pinned values and their shapes at the ratified inspect build live route, with source fixtures (moved from #5454 c71)"
+    },
+    {
+      "at": "2026-11-15T04:15:11.689Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#5: strip debris; proof; was: (was #2504 c3) Default swap, explicit session/project restart opt-outs and retained existing field values are implemented with typed save outcomes (moved from #5454 c70)"
+    },
+    {
+      "at": "2026-11-15T04:15:10.398Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#3: strip debris; proof; was: (was #2504 c1) Execution selection, composed O0/O2 source paths, content-digest watching and resident live execution with Persist semantics are integrated; long-lived tier proof remains #2919 (moved f"
+    },
+    {
+      "at": "2026-11-15T04:15:09.474Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#2: strip debris; proof; was: (was #2489 c1) Game hot swap is source-complete through production WatchSession facts, one shared Foundation swap kernel, typed asset/script/world decisions, resident CmdDevTools application, and cano"
+    },
+    {
+      "at": "2026-11-15T04:15:08.522Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c066t33h",
+      "note": "#1: strip debris; proof; was: (was #2426 c1) Implementation-only closure: every live edit computes per-key canonical #Persist retention from checked type identity, validates payload shape through one Foundation migration boundary,"
+    },
+    {
+      "at": "2026-11-15T04:15:07.473Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0xhxet9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:15:06.400Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:15:04.870Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0xhxet9",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:15:03.211Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xhxet9",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T04:15:02.215Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xhxet9",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T04:15:01.207Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xhxet9",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T04:15:00.168Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xhxet9",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T04:14:59.113Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xhxet9",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T04:14:58.019Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#9: strip debris; proof; was: (was #6020) Editing one cell of a 10-cell notebook reruns only its dependents and shows the new output sooner than marimo on the equivalent notebook (Jet/marimo < 1.00, numbers logged). (was #6386 c9)"
+    },
+    {
+      "at": "2026-11-15T04:14:56.915Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#8: strip debris; proof; was: (was #6020) `jet run nb.jetnb` and `jet build nb.jetnb` print the same output as running every cell in order; a test corpus of 20 notebooks reruns from a clean state with identical output 20/20 (Jupyt"
+    },
+    {
+      "at": "2026-11-15T04:14:55.756Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#7: strip debris; proof; was: (was #6020) A Jupyter kernel adapter runs Jet cells: a scripted `jupyter nbconvert --execute` run of a three-cell notebook passes in a test where Jupyter is installed and is skipped with a reason else"
+    },
+    {
+      "at": "2026-11-15T04:14:54.442Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#5: strip debris; proof; was: (was #2445 c5) Proof: a tests/cases notebook row on the self-hosted jet notebook. Text, HTML, SVG, and table results remain attached to their executable cell, imported output stays quarantined, and ex"
+    },
+    {
+      "at": "2026-11-15T04:14:53.434Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#4: strip debris; proof; was: (was #2445 c4) Proof: a tests/cases notebook row on the self-hosted jet notebook. Closing and reopening the browser reconnects to the same bounded kernel only when source/build identity and authority "
+    },
+    {
+      "at": "2026-11-15T04:14:52.481Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#3: strip debris; proof; was: (was #2445 c3) Proof: a tests/cases notebook row on the self-hosted jet notebook. Deleting a defining cell scrubs its bindings, invalidates dependent outputs, and never displays an old cached value as"
+    },
     {
       "at": "2026-11-15T04:14:51.059Z",
       "by": "TowerKeeper-1",
