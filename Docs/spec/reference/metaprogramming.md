@@ -757,6 +757,17 @@ metadata identities, roots, results, and typed failures; parsing, checking,
 evaluation, and runtime retention use their own compiler seams. The feature
 examples show exercised forms, and the syntax ledger names ratified roots.
 
+Every row of the contract registry (`MetadataContract.jet` in JetFoundation's
+registries) names the witness test that proves it, and every Jai
+metaprogramming peer family, J01 to J40, names the Jet witnesses that prove
+Jet's answer to it in
+[`manifest.tsv`](../../../tests/cases/meta_suite/jai_families_and_metadata_rows_each_pass_a_witness.fixture/manifest.tsv).
+The manifest keeps historical Jai evidence, the author's dated demos, apart
+from behavior observed through pinned community sources.
+`jet test Compiler --profile cases --filter meta_suite` runs every witness on
+its tiers and fails on a family with no row, an Owed contract row, or a
+witness that fails, is skipped or misses a tier.
+
 ## Publication and advanced providers
 
 Standard metadata inspection is read-only. The syntax ledger reserves
