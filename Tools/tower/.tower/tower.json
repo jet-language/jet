@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6925,
-    "rev": 104625,
+    "rev": 104650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48792,57 +48792,57 @@
         },
         {
           "n": 5,
-          "text": "(was #644 c5) Coded diagnostics, UI snapshots, inspect, API and semver projections and examples cover no_alloc, zero_rc and arena_bounded, with O0, O1 and O2 parity.",
+          "text": "Coded diagnostics, UI snapshots, inspect, API and semver projections and examples cover no_alloc, zero_rc and arena_bounded, with O0, O1 and O2 parity. Proof: `jet test Compiler --profile cases --filter mem_facts/no_alloc_zero_rc_arena_bounded_` on O0, O1 and O2, and `jet test Compiler --profile ui --filter arena_bounded`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:57.255Z"
+          "at": "2026-11-15T04:32:09.604Z"
         },
         {
           "n": 6,
-          "text": "(was #1197 c1) A safe function can return a view chosen at runtime from compatible input owners [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "text": "A safe function can return a view chosen at run time from compatible input owners. Proof: `jet test Compiler --profile cases --filter ownership/returned_view_chosen_at_run_time` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:25.086Z"
+          "at": "2026-11-15T04:32:10.665Z"
         },
         {
           "n": 7,
-          "text": "(was #1197 c2) Lists, tuples, options, results, enums, and named aggregates can carry proven read or write views [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "text": "Lists, tuples, options, results, enums and named aggregates can carry proven read or write views. Proof: `jet test Compiler --profile cases --filter ownership/aggregates_carry_views_`, one case per holder kind.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:25.704Z"
+          "at": "2026-11-15T04:32:11.637Z"
         },
         {
           "n": 8,
-          "text": "(was #1197 c3) Function values, lambdas, generic callbacks, and trait dispatch preserve returned-view provenance without unsafe code [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "text": "Function values, lambdas, generic callbacks and trait dispatch keep returned-view provenance without unsafe code. Proof: `jet test Compiler --profile cases --filter dev_parts_routine/returned_view_trait_method_matches_aot_and_default_dev` and `--filter ownership/callback_view_provenance_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:26.340Z"
+          "at": "2026-11-15T04:32:12.642Z"
         },
         {
           "n": 9,
-          "text": "(was #1197 c4) Public API snapshots record source relations and report breaking provenance changes [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "text": "Public API snapshots record view source relations and report a provenance change as breaking. Proof: `jet test Compiler --profile packages --filter api_snapshot_view_provenance`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:26.948Z"
+          "at": "2026-11-15T04:32:13.664Z"
         },
         {
           "n": 10,
-          "text": "(was #1197 c5) Zero-copy parser and borrowing-deserializer examples work without copies, raw pointers, or user-written lifetime syntax [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "text": "A zero-copy parser and a borrowing deserializer work without copies, raw pointers or written lifetime syntax, and a parser over a locally owned source is refused. Proof: `jet test Compiler --profile golden --filter Memory/ZeroCopyParser` and `jet test Compiler --profile ui --filter zero_copy_parser_rejects_locally_owned_source`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:27.551Z"
+          "at": "2026-11-15T04:32:14.602Z"
         },
         {
           "n": 12,
@@ -48915,7 +48915,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-15T02:29:50.945Z",
+      "updated": "2026-11-15T04:32:14.602Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
@@ -54297,39 +54297,39 @@
       "criteria": [
         {
           "n": 2,
-          "text": "(was #4767) Native lowering never drops or retains boxed exact Ints (leak; ownership of Int nodes in native code): boxed Ints follow the same ownership as the reference tier (drop",
+          "text": "Native lowering drops and retains boxed exact Ints like every other owned value: dropped at the last use and retained on copy (Lower.jet lower_drop). Proof: `jet test Compiler --profile cases --filter leaks/boxed_exact_int_` passes under the leak gate on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:10:39.759Z"
+          "at": "2026-11-15T04:32:30.872Z"
         },
         {
           "n": 3,
-          "text": "(was #5059) Codegen: rebinding an owned heap value in a loop leaks the old value (simplify +153 B/inst/run, x64 +63 B/inst/run)",
+          "text": "Rebinding an owned heap value in a loop frees the old value (on 2026-10-20 it leaked 153 B per iteration on simplify and 63 B on x64). Proof: `jet test Compiler --profile cases --filter leaks/loop_rebind_frees_old_value` under the leak gate.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:20:06.889Z"
+          "at": "2026-11-15T04:32:32.410Z"
         },
         {
           "n": 6,
-          "text": "(was #5922) Runtime witnesses can't see jet_rt_free calls made inside the runtime object (--wrap misses direct-patched calls): root cause named; the witness passes; a regression case.",
+          "text": "The runtime witnesses see jet_rt_free calls made inside the runtime object (`--wrap` missed direct-patched calls), and the root cause is named in the fix commit. Proof: `jet test Compiler --profile cases --filter leaks/runtime_internal_free_witnessed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:02:02.502Z"
+          "at": "2026-11-15T04:32:33.789Z"
         },
         {
           "n": 7,
-          "text": "(was #5939) Runtime process witnesses stale on dev: ProcessSpecWitness, native-process-fields step, HostSpawnTests (registry id mismatch plus runtime-lower ICE): all process witnesses run through the registry and pass on dev, or",
+          "text": "The runtime process witnesses (ProcessSpecWitness, HostSpawnTests and TerminalProcessWitness under Compiler/JetRuntime/Tests) run through the registry with matching ids and pass on dev, with no runtime-lower internal error. Proof: `jet test Compiler/JetRuntime --filter ProcessSpecWitness`, `--filter HostSpawnTests` and `--filter TerminalProcessWitness`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:03:20.438Z"
+          "at": "2026-11-15T04:32:35.068Z"
         },
         {
           "n": 10,
@@ -54342,12 +54342,12 @@
         },
         {
           "n": 11,
-          "text": "(was #6310) (b) sema refuses try_alloc(x) ?? fallback when the fallback is not an allocator view of the same payload, with a registered code, what/why/fix and a UI snapshot; codegen no longer carries the IR refusal.",
+          "text": "Sema refuses `try_alloc(x) ?? fallback` when the payload holds a resource or cannot be cloned (E0642, Main's ruling 2026-11-13), with what/why/fix and a UI snapshot, and codegen no longer carries the JetIR refusal; a plain-value fallback on an Int payload stays accepted. Proof: `jet test Compiler --profile ui --filter try_alloc_fallback_` and `jet test Compiler --profile cases --filter memory/try_alloc_int_fallback_accepted`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:25:38.682Z"
+          "at": "2026-11-15T04:32:36.111Z"
         },
         {
           "n": 12,
@@ -54438,8 +54438,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-13T07:10:51.603Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:32:36.111Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -67344,12 +67344,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep rejecting.",
+          "text": "A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep rejecting. Proof: the census is committed under Docs/audits, and each probe is a case: `jet test Compiler --profile cases --filter memory_census/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:19:27.033Z"
+          "at": "2026-11-15T04:32:15.621Z"
         },
         {
           "n": 2,
@@ -67362,30 +67362,30 @@
         },
         {
           "n": 3,
-          "text": "Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic.",
+          "text": "Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic. Proof: `jet test Compiler --profile cases --filter memory_census/` passes, with every safe probe accepted and every unsafe probe refused with its code.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:19:27.033Z"
+          "at": "2026-11-15T04:32:16.548Z"
         },
         {
           "n": 5,
-          "text": "(was #6200) Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: rejecting it prevents a memory, type, aliasing or resource fault; or opinion: the program would run safely) and a one-line reason. A Jet tool generates a dated audit under Docs/research from those fields, not hand-listed, and its --check fails when an error row lacks a class. The classification may land in slices by code range; met when every active error row is classified.",
+          "text": "Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: refusing it prevents a memory, type, aliasing or resource fault; or opinion: the program would run safely) and a one-line reason. A Jet tool generates a dated audit under Docs/research from those fields, and its `--check` fails when an error row lacks a class. It may land in slices by code range. Proof: `jet test tests/guards --filter diagnostic_safety_class` passes with every active error row classified.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T06:36:17.326Z"
+          "at": "2026-11-15T04:32:17.483Z"
         },
         {
           "n": 6,
-          "text": "(was #6200) Every sealed floor (a soundness refusal that neither #Unsafe nor any other ratified expert opt-in can lift) is listed with its diagnostic code, its sema location (file:line) and the expert path that reaches the same program (or \"none\" with the reason), in the audit generated for c5.",
+          "text": "Every sealed floor (a soundness refusal that neither #Unsafe nor another ratified expert opt-in can lift) is listed with its code, its sema location (file:line) and the expert path to the same program, or \"none\" with the reason, in the audit c5 generates. Proof: the generated audit's sealed-floor section, reproduced by the c5 tool's `--check`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T06:36:18.212Z"
+          "at": "2026-11-15T04:32:18.436Z"
         },
         {
           "n": 8,
@@ -67407,12 +67407,12 @@
         },
         {
           "n": 10,
-          "text": "(S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the caller's owner close it: probe $JET_SCRATCH_ROOT/lanes/Main/prep/bal2/p/stop_refill.jet prints 'close a' twice before E3001 on -O0 and -O1 (refill-move path, Checking.jet:583-584). Rule: while a write place is empty, nothing that can stop may consume the moved value; sema rejects it or the place is refilled before any stop. The probe becomes a tests/cases case that closes once on O0/O1/O2, and the 8 repo sites of 'x.f = g(x.f)' (g takes &&) (CheckProgram.jet:5580/5581/6385/6529/7346, Host.jet:2553, Review.jet:282, Loops.jet:177) check clean or are migrated.",
+          "text": "(S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the caller's owner close it: probe $JET_SCRATCH_ROOT/lanes/Main/prep/bal2/p/stop_refill.jet prints 'close a' twice before E3001 on -O0 and -O1 (refill-move path, Checking.jet:583-584). Rule: while a write place is empty, nothing that can stop may consume the moved value; sema rejects it or the place is refilled before any stop. The probe becomes a tests/cases case that closes once on O0/O1/O2, and the 8 repo sites of 'x.f = g(x.f)' (g takes &&) (CheckProgram.jet:5580/5581/6385/6529/7346, Host.jet:2553, Review.jet:282, Loops.jet:177) check clean or are migrated. Proof: `jet test Compiler --profile cases --filter memory/stop_refill_closes_once` on O0, O1 and O2, and `jet check` over Compiler passes at the 8 sites.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T16:53:26.337Z"
+          "at": "2026-11-15T04:32:20.140Z"
         },
         {
           "n": 11,
@@ -67443,30 +67443,30 @@
         },
         {
           "n": 15,
-          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile cases --filter definite_init/fixed_array_loop_fill_`, one case per fill shape.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:23:21.359Z"
+          "at": "2026-11-15T04:32:21.185Z"
         },
         {
           "n": 16,
-          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0302, and an inline closure in a Shared field write or push reports E0118 naming the internal `__jet_shared_value`. Both safe programs are accepted and run with the same output on O0, O1, O2 and web; cases prove each, and no diagnostic names a compiler-internal symbol.",
+          "text": "Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0302, and an inline closure in a Shared field write or push reports E0118 naming the internal `__jet_shared_value`. Both safe programs are accepted and run with the same output on O0, O1, O2 and web; cases prove each, and no diagnostic names a compiler-internal symbol. Proof: `jet test Compiler --profile cases --filter shared/pool_element_shared_field_write` and `--filter shared/inline_closure_in_shared_field_write` on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T22:43:50.120Z"
+          "at": "2026-11-15T04:32:22.148Z"
         },
         {
           "n": 17,
-          "text": "D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the ballot program (make_child, then root.kids.push(child.copy())), which prints 1 on O0, O1 and O2. There is no hidden runtime cycle test and no automatic collector. A real cycle (a node linked into its own ancestor chain) is still refused with its registered diagnostic (UI snapshot), and collection stays explicit for real loops. The census sweep of every tree shows no new rejection.",
+          "text": "D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the ballot program (make_child, then root.kids.push(child.copy())), which prints 1 on O0, O1 and O2. There is no hidden runtime cycle test and no automatic collector. A real cycle (a node linked into its own ancestor chain) is still refused with its registered diagnostic (UI snapshot), and collection stays explicit for real loops. The census sweep of every tree shows no new rejection. Proof: `jet test Compiler --profile cases --filter shared_cycles/helper_built_tree_accepted`, and `jet test Compiler --profile ui --filter shared_cycle_ancestor_link`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T03:26:46.859Z"
+          "at": "2026-11-15T04:32:23.219Z"
         }
       ],
       "refs": [
@@ -67480,8 +67480,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-13T07:31:26.901Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:32:23.219Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G10"
       ],
@@ -85097,39 +85097,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "After IR lowering, a verifier checks that every owned value, temporaries included, is dropped or moved exactly once on every path out of its scope, outside #Unsafe. It runs on every compile at O0, O1 and O2; a violation is an internal compiler error (exit 101), never a user diagnostic. A negative-control case shows it catching each of the 2026-11-05 leak shapes when the matching fix is reverted.",
+          "text": "After IR lowering, a verifier checks that every owned value, temporaries included, is dropped or moved exactly once on every path out of its scope, outside #Unsafe. It runs on every compile at O0, O1 and O2; a violation is an internal compiler error (exit 101), never a user diagnostic. A negative-control case shows it catching each of the 2026-11-05 leak shapes when the matching fix is reverted. Proof: `jet test Compiler --profile cases --filter ir_verify/leak_shapes_negative_control`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T13:14:15.148Z"
+          "at": "2026-11-15T04:32:24.229Z"
         },
         {
           "n": 2,
-          "text": "The golden and cases suites run their programs with the checked allocator and fail any row whose program exits with a live owned block allocated outside #Unsafe, at o0, o1 and o2. The compiler itself passes the same check: jet check and jet build over Core and over the compiler's own sources end with zero leaked blocks, and 9 jet repl turns of repl_core_data_query_plans_and_typed_joins stay flat.",
+          "text": "The golden and cases suites run their programs with the checked allocator and fail any row whose program exits with a live owned block allocated outside #Unsafe, at o0, o1 and o2. The compiler itself passes the same check: jet check and jet build over Core and over the compiler's own sources end with zero leaked blocks, and 9 jet repl turns of repl_core_data_query_plans_and_typed_joins stay flat. Proof: `jet test Compiler --profile golden` and `--profile cases` with the leak gate on report zero leak rows at O0, O1 and O2, and `jet test Compiler --profile cases --filter repl/repl_core_data_query_plans_and_typed_joins` stays flat over 9 turns.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T13:14:15.813Z"
+          "at": "2026-11-15T04:32:25.232Z"
         },
         {
           "n": 3,
-          "text": "Every leak the verifier or the leak gate finds is fixed at its root, per lowering family, each with a case per shape; the full suites then run with the leak gate on and show zero leak rows.",
+          "text": "Every leak the verifier or the leak gate finds is fixed at its root, per lowering family, each with a case per shape; the full suites then run with the leak gate on and show zero leak rows. Proof: with the leak gate on, `jet test Compiler --profile golden` and `--profile cases` report zero leak rows, and each fixed family has a `--filter leaks/` case.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T13:14:16.513Z"
+          "at": "2026-11-15T04:32:26.229Z"
         },
         {
           "n": 4,
-          "text": "An audit, committed under Docs/audits, lists every construct that can keep memory alive in safe Jet (shared values and reference cycles, tasks or generators parked at exit, channels, globals and caches, closures and captures) and states the structural rule that prevents a leak for each, with a case; any rule that is a language choice goes to an owner ballot.",
+          "text": "An audit, committed under Docs/audits, lists every construct that can keep memory alive in safe Jet (shared values and reference cycles, tasks or generators parked at exit, channels, globals and caches, closures and captures) and states the structural rule that prevents a leak for each, with a case; any rule that is a language choice goes to an owner ballot. Proof: the audit is committed under Docs/audits, and `jet test Compiler --profile cases --filter leaks/structural_rule_` has a case per construct.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T13:14:17.202Z"
+          "at": "2026-11-15T04:32:27.220Z"
         },
         {
           "n": 5,
@@ -85142,21 +85142,21 @@
         },
         {
           "n": 6,
-          "text": "(moved from #6035 c8) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R1: jet repl keeps every turn's compile in memory (Repl.jet:338-348): 773 MiB at 1 turn grows to 5.6 GiB at 9, and suite repl cases reach 4.7-8.3 GB. Per-turn memory stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins under 1 GiB, with a test. (Also #6543.)",
+          "text": "jet repl does not keep every turn's compile in memory (Repl.jet:338-348 held 773 MiB at 1 turn and 5.6 GiB at 9 on 2026-11-04). Memory per turn stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins stay under 1 GiB (also #6543). Proof: `jet test Compiler --profile cases --filter repl/repl_turn_memory_flat`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T13:50:21.771Z"
+          "at": "2026-11-15T04:32:28.146Z"
         },
         {
           "n": 7,
-          "text": "A runtime leak and double-drop witness proves leak freedom per program: today JET_MEMORY_LEDGER records only unsafe sentry events (not leaks or double drops), and the counting allocator cap does not trip on String allocations (a 32 MB copy ran under a 48 MB cap; found by CoreCliLead-2 on #6677). A safe-Jet program run under the witness reports live allocations at exit = 0 and any double drop as a failure, on O0, O1 and O2. jet test and jet dev print the same witness: live allocations, unreleased foreign handles and Shared cycles with their sites on every level; release builds carry no tracking (was #3239 c49).",
+          "text": "A run-time leak and double-drop witness proves leak freedom per program. On 2026-11-12, JET_MEMORY_LEDGER recorded only unsafe sentry events, and the counting allocator cap did not trip on String allocations (a 32 MB copy ran under a 48 MB cap, #6677). A safe-Jet program run under the witness reports 0 live allocations at exit and fails on any double drop, on O0, O1 and O2. jet test and jet dev print the same witness (live allocations, unreleased foreign handles and Shared cycles, with their sites), and release builds carry no tracking. Proof: `jet test Compiler --profile cases --filter memory/leak_witness_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:48:25.019Z"
+          "at": "2026-11-15T04:32:29.349Z"
         },
         {
           "n": 8,
@@ -85185,8 +85185,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-13T12:16:06.127Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:32:29.349Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 9
     },
     {
@@ -214257,6 +214257,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T04:32:36.111Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#11: strip debris; proof; was: (was #6310) (b) sema refuses try_alloc(x) ?? fallback when the fallback is not an allocator view of the same payload, with a registered code, what/why/fix and a UI snapshot; codegen no longer carries "
+    },
+    {
+      "at": "2026-11-15T04:32:35.068Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#7: strip debris; complete the text cut off in the merge; proof; was: (was #5939) Runtime process witnesses stale on dev: ProcessSpecWitness, native-process-fields step, HostSpawnTests (registry id mismatch plus runtime-lower ICE): all process witnesses run through the "
+    },
+    {
+      "at": "2026-11-15T04:32:33.789Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#6: strip debris; proof; was: (was #5922) Runtime witnesses can't see jet_rt_free calls made inside the runtime object (--wrap misses direct-patched calls): root cause named; the witness passes; a regression case."
+    },
+    {
+      "at": "2026-11-15T04:32:32.410Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#3: strip debris; proof; was: (was #5059) Codegen: rebinding an owned heap value in a loop leaks the old value (simplify +153 B/inst/run, x64 +63 B/inst/run)"
+    },
+    {
+      "at": "2026-11-15T04:32:30.872Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#2: strip debris; proof; was: (was #4767) Native lowering never drops or retains boxed exact Ints (leak; ownership of Int nodes in native code): boxed Ints follow the same ownership as the reference tier (drop"
+    },
+    {
+      "at": "2026-11-15T04:32:29.349Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#7: strip debris; proof; was: A runtime leak and double-drop witness proves leak freedom per program: today JET_MEMORY_LEDGER records only unsafe sentry events (not leaks or double drops), and the counting allocator cap does not t"
+    },
+    {
+      "at": "2026-11-15T04:32:28.146Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#6: strip debris; proof; was: (moved from #6035 c8) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its l"
+    },
+    {
+      "at": "2026-11-15T04:32:27.220Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#4: proof; was: An audit, committed under Docs/audits, lists every construct that can keep memory alive in safe Jet (shared values and reference cycles, tasks or generators parked at exit, channels, globals and cache"
+    },
+    {
+      "at": "2026-11-15T04:32:26.229Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#3: proof; was: Every leak the verifier or the leak gate finds is fixed at its root, per lowering family, each with a case per shape; the full suites then run with the leak gate on and show zero leak rows."
+    },
+    {
+      "at": "2026-11-15T04:32:25.232Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#2: proof; was: The golden and cases suites run their programs with the checked allocator and fail any row whose program exits with a live owned block allocated outside #Unsafe, at o0, o1 and o2. The compiler itself "
+    },
+    {
+      "at": "2026-11-15T04:32:24.229Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0q4s6en",
+      "note": "#1: proof; was: After IR lowering, a verifier checks that every owned value, temporaries included, is dropped or moved exactly once on every path out of its scope, outside #Unsafe. It runs on every compile at O0, O1 "
+    },
+    {
+      "at": "2026-11-15T04:32:23.219Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#17: proof; was: D-SHARED-CYCLE2=A is built. The one ownership checker accepts a Shared tree whose links are made through helper functions once its complete alias and call summaries prove the links safe, as in the bal"
+    },
+    {
+      "at": "2026-11-15T04:32:22.148Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#16: proof; was: Found 2026-11-09 (G6Lead, probes $JET_SCRATCH_ROOT/lanes/G6Lead/ballots/probes/cycle2/a5 and s14b): writing through a Shared field of a pool element, `scene[id].material.color = c`, is refused with E0"
+    },
+    {
+      "at": "2026-11-15T04:32:21.185Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#15: proof; was: Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with in"
+    },
+    {
+      "at": "2026-11-15T04:32:20.140Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#10: proof; was: (S1, I1 soundness) A refill write 'self.r = next(self.r)' (next takes &&) on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the call"
+    },
+    {
+      "at": "2026-11-15T04:32:18.436Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#6: strip debris; proof; was: (was #6200) Every sealed floor (a soundness refusal that neither #Unsafe nor any other ratified expert opt-in can lift) is listed with its diagnostic code, its sema location (file:line) and the expert"
+    },
+    {
+      "at": "2026-11-15T04:32:17.483Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#5: strip debris; proof; was: (was #6200) Each active error row in Compiler/Prelude/Diagnostics.jet carries a safety class (soundness: rejecting it prevents a memory, type, aliasing or resource fault; or opinion: the program would"
+    },
+    {
+      "at": "2026-11-15T04:32:16.548Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#3: proof; was: Every other over-strict rejection in the census is fixed in sema, or carded with a ballot if the fix needs new syntax; every unsafe probe still fails with its diagnostic."
+    },
+    {
+      "at": "2026-11-15T04:32:15.621Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#1: proof; was: A census of every memory, ownership, borrow, aliasing and resource diagnostic lists, for each, safe programs it rejects today (probe files with expected output) and unsafe programs it must keep reject"
+    },
+    {
+      "at": "2026-11-15T04:32:14.602Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#10: strip debris; proof; was: (was #1197 c5) Zero-copy parser and borrowing-deserializer examples work without copies, raw pointers, or user-written lifetime syntax [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_tr"
+    },
+    {
+      "at": "2026-11-15T04:32:13.664Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#9: strip debris; proof; was: (was #1197 c4) Public API snapshots record source relations and report breaking provenance changes [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL s"
+    },
+    {
+      "at": "2026-11-15T04:32:12.642Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#8: strip debris; proof; was: (was #1197 c3) Function values, lambdas, generic callbacks, and trait dispatch preserve returned-view provenance without unsafe code [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trai"
+    },
+    {
+      "at": "2026-11-15T04:32:11.637Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#7: strip debris; proof; was: (was #1197 c2) Lists, tuples, options, results, enums, and named aggregates can carry proven read or write views [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_r"
+    },
+    {
+      "at": "2026-11-15T04:32:10.665Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#6: strip debris; proof; was: (was #1197 c1) A safe function can return a view chosen at runtime from compatible input owners [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snap"
+    },
+    {
+      "at": "2026-11-15T04:32:09.604Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00rqc09",
+      "note": "#5: strip debris later in text; proof; was: (was #644 c5) Coded diagnostics, UI snapshots, inspect, API and semver projections and examples cover no_alloc, zero_rc and arena_bounded, with O0, O1 and O2 parity."
+    },
+    {
       "at": "2026-11-15T04:32:08.315Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -217685,713 +217860,6 @@
       "action": "card.update",
       "ref": "c0ozzmvc",
       "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:59:12.479Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#127"
-    },
-    {
-      "at": "2026-11-15T03:59:11.184Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#126"
-    },
-    {
-      "at": "2026-11-15T03:59:09.571Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#118"
-    },
-    {
-      "at": "2026-11-15T03:59:07.913Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#117"
-    },
-    {
-      "at": "2026-11-15T03:59:06.629Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#114"
-    },
-    {
-      "at": "2026-11-15T03:59:04.814Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#113"
-    },
-    {
-      "at": "2026-11-15T03:59:03.362Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#112"
-    },
-    {
-      "at": "2026-11-15T03:59:01.932Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#87"
-    },
-    {
-      "at": "2026-11-15T03:59:00.431Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#86"
-    },
-    {
-      "at": "2026-11-15T03:58:59.220Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#85"
-    },
-    {
-      "at": "2026-11-15T03:58:57.807Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#124"
-    },
-    {
-      "at": "2026-11-15T03:58:56.508Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#123"
-    },
-    {
-      "at": "2026-11-15T03:58:55.255Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#122"
-    },
-    {
-      "at": "2026-11-15T03:58:53.750Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#121"
-    },
-    {
-      "at": "2026-11-15T03:58:52.501Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T03:58:51.297Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T03:58:50.023Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T03:58:48.666Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:58:47.414Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#115"
-    },
-    {
-      "at": "2026-11-15T03:58:46.156Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T03:58:44.650Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:58:43.340Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0ozzmvc",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:58:42.138Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#131: strip debris; proof; was: (was #2459 c4) Guards reject non-loopback, expired, release and missing-authority operations and record request denials, with UI snapshots and a case. (was #4268 c40)"
-    },
-    {
-      "at": "2026-11-15T03:58:41.198Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#130: strip debris; proof; was: (was #2459 c3) Sandbox transactions use captured canonical database resources and roll back on close or cancel with value-free transaction audit records, proven by a case. (was #4268 c39)"
-    },
-    {
-      "at": "2026-11-15T03:58:40.293Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#129: strip debris; proof; was: (was #2459 c2) The console dispatches requests through the existing resident in-process router with status, headers, body and shared request identity, proven by a case. (was #4268 c38)"
-    },
-    {
-      "at": "2026-11-15T03:58:39.368Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#128: strip debris; proof; was: (was #2459 c1) The console attaches declared live services and database resources, command and stdin entry paths, and read-only default authority, proven by a case. (was #4268 c37)"
-    },
-    {
-      "at": "2026-11-15T03:58:38.486Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#125: strip debris; proof; was: (was #3196) [#3250] Golden io/log_trace_export proves span export/replay with parent links, redaction and bounded buffers on every level. (was #4275 c75)"
-    },
-    {
-      "at": "2026-11-15T03:58:37.629Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#4: strip debris; proof; was: (was #6018) Attaching to a process that was not started with observe enabled, or that another user owns, fails with a named error and changes nothing in the target (test)."
-    },
-    {
-      "at": "2026-11-15T03:58:36.747Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#3: strip debris; proof; was: (was #6018) The view also shows open spans and allocation counts per task (test)."
-    },
-    {
-      "at": "2026-11-15T03:58:35.866Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#2: strip debris; proof; was: (was #6018) `jet inspect live --attach PID` on a process started with observe enabled prints the task tree, channel depths, deadlines and effect counts; on the D-OBSERVE-LIVE1 example it shows the blo"
-    },
-    {
-      "at": "2026-11-15T03:58:35.009Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ozzmvc",
-      "note": "#1: strip debris; proof; was: (was #4640) the console attaches to the running app again with the same commands and output, through either a child-process attach over a local protocol or native in-memory O0 (D-EXEC1's next step); o"
-    },
-    {
-      "at": "2026-11-15T03:58:34.153Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c087ot9q",
-      "note": "#17 The live world inspector runs through the native host with t"
-    },
-    {
-      "at": "2026-11-15T03:58:33.274Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c02vsnvm",
-      "note": "#70 The Code Map view in Canvas (D-CODEMAP-VIEW1=A) draws a tree"
-    },
-    {
-      "at": "2026-11-15T03:58:32.394Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c06vkd04",
-      "note": "#30 The debugger event-observation behaviours the deleted Rust t"
-    },
-    {
-      "at": "2026-11-15T03:58:31.519Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0c209zc",
-      "note": "#16 The built-in devtools dogfood package uses the public #DevPa"
-    },
-    {
-      "at": "2026-11-15T03:58:30.483Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0c209zc",
-      "note": "#15 Every devserver security candidate (#1377-#1384) has a sourc"
-    },
-    {
-      "at": "2026-11-15T03:58:29.622Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0c209zc",
-      "note": "#14 `jet dev` works on the default tier inside the repository (n"
-    },
-    {
-      "at": "2026-11-15T03:58:28.737Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0y05z3o",
-      "note": "#18 A search by input/output example returns candidates and show"
-    },
-    {
-      "at": "2026-11-15T03:58:27.809Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0y05z3o",
-      "note": "#17 A search by effect returns the functions that hold that auth"
-    },
-    {
-      "at": "2026-11-15T03:58:26.935Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0t5gnhs",
-      "note": "#14 The canonical syntax round-trip census, the full AST and for"
-    },
-    {
-      "at": "2026-11-15T03:58:26.047Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0bd75d8",
-      "note": "One record index: canonical identity, build verify, safe capture by default in dev, and indexed replay (D-RECORD1=B)"
-    },
-    {
-      "at": "2026-11-15T03:58:25.160Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0wowe4m",
-      "note": "Jet embeds in a C host and as a wasm component from one export surface, with authority checked at load (D-EMBED1=E, D-EMBED2=C)"
-    },
-    {
-      "at": "2026-11-15T03:58:24.270Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0hzex6k",
-      "note": "jet flash: watch, rebuild and flash a board, show flash and RAM budgets, and fail by name with no probe"
-    },
-    {
-      "at": "2026-11-15T03:57:27.157Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pwde2g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:57:26.254Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0voqhky",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:57:25.339Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0voqhky",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:57:24.448Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0voqhky",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:57:05.744Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:56:43.902Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03183d1",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T03:56:37.094Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03183d1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:56:35.974Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03183d1",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:56:34.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-15T03:56:33.450Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-15T03:56:32.540Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-15T03:56:31.593Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#67"
-    },
-    {
-      "at": "2026-11-15T03:56:30.678Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-15T03:56:29.760Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-15T03:56:28.803Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#58"
-    },
-    {
-      "at": "2026-11-15T03:56:27.896Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-15T03:56:26.967Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#55"
-    },
-    {
-      "at": "2026-11-15T03:56:25.858Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#54"
-    },
-    {
-      "at": "2026-11-15T03:56:24.890Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-15T03:56:23.999Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-15T03:56:23.062Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-15T03:56:22.142Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-15T03:56:21.229Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-15T03:56:20.316Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-15T03:56:19.389Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-15T03:56:18.452Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T03:56:17.416Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-15T03:56:16.500Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-15T03:56:15.594Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-15T03:56:14.657Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-15T03:56:13.708Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-15T03:56:12.745Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-15T03:56:11.834Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-15T03:56:10.934Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-15T03:56:10.024Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T03:56:09.044Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T03:56:07.929Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T03:56:06.706Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T03:56:05.789Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T03:56:04.827Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T03:56:03.919Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T03:56:02.985Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T03:56:01.888Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T03:56:00.953Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T03:55:59.905Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03183d1",
-      "note": "#63: proof; was: Framing, positions, edits, progress, errors, cancellation, and shutdown satisfy the standard through the actual transport. (merged from #3410 c3)"
-    },
-    {
-      "at": "2026-11-15T03:55:58.879Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03183d1",
-      "note": "#62: proof; was: The real initialize response and registrations advertise only complete applicable handlers and respect negotiated client capabilities. (merged from #3410 c2)"
-    },
-    {
-      "at": "2026-11-15T03:55:57.955Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03183d1",
-      "note": "#3: proof; was: Hover on a local, a parameter and a Core call shows its type; go-to-definition reaches a declaration in the same file, in another module and in Core; one fixture test per case."
-    },
-    {
-      "at": "2026-11-15T03:55:56.993Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03183d1",
-      "note": "#2: proof; was: Opening a file with a type error publishes the same diagnostics (code, range, message) as `jet check` on that file; an LSP fixture test compares them."
-    },
-    {
-      "at": "2026-11-15T03:55:55.859Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03183d1",
-      "note": "#30: strip debris; proof; was: (was #1807 c3) Focused LSP/UI snapshots and O0, O1 and O2 checks show matching report meaning and recovery data [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T03:55:54.951Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0bk3yid",
-      "note": "#13 The REPL classifies input with the parser, not substrings: I"
-    },
-    {
-      "at": "2026-11-15T03:55:54.034Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0t5gnhs",
-      "note": "#13 The formatter spells literals and reserved names from the le"
-    },
-    {
-      "at": "2026-11-15T03:55:53.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c01q17ls",
-      "note": "Editor refactors on checked facts: callable summary, signature-change preview, extract and inline, and marker moves"
-    },
-    {
-      "at": "2026-11-15T03:55:52.158Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0mbiq9g",
-      "note": "The LSP stays current: cancellation, fresh verdicts, embedded Jet regions, workspaces and the VS Code, Zed and Neovim matrix"
-    },
-    {
-      "at": "2026-11-15T03:55:51.221Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c06tzcrf",
-      "note": "Editor assists from checked facts: completion with foreign-word rows, semantic tokens and inlay hints"
-    },
-    {
-      "at": "2026-11-15T03:55:50.328Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0s1vode",
-      "note": "LSP references and rename follow checked identity across files, versions and Unicode"
-    },
-    {
-      "at": "2026-11-15T03:53:36.157Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0h4r83r",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:53:34.463Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kob6cb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:53:32.595Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0h4r83r",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
