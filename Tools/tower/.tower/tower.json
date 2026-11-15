@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6851,
-    "rev": 102850,
+    "rev": 102875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33285,7 +33285,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nOne complete, versioned public model for metadata, preparation, generated code, compiler sessions and advanced operations. Its exact field and operation catalogs are published as executable registries in the Jet compiler, not as duplicated prose. This card owns contracts, not compiler delivery.\n\n## Current state\n- All four ballots (D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2, D-META-CONTROL2) are ratified A, so no decision blocker remains.\n- Criteria 6-8 are met: the Syntax.rs entry, the syntax-decisions.md log and regenerated `jet devtools grammars`. Criterion 9 (re-bless snapshots) is open.\n- The 2026-09-24 work landed in archived crates/jet-semindex (typed callable facts, schema v20; `callable_signature_facts_keep_typed_and_unavailable_states` passed). tests/semindex.rs:363 pins SCHEMA_VERSION 20.\n- Owned paths retarget from crates/jet-foundation/src/{Syntax.rs, AST, Registry.rs, Collections.rs} to Compiler/JetFoundation/Source/Registry (CoreCalls.jet, CoreCallRows.jet, CoreModules.jet, DiagnosticRows.jet), Compiler/JetAst/Source/AST (Comptime.jet, Expressions.jet, Items.jet) and Compiler/JetFoundation/Source/Collections.jet. Docs: Docs/spec/reference/metaprogramming.md and Docs/spec/syntax-decisions.md (the old docs/ path is stale).\n- Metadata families and owners: type universe (#3147); fields and enum cases (#3147, #3524); callable contracts (#3522, #3541); plus the remaining families listed in the card body.\n\n## Changes\n1. Registry: add Compiler/JetFoundation/Source/Registry/Metaprogramming.jet (listed in Compiler/Bootstrap/sources.list), with one row per public fact, operation, phase and failure: name, family, availability phase, result/error type, owner card and witness name. Include D-META-REFLECT2's closed result and error types, complete typed field schema, runtime value/table roots and retention operations exactly. Extend the string-only CallableSignatureFact fields from their checker producers, and do not describe them as already complete.\n2. AST: Compiler/JetAst/Source/AST/Comptime.jet carries the ratified prep and generation shapes. No discarded spelling survives as a second interface.\n3. Docs: metaprogramming.md cites the registry, not a copy of it. Record that default mode stops at level 5 and that opt-in never grants host permissions or unchecked facts. Phase availability, unavailable facts, identity, visibility, receipts and I9 meaning are explicit.\n4. Map all forty captured Jai capability families to a contract, owner and proof. Unknown peer details stay blockers.\n5. Re-bless the affected snapshots (criterion 9).\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- A registry completeness check, `rg -c \"owner:\" Compiler/JetFoundation/Source/Registry/Metaprogramming.jet`, equals the row count, and every owner card exists in Tower.\n- `jet test Compiler --profile ui meta_` passes.\n- `jet test Compiler --profile cases semindex/semindex_schema_version` passes.\n\n## Batch\nbatch-jetc-front: the registries and AST shapes are front-end foundation data, checked in one compiler check.\n\n## Dependencies\nNone open. All four ballots are ratified.",
       "checkSteps": "Rebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nRead every approved decision and compare its chosen interface with the executable registry schema planned by the consumer cards. Require every public fact, operation, phase and failure to have a delivery owner and a behavioral witness; reject holes described as future work.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
@@ -33294,6 +33294,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: legacy rows settled so the card can close. c1, c3, c4 and c5 had been marked met on 2026-09-29 with 'Not evidenced'; they are merged into #6845 c11, #6846 c2 and #6845 c2 instead of lost. c2 is a decision closure (the five ratified interface decisions). c6-c9 cite where their Rust-era outcomes live on dev now."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -33449,82 +33454,87 @@
           "n": 1,
           "text": "Every metadata family and all forty captured Jai capability families have an explicit current contract, delivery owner and proof requirement; unknown peer details remain blockers rather than exclusions.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not evidenced: no registry maps the metadata/Jai families to contract, owner and proof (see crit 10).",
-          "at": "2026-09-29T04:23:50.011Z"
+          "evidence": "Merged into #6845 c11: was marked met 2026-09-29 with evidence 'Not evidenced'; the family-by-family contract and proof manifest is the meta_suite criterion",
+          "at": "2026-11-15T02:18:34.737Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
           "text": "Exact prep, metadata query, shared publishing, advanced control and opt-in interfaces are owner-ratified; no discarded spelling remains a second interface.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not evidenced by these proofs.",
-          "at": "2026-09-29T04:23:50.611Z"
+          "evidence": "The interfaces are owner-ratified: D-PREP-SURFACE2=A, D-META-REFLECT2=A, D-META-PUBLISH2=A, D-META-OPTIN2=A (2026-09-21), with control later replaced by D-META-LADDER1=A; discarded spellings were removed in ba6124f2b3. Re-recorded 2026-11-14; the 2026-09-29 row had no evidence.",
+          "at": "2026-11-15T02:18:35.930Z",
+          "closure": "decision"
         },
         {
           "n": 3,
           "text": "Default mode stops at level 5; above-level-5 code values, type factories, insertion and rewrites are explicitly opted in and never grant host permissions or unchecked compiler facts.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not evidenced by these proofs.",
-          "at": "2026-09-29T04:23:51.211Z"
+          "evidence": "Merged into #6846 c2: was marked met 2026-09-29 with evidence 'Not evidenced'; level 5 and the opt-in are the levels criterion of the generation card",
+          "at": "2026-11-15T02:18:36.963Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
           "text": "Phase availability, unavailable facts, declaration identity, visibility, source ownership, transformation receipts and I9 meaning are explicit. No empty list or zero substitutes for unknown metadata.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not evidenced by these proofs.",
-          "at": "2026-09-29T04:23:51.815Z"
+          "evidence": "Merged into #6845 c2: was marked met 2026-09-29 with evidence 'Not evidenced'; explicit phase availability, identity, visibility and unknown facts are the declaration-facts criterion",
+          "at": "2026-11-15T02:18:37.855Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "D-META-REFLECT2’s closed result/error types, complete typed field schema, runtime value/table roots and retention operations are registered exactly. Existing string-only CallableSignatureFact fields are extended from their checker producers, not misrepresented as already complete.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not evidenced: no D-META-REFLECT2 registry rows exist.",
-          "at": "2026-09-29T04:23:52.391Z"
+          "evidence": "Merged into #6845 c2: was marked met 2026-09-29 with evidence 'Not evidenced'; the typed D-META-REFLECT2 schema is the declaration-facts and TypeId criteria (#6845 c2, c7)",
+          "at": "2026-11-15T02:18:38.776Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "Integrated static proof: crates/jet-foundation/src/Syntax.rs lexical entries at lines 30-45 register prep, @PHASE, uppercase callable metadata roots and selected compiler publication/advanced operation spellings, each tied to ratified D-PREP-SURFACE2 / D-META-REFLECT2 / D-META-PUBLISH2 / D-META-CONTROL2 IDs. MetaSchemaLuna6 lane-check -p jet-foundation returned CHECK OK; parser/runtime delivery and grammar regeneration remain open.",
-          "at": "2026-09-23T21:34:43.726Z"
+          "evidence": "Met in the Rust tree (Syntax.rs lines 30-45, see the earlier evidence); after Rust removal the Jet syntax registry carries the rows, now in their D-META-SPELL1 spelling (Compiler/JetFoundation/Data/Syntax/MathLayout.jet PREP_RUN \"#run\"), on dev 72a8142651.",
+          "at": "2026-11-15T02:18:39.706Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "Integrated static proof: docs/spec/syntax-decisions.md lines 2846-2890 contain ratified decision log entries for D-PREP-SURFACE2=A, D-META-REFLECT2=A, D-META-PUBLISH2=A and D-META-CONTROL2=A. No runtime or snapshot proof is claimed.",
-          "at": "2026-09-23T21:34:44.587Z"
+          "evidence": "Holds on dev 72a8142651: Docs/spec/syntax-decisions.md carries the entries for D-PREP-SURFACE2=A, D-META-REFLECT2=A, D-META-PUBLISH2=A and D-META-CONTROL2=A (git grep, 2026-11-14).",
+          "at": "2026-11-15T02:18:40.658Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "Integrated D-PREP-SURFACE2/D-META-REFLECT2 lexical view regeneration: scripts/agent/lexical-ledger.mjs now resolves all 38 Syntax.rs literal/const-referenced rows without a second inventory; node ... --write then --check says up to date (38 rows), generated docs/spec/syntax-decisions.md records prep/@PHASE and metadata roots. Fresh cargo build -p jet --bin jet followed by jet self devtools grammars rewrote four editor-generated sections; tree-sitter and TextMate include full prep/@PHASE spellings, Zed generated comments list them but Zed capture awaits anonymous parser tokens. Exact focused cargo test -p jet --test grammar editor_grammars_match_generated_sections -- --exact passed, git diff --check passed. This criterion only proves generated editor sections, not parser/sema/phase execution; criterion9 and #3521 remain open.",
-          "at": "2026-09-23T23:59:57.986Z"
+          "evidence": "Met in the Rust tree (see the earlier evidence); the grammar generator is now the Jet command `jet devtools grammars` (Compiler/JetCli/Source/Cli/EditorGrammars.jet), which writes Tools/editors/jet.tmGrammar, on dev 72a8142651.",
+          "at": "2026-11-15T02:18:41.621Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Partly met. Blessed prep_block_at_retired (E0388 `@ { … } is retired; write prep { … }` at 6:5, one report). meta_bad_type, meta_duplicate_field and meta_empty_category were re-blessed for the entry-relative path only; `JET_UI_FILTER=tests/ui/meta_` -> ok. 1 passed. NOT blessed: prep_block_value_unsupported, which renders a spurious cascade `E0003 This line computes a value but doesn't do anything with it` at 7:21 alongside the intended E0391 at 7:14 (same on snapshot12), and whose E0391 Fix still teaches `@lanes :: …`.",
-          "at": "2026-09-29T04:23:52.968Z"
+          "evidence": "The prep-@ snapshots this row re-blessed, including the unblessed prep_block_value_unsupported, were deleted with every retired spelling and its teaching in ba6124f2b3 (owner order: retired spellings get no teaching snapshot).",
+          "at": "2026-11-15T02:18:42.764Z"
         },
         {
           "n": 10,
@@ -33792,12 +33802,13 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-15T02:12:00.473Z",
+      "updated": "2026-11-15T02:18:46.795Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 36
+      "criteriaLastN": 36,
+      "completedAt": "2026-11-15T02:18:46.795Z"
     },
     {
       "id": "c02m1p02",
@@ -33808,7 +33819,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement the ratified package opt-in for above-level-five metaprogramming (D-META-OPTIN2=A: a checked package opt-in suffices), the privileged compiler module and explicit provider registration. Standard mode stays at level 5. The effective mode is frozen before any metaprogram runs and recorded in toolchain, package, cache and artifact identity. Import alone authorizes nothing.\n\n## Current state\n- D-META-OPTIN2 is ratified A (2026-09-21, \"all decisions ratified\").\n- The owned paths are archived: crates/jet-pkg-model/src/Package, crates/jet-foundation/src/Policy.rs, crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs, crates/jet-driver/src/Driver/mod.rs and crates/jetpack/src. Source/main.rs is the retained host.\n- Jet homes: Jetpack/PackageModel/Source/Manifest, Authority/Resolver.jet, Policy and Lock; Compiler/JetDriver/Source/Driver/Pipeline.jet and Identity.jet; Compiler/JetSema/Source/Sema/Calls (CompilerServices.jet, Core.jet).\n- Ballot text: registration accepts compiler-issued declaration identities, not display strings. A dependency rewrite needs an approved invocation-root `metaprogramming_targets` entry that matches package identity, the complete source digest and the exact declarations, and any change in grant or source invalidates the approval.\n\n## Changes\n1. Jetpack/PackageModel/Source/Manifest: parse the ratified opt-in field. Authority/Resolver.jet resolves effective mode: root ownership, dependency identity, enterprise denial and source scope stay distinct, a dependency can never widen consumer mode, and root and mandatory external denials win.\n2. JetDriver Pipeline.jet: freeze `JetDriverMetaMode` before any prep or hook execution. Identity.jet folds it into cache and artifact identity, and Jetpack Lock records it.\n3. JetSema Calls/CompilerServices.jet: every above-level-five entry point checks the frozen mode and is refused in standard mode with a registered diagnostic. Hook registration takes compiler-issued declaration identities.\n4. Source/main.rs only forwards the mode flag.\n5. Host IO, credentials, provider consent and audited Unsafe stay independent of this opt-in.\n6. Criteria 7-10: add a syntax-decisions.md log entry, regenerate `jet devtools grammars`, and re-bless the snapshots. The Syntax.rs row goes in the shipped binary's syntax table.\n\n## Proof\n- tests/ui/meta_optin_{none,import_only,manifest_only,dependency_only,enterprise_denied,no_tty,self_enable_*}.jet plus one approved fixture: `jet test Compiler --profile ui meta_optin_`.\n- `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel` exits 0.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n\n## Batch\nbatch-jetc-driver: mode freezing and identity are driver-owned, with the manifest and resolver in the same build.\n\n## Dependencies\n#3520 (contract) and #3418 (unified effects and restrictive policy, which the resolver reuses).",
       "checkSteps": "Rebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nBuild the same hook fixture with no opt-in, import only, manifest only, complete approved opt-in, dependency-only request, restricted enterprise policy and no-TTY unknown-root execution. Assert only the authorized registration runs. Attempt self-enablement through settings, manifest writes, generated headers, cache reuse and subprocesses; every bypass must fail without unauthorized effects.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
@@ -33965,19 +33976,19 @@
           "n": 7,
           "text": "Syntax.rs entry updated",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Jet syntax registry entries present: Compiler/JetFoundation/Data/Syntax/Spellings.jet:39-42 (explicit opt-in provider / call-expansion / specialization registration and authorized session, decision \"D-META-CONTROL2=A; D-META-OPTIN2=A\")",
-          "at": "2026-10-31T14:21:30.671Z"
+          "evidence": "The syntax registry rows landed (CardClose-1 2026-10-31, Spellings.jet:39-42) and were removed with the compiler.advanced rows in 973d760c89 (G8Lead2-24) when D-META-LADDER1=A superseded D-META-CONTROL2; the row stays met as superseded history, per this card's 2026-11-10 log.",
+          "at": "2026-11-15T02:18:29.683Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Docs/spec/syntax-decisions.md:3569 \"**D-META-OPTIN2=A — Approved root-package metaprogramming opt-in** *(ratified 2026-09-21)*\" (wave/9b/tree)",
-          "at": "2026-10-31T14:21:32.251Z"
+          "evidence": "Holds on dev 72a8142651: Docs/spec/syntax-decisions.md carries the D-META-OPTIN2=A entry (git grep, 2026-11-14).",
+          "at": "2026-11-15T02:18:30.573Z"
         },
         {
           "n": 9,
@@ -34182,12 +34193,13 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-15T02:12:01.795Z",
+      "updated": "2026-11-15T02:18:48.937Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 29
+      "criteriaLastN": 29,
+      "completedAt": "2026-11-15T02:18:48.936Z"
     },
     {
       "id": "c0l5ld15",
@@ -39872,7 +39884,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nTake every compile-time meaning off prefix `@`, so that in code `@` means only a D-MEMREF1 checked live link. Do it in one cutover of parser, sema, formatter, grammars, teaching diagnostics, examples and spec.\n\n## Current state\n- Ratified and landed: D-PREP-SURFACE2, D-PREP-BRANCH1, D-PREP-FN1 (`prep { }`, `prep if/loop/fn`), D-FENCE2 (`<: … :>`), D-CONSTGEN2 and D-AT-INFIX1. The Jet parser teaches E0388 for the retired `@if/@loop/@fn/@ { }` (`Compiler/JetParser/Source/Parser/Statements.jet:374-392`).\n- Still open with recommended option A: D-COMPILER-NS1 (the family: plain word `prep` plus a `compiler.` namespace), D-META-ROOT3 (`compiler.type/function/method/closure/program/package_info/source/value/types/phase`, marked facts become record fields, `T.reflect()` retires, `reflect.of(value)` stays), D-BUILD-FACT2 (build facts) and D-NAME-SPLICE1 (computed declaration names and declaration metadata).\n- Remaining prefix-`@` code paths in the Jet parser: `@name ::` comptime constants (`Parser/Entry.jet:148-150`, `Parser/Items.jet:994-998`), `@` marker metadata (`Parser/Declarations/Markers.jet:54-58`), and the `@`-headed prep recovery arms (`Statements.jet:233-236, 399, 431`; `Declarations/Markers.jet:150`). Metadata roots (`@TYPE` …), fact members (`T.@layout` …) and `@build.*` still exist as described in the card inventory.\n- Non-compile-time infix uses (`target@provider#version`, `host@root`, `@run.jet` home files) are out of scope and keep their meaning.\n\n## Changes (written for option A on all four ballots)\n1. After ratification, record the complete old-to-new mapping in `crates/jet-foundation/src/Syntax.rs`, `Docs/spec/syntax-decisions.md` and the Jet syntax registry under `Compiler/JetFoundation/Source/Registry`.\n2. `Compiler/JetLexer` and `Compiler/JetParser`: parse `compiler.` roots as ordinary calls, marked facts as fields, build facts per D-BUILD-FACT2 and computed names per D-NAME-SPLICE1. Retired `@` forms are not Jet syntax and get no teaching diagnostic; E0388's teaching is removed under #4148 c4. Prefix `@place` parses as a D-MEMREF1 link.\n3. `Compiler/JetSema`: resolve the `compiler.` namespace through the prelude (`#NoPrelude` opts out) and route it to the existing metadata path (#3520).\n4. Mirror the parser in `crates/jet-parser` so the bootstrap still parses the corpus. Migrate the formatter, `jet devtools grammars`, `Examples/`, `Core/`, `Docs/` and UI snapshots in the same commit.\n\n## Proof\n- `JET_UI_FILTER=tests/ui/at_compile_time_retired.jet cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- `cargo test --test selfhost_parser` passes.\n- Jet slice check: `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` reports no diagnostic in `Compiler/JetLexer` or `Compiler/JetParser` (map through `~/.cache/jet-luna/compiler-bootstrap/compiler.map.json`).\n- `JET_GOLDEN_FILTER=comptime cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=reflection cargo test --test golden examples_compile_and_run` both pass with identical AOT and `jet run` output.\n- `jet devtools grammars` regenerates with no remaining `@` compile-time rule.\n\n## Batch\n`batch-jetc-front`: a lexer/parser surface cutover plus the Rust parser mirror.\n\n## Dependencies\nOwner ratification of D-COMPILER-NS1 first, then D-META-ROOT3, D-BUILD-FACT2 and D-NAME-SPLICE1 (recommend A for all four). Sequence with #3505 and #3520, which own overlapping paths, and with the #218 port.",
       "checkSteps": null,
@@ -39962,19 +39974,20 @@
           "n": 1,
           "text": "Every ballot on this card is ratified, and the full old-to-new @ mapping is recorded in Syntax.rs and syntax-decisions.md.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not met: D-COMPILER-NS1, D-META-ROOT3, D-BUILD-FACT2 and D-NAME-SPLICE1 are still open per the card plan.",
-          "at": "2026-09-29T04:23:54.718Z"
+          "evidence": "Every ballot on this card is ratified: D-COMPILER-NS1=A, D-META-ROOT3=A, D-BUILD-FACT2=A and D-NAME-SPLICE1=B (all 2026-09-30). The 2026-09-29 'Not met' note predates those ratifications.",
+          "at": "2026-11-15T02:18:31.588Z",
+          "closure": "decision"
         },
         {
           "n": 2,
           "text": "One cutover migrates the parser, sema, formatter, grammars, teaching diagnostics, examples, and spec; no compile-time meaning of prefix @ remains in code, and a prefix @ in code parses as a D-MEMREF1 link.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "2026-09-29 overnight proof (Opus 5.5 prover, snapshot9/10): Not met: prefix-@ compile-time names remain (e.g. `@LIMIT :: 1000` and `@half` accepted in tests/ui/prep_block_at_retired.jet; E0391's fix teaches `@lanes`).",
-          "at": "2026-09-29T04:23:55.331Z"
+          "evidence": "The compile-time meanings of prefix @ and their teaching (E0388 and the prep_block_at_retired snapshot) were removed in ba6124f2b3 (greenfield: remove every retired spelling and its teaching); on dev 72a8142651 `git grep E0388 Compiler/JetParser` prints nothing. Parsing a prefix @ as a D-MEMREF1 live link is the open #4500 c1.",
+          "at": "2026-11-15T02:18:32.754Z"
         },
         {
           "n": 3,
@@ -40032,11 +40045,12 @@
       "parentId": "c0s8gang",
       "needsAcceptance": false,
       "created": "2026-09-28T10:50:31.711Z",
-      "updated": "2026-11-15T02:12:05.548Z",
+      "updated": "2026-11-15T02:18:55.380Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
-      ]
+      ],
+      "completedAt": "2026-11-15T02:18:55.380Z"
     },
     {
       "id": "c047t3lg",
@@ -44628,7 +44642,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Rust freeze: do not change Source/, crates/ Rust implementations or add Rust tests. Implement in the Jet compiler, Jet-hosted tooling and owning Jet packages. Core/, Docs/ and canonical Prelude/*.jet are shared inputs to the frozen reference: coordinate owner timing before editing them. Regenerate generated Compiler registries; never hand-edit DiagnosticRows.jet, CoreCallRows.jet or CoreSources.jet. Historical Rust file:line witnesses diagnose the gap; they do not authorize a Rust repair.\n2. Implement only the missing consumer boundary identified by each cited gap witness, preserving working behavior; reuse the owning source, checker, registry and provider seam rather than introduce a parallel mechanism.\n3. [D-CTCODEGEN1] Derive output re-enters lexer, parser and sema as source text; a pre-parsed AST is never injected. Owning evidence: PARTIAL — Rust derive source expansion pipeline exists; Jet Registration/Derives.jet:1214-1216 expands expressions, and UserTemplates.jet exists. Complete generated-source relex/reparse/sema with no injected pre-parsed items in the Jet port was not established.\n4. [D-CTCORE1] Compile-time and runtime eligibility share the effect model, not a curated pure-Core allow-list; pure, recorded and #Impure-plus-permission tiers remain. The 2026-08-08 record explicitly acknowledges the 2026-08-06 D-META-EFFECT1 amendment, so it is not a later reversal of that amendment. Owning evidence: PARTIAL — Rust comptime/Purity.rs and shared effects exist, but dispatch still uses curated call routes; Jet explicit prep/comptime path exists. Unified effect-model eligibility for every pure source-Core call was not established; an old allow-list is not sufficient.\n5. [D-FIELDMEMO1] You mark the field. Jet keeps the answer after the first read. Owning evidence: CONTRADICTED — Rust pipeline CheckInner.rs:430-432 synthesizes computed getters and example memory/computed_field.jet:7 marks Memo. Jet Parser/Items.jet:1657-1667 has no -> computed-field branch, and port memo dependency invalidation was not established. The source shape itself is missing.\n6. [D-FMT-SIMPLIFY1] Plain jet fmt stays exactly as it is; The rewriter runs only when you ask for it with one flag; Teams canonicalize a repo in one deliberate run, and nobody's code changes shape mid-edit; The in-repo corpus migrates once with the flag as part of this work. Owning evidence: PARTIAL: Rust: production fmt seam exists at Source/main.rs:3604-3607; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n7. [D-MEMO1] You write one marker above a pure function. Jet keeps one store for that function and answers repeat calls from it. Owning evidence: PARTIAL — Examples/features/memory/memoize.jet:1-3 expresses #Memo pure-function caching and .cache() counters. Jet Codegen/Expressions.jet:4585 lowers MemoStats and Emit/Types.jet:1872 maps its runtime carrier. Complete bounded/unbounded store semantics, recursive callers, eviction and cache-hit observer contracts were not established through both runtime backends.\n8. [D-META-AUTO1] Every structurally derivable capability is generated when the type qualifies, unless refused by #!Trait or package auto_derive settings. Nonstructural capabilities remain opt-in. Package refusal uses the later D-ONCE-AUTODERIVE1 named lint law; do not revive the boolean. Owning evidence: PARTIAL — Rust auto-derive/refusal behavior is covered in tests/auto_derive_policy.rs:159 onward. Jet Registration/TypeMetadata.jet:19-39 treats only syntactically recognized types as eligible, and :99-108 selects automatic traits; complete nominal structural recursion and all six structural capabilities were not proved equivalent.\n9. [D-META-BODY1] A provider body directly contains generated members, without a nested impl; compile-time control flow may generate members. D-MARKER-LAW1 changes provider declarations to marker bodies while preserving this direct-member rule. Owning evidence: PARTIAL — Rust Parser/Items/states_protocols.rs:505-520 directly parses checked item templates. Jet Registration/UserTemplates.jet:1-6,165-184 expands parsed templates and re-registers items without relexing, but current marker-origin law/provider migration remains missing (derive selection :219-290); complete library text checking/encoding and rejection powers were not established.\n10. [D-META-MODNAME1] An instance is a module, so its types are its members. You write three_ints.Buffer, exactly as you already write three_ints.echo for a function. Owning evidence: PARTIAL — Rust Bundle/GenericModules.rs:882-905 specializes applied rule facts outside nested template spans. Jet GenericModules.jet:1050-1113 returns expanded declarations but no rule_facts, and :1111 constructs ModuleInstanceIdentity with empty full_key/argument keys/values/provenance/applications (source-comparison finding from SolParitySemaCore.RegistrationLedger). Instance-qualified member names exist, but canonical instance identity and rule provenance are incomplete.\n11. [D-META-NAME1] marker is the declaration word for a rule; marker bodies use the current single named parameter list and $ metadata spellings. Owning evidence: PARTIAL — Rust Parser/Items/states_protocols.rs:505-520 directly parses checked item templates. Jet Registration/UserTemplates.jet:1-6,165-184 expands parsed templates and re-registers items without relexing, but current marker-origin law/provider migration remains missing (derive selection :219-290); complete library text checking/encoding and rejection powers were not established.\n12. [D-META-REG1] One registry substrate serves marker rules, knowledge planes, rights, and build facts, distinguished by attachment. D-LEDGER1 preserves three lifetime-separated stores behind one typed query contract rather than requiring a single physical store. Owning evidence: PARTIAL — Rust Facts/Registry owners and Jet fact-read/reflection machinery exist (Jet Sema/Expressions/FactReads.jet:396-428; Comptime/Reflection.jet:883-900). Canonical direction/gate guards and one typed query across schema/program/run stores are not established; the known handwritten effect twins contradict one-home guarantees rather than proving unified registry completeness.\n13. [D-ONCE-DOLLAR1] Typed configuration $NAME environment reads and code $ compiler facts have distinct current meanings; neither restores prefix-@ comptime. Owning evidence: PARTIAL — Rust jet-env-model/src/ModuleEval/Eval.rs:69-72 reads only lexer environment tokens, not quoted shell strings; Rust Lexer/Scan.rs:645-649 emits $NAME tokens. Jet lexer Payload.jet supports the shared compiler-fact mark, and Syntax.rs:35 records its later code meaning. Complete typed/checked/listed configuration environment reads in the Jet ecosystem runtime were not established.\n14. Migrate every affected public caller, example, test and existing doc/changelog section in the same clean cutover. Coordinate overlapping scopes; P23 owns module names, P03 non-Effect enums, #3986 Effect, P12 marker generation, P19 diagnostic templates and P27 fact-query lifetime separation.\n15. D-EXEC1 staging: finish stage zero and semantic/output parity on current engines first; unify the compiled runtime and shared low-level ABI/drop representation next; build Jet O0/O1 x86-64 then aarch64, require whole-example-corpus parity and O0 live function replacement, and only then retire Cranelift/MIREval/--interpret in one cutover. Frozen engine-specific work stays frozen until its step lands. Before retirement retain applicable current-engine proof; after retirement retarget durable tests to O0/O1/O2/web. No early engine deletion or declaration that a surviving old engine is itself a violation.\n16. Deliver the named Jet-side tests/goldens and real consumer receipts in criteria. Main runs verification once on the integrated snapshot; performance/process requirements require their real receipts, not fabricated code.",
       "checkSteps": null,
@@ -44637,6 +44651,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c19 had been met from a scratch probe only; it is reopened on #6847 as #6847 c10 with a case to pin it."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -44857,10 +44876,11 @@
           "n": 19,
           "text": "[#4398] Prep record collections holding named function values register and evaluate (no E0107).",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 p/prepfn4276.jet: struct Op{name, f: fn(Int) -> Int}; `TOTAL :: comptime { total_of(ops()) }` folds a [Op] list holding the named functions dbl and sq and calls each one (g :: op.f; g(3)); prints `total=15 count=2` (6+9) exit 0 on jet run o0/o1/o2; no E0107. Side note: calling `op.f(3)` directly gives E0102 (field call is resolved as a method)",
-          "at": "2026-10-31T17:25:54.968Z"
+          "evidence": "Moved to #6847 c10: was marked met 2026-10-31 from a scratch probe only, with no repository case or commit; reopened as an open criterion with a case to pin it",
+          "at": "2026-11-15T02:18:33.654Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
@@ -45401,12 +45421,13 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-15T02:12:02.824Z",
+      "updated": "2026-11-15T02:18:51.490Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 97
+      "criteriaLastN": 97,
+      "completedAt": "2026-11-15T02:18:51.490Z"
     },
     {
       "id": "c06lr0kz",
@@ -64728,7 +64749,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -64812,10 +64833,11 @@
           "n": 1,
           "text": "The marker API ballot is ratified.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "D-DECL-TYPES1 A ratified by the owner 2026-10-30 (markers, effects, facts, derives and errors are ordinary types implementing Core traits). D-MARKER-DIAG1 is folded into it and is being reworked to match.",
-          "at": "2026-10-30T12:26:59.040Z"
+          "evidence": "Settled by D-DECL-TYPES1=A, ratified by the owner 2026-10-30 (the marker API ballot). Re-recorded 2026-11-14 as a decision closure; the original row cited the ratification without a commit.",
+          "at": "2026-11-15T02:18:25.033Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -64866,10 +64888,10 @@
           "n": 7,
           "text": "Compile-time code can read a written marker argument: MarkerInfo.args[i].value (Core Reflection.jet:311-336) in a derive returns the written value (q/bd/probe/mk/reflect_c.jet: arg :: info.markers[0].args[0].value) instead of E0956 'A derive template binding is not a known-time value'",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w9b and w11 (queue3.out, same output) run3 p/r6039_reflect_v.jet (derive: arg :: info.markers[0].args[0].value; #[Table(\"orders\"), TableName] struct Order) prints \"orders\", exit 0 on o0/o1/o2 (no E0956)",
-          "at": "2026-10-31T19:52:19.075Z"
+          "evidence": "Holds on dev 72a8142651: compile-time code reads a written marker's arguments as its typed record (38cb96129c, typed marker(T)), superseding the untyped MarkerInfo.args read; `jet test Compiler --profile golden --filter Metaprogramming/Reflection/MarkerSites` PASS 3 (prints the written label) with the gate-p136 jet, 2026-11-14.",
+          "at": "2026-11-15T02:18:27.589Z"
         },
         {
           "n": 8,
@@ -64884,10 +64906,10 @@
           "n": 9,
           "text": "D-DECL-TYPES1 A: the trait constant works. A trait may require a named compile-time constant with an optional default, and an impl supplies it with name :: value; syntax registry row, example with golden output on o0/o1/o2.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "trait constants (required, default, enum, list, concrete and generic reads): Examples/features/traits/trait_constants.jet PASS o0/o1/o2 against hand-derived expected/traits/trait_constants.out; syntax registry rows in Spellings.jet NAME_CASE+LEXICAL_LEDGER with syntax-decisions.md regenerated; 5 UI snapshots tests/ui/trait_constant_* PASS; whole-Compiler lane-check CHECK OK",
-          "at": "2026-10-30T22:10:31.468Z"
+          "evidence": "Holds on dev 72a8142651: `jet test Compiler --profile golden --filter Types/Traits/TraitConstants` PASS 3 (o0, o1, o2) and `jet test Compiler --profile ui --filter trait_constant_` PASS 5, gate-p136 jet, 2026-11-14 (the example moved from Examples/features/traits/trait_constants.jet in 2c3e68a70b).",
+          "at": "2026-11-15T02:18:28.668Z"
         },
         {
           "n": 10,
@@ -64980,10 +65002,11 @@
           "n": 19,
           "text": "D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "Main 2026-11-04 paste error: c19 holds a copy of #6066 c11 (D-TASK-WINDOW1), which my script picked up by mistake. That work is owned and tracked by #6066 c11. The intended #6039 criterion is c20.",
-          "at": "2026-11-04T17:31:18.768Z"
+          "evidence": "Paste error recorded by Main 2026-11-04: this row is a copy of #6066 c11 (D-TASK-WINDOW1), which owns and tracks the work.",
+          "at": "2026-11-15T02:18:26.334Z",
+          "closure": "duplicate"
         },
         {
           "n": 20,
@@ -65081,12 +65104,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-15T02:12:03.711Z",
+      "updated": "2026-11-15T02:18:53.707Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 31
+      "criteriaLastN": 31,
+      "completedAt": "2026-11-15T02:18:53.707Z"
     },
     {
       "id": "c0cwk90x",
@@ -204653,6 +204677,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:18:55.381Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0w6dky2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:18:53.707Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c03pi177",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:18:51.491Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0699zei",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:18:48.937Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02m1p02",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:18:46.795Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T02:18:44.597Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0699zei",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:18:43.705Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:18:42.764Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:18:41.621Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:18:40.658Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:18:39.706Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T02:18:38.776Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T02:18:37.855Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T02:18:36.963Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:18:35.930Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T02:18:34.737Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T02:18:33.654Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T02:18:32.754Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0w6dky2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T02:18:31.588Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0w6dky2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T02:18:30.573Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02m1p02",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T02:18:29.683Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02m1p02",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:18:28.669Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:18:27.589Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:18:26.334Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T02:18:25.034Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T02:18:23.687Z",
       "by": "TowerKeeper-1",
