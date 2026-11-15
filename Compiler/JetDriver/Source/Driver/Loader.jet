@@ -5197,8 +5197,7 @@ jet_driver_core_private_unit: fn(module_name: String, span: Span) -> Diagnostic?
     parts: module_name.split(".").to_list()
     if parts.len() < 3 || parts[0] != "core" || parts[2] != "runtime" -> return None
     public: "core.{parts[1]}"
-    names: loop row in CORE_MODULE_EXPORTS -> row.module_name
-    fix: if core_module_export(public) != None -> "use the public module `{public}` instead" else -> "use one of: {names.join(", ")}"
+    fix: if core_module_export(public) != None -> "use the public module `{public}` instead" else -> "use one of: {jet_driver_importable_core_modules()}"
     Val(jet_driver_diagnostic("E1001", span, "`{module_name}` is private to Core", "`core.<area>.runtime` units implement the Core library; only Core sources import them", fix))
 }
 
@@ -5621,8 +5620,17 @@ jet_driver_owned_parts: fn(source_units: &[JetDriverSourceUnit], queued: &[Bool]
 // by Rust's checker, whose fix reads "import one of" (`fix_verb`).
 jet_driver_unknown_core_module: fn(module_name: String, span: Span, fix_verb: String) -> Diagnostic {
     if jet_driver_core_private_unit(module_name, span) == .Val(private) -> return private
-    names: loop row in CORE_MODULE_EXPORTS -> row.module_name
-    jet_driver_diagnostic("E1001", span, "there is no core module `{module_name}`", "`core` is compiler-known in M10, and only the frozen core modules exist", "{fix_verb} one of: {names.join(", ")}")
+    jet_driver_diagnostic("E1001", span, "there is no core module `{module_name}`", "`core` is compiler-known in M10, and only the frozen core modules exist", "{fix_verb} one of: {jet_driver_importable_core_modules()}")
+}
+
+// The Core modules a program outside Core may import, as an E1001 fix lists
+// them: every exported module but the Core-private `jet_builtins`.
+jet_driver_importable_core_modules: fn() -> String Never! {
+    names := [String]{}
+    loop row in CORE_MODULE_EXPORTS {
+        if row.module_name != CORE_BUILTINS_MODULE -> names.push(row.module_name)
+    }
+    names.join(", ")
 }
 
 // The loaded module position of the Core module `module_name`, if any.

@@ -829,6 +829,16 @@ jfmt_fmt_block_marker: fn(f: &JetFmt, marker: JetFmtBlockMarker, source_start: I
     jfmt_write(f, " {{")
 }
 
+// A marked block's body after its ` {`. One written `{}` stays `{}`, where
+// jfmt_fmt_body would open it onto a blank line.
+jfmt_fmt_marked_body: fn(f: &JetFmt, body: [Stmt], span: Span) {
+    if body.len() == 0 && jfmt_empty_body_inline(f, span) {
+        jfmt_write(f, "}}")
+        return
+    }
+    jfmt_fmt_body(f, body)
+}
+
 jfmt_fmt_loop_label: fn(f: &JetFmt, label: NamedSpan?) {
     // Loop labels use declaration spelling.
     if label == .Val(named) -> jfmt_write(f, "{named.name}: ")
@@ -1006,14 +1016,14 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             jfmt_write(f, "loop")
             jfmt_fmt_effect_loop_body(f, inner, 0, arrow_body)
         }
-        .Unsafe(_, _, body, _) -> { jfmt_fmt_body(f, body) }
+        .Unsafe(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `#Impure("reason") { … }` round-trips verbatim.
-        .Impure(_, _, body, _) -> { jfmt_fmt_body(f, body) }
+        .Impure(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         .Switched(marker, body, _) -> { jfmt_fmt_statement_switch_attr(f, marker, body) }
         // `#Reactive { … }` round-trips verbatim.
-        .Reactive(body, _) -> { jfmt_fmt_body(f, body) }
+        .Reactive(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `#Shield { … }` round-trips verbatim.
-        .Shield(body, _) -> { jfmt_fmt_body(f, body) }
+        .Shield(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `defer statement` stays one line; a braced or longer body keeps its braces.
         .Defer(body, span) -> {
             if body.len() == 1 && !jfmt_defer_braced(f, span) {
@@ -1025,8 +1035,8 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             }
         }
         // `#Region(r) { … }`.
-        .Region(_, _, body, _) -> { jfmt_fmt_body(f, body) }
-        .Policy(_, body, _) -> { jfmt_fmt_body(f, body) }
+        .Region(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
+        .Policy(_, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `task.group g(limit: n, stack: bytes) { … }`.
         .TaskGroup(name, _, args, body, _) -> {
             jfmt_write(f, "task.group {name}")
@@ -1071,7 +1081,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             if multiline && resugared.len() > 0 -> jfmt_write(f, "}}") else -> jfmt_end_block(f)
         }
         // `#FX(Net, DB) { … }` effect-restriction region.
-        .AuthorityScope(_, _, _, body, _) -> { jfmt_fmt_body(f, body) }
+        .AuthorityScope(_, _, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `#run { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
             // A template loop prints as `#loop …`.
@@ -1118,13 +1128,13 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_dispatch(f, subject, arms, else_body, true, span)
         }
         // `#Context(field: value, …) { … }`.
-        .ContextBlock(_, body, _) -> { jfmt_fmt_body(f, body) }
+        .ContextBlock(_, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `#Live { … }`.
-        .Live(body, _) -> { jfmt_fmt_body(f, body) }
+        .Live(body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // `#Nondeterministic("reason") { … }`.
-        .AssumeDet(_, _, body, _) -> { jfmt_fmt_body(f, body) }
+        .AssumeDet(_, _, body, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // – `#Transact(name) { … }` (the handle is optional).
-        .Transact(_, _, body, _, _) -> { jfmt_fmt_body(f, body) }
+        .Transact(_, _, body, _, span) -> { jfmt_fmt_marked_body(f, body, span) }
         // A scope-member statement `.name { … }` /
         // `.name(args) { … }`, or a declared `#Name { … }` block.
         .ScopeMember(name, _, args, args_span, body, dsl, _, _) -> {

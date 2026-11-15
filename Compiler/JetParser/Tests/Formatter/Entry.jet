@@ -409,6 +409,20 @@ SUM: #run { count() + 1 }
     assert(formatted.contains(`x\u{1}\ry`), formatted)
 }
 
+#Test("an empty marked block written {{}} stays on its line") {
+    source: `run: fn() {
+    #Unsafe("audit") {}
+    #Impure("reason") {}
+    #Nondeterministic("reason") {}
+    #Unsafe("kept") {
+        // a note
+        print(1)
+    }
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
 // `if r == .Val(n) -> A else -> B` is one pattern test, so fmt keeps it as
 // written when an arm's value is a table of its own; the table's `{` is not
 // the test's. As a table, its `else` would stand for `.None` (E0641).

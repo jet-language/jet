@@ -18,6 +18,7 @@ project_policy: fn(row: Project, op: db.Op, who: db.Who, _store: db.Store) -[DB.
     if who == {
         .Account(account) -> Ok(op == db.Op.Read || row.created_by == account)
         .System -> Ok(true)
+        .Anonymous -> Ok(false)
     }
 }
 

@@ -1,8 +1,17 @@
-Error [jet.RawMemoryOutsideKernel]: `os_load_i64` at Compiler/JetRuntime/Source/Host.jet:4 is a raw memory operation outside the package's memory kernel
-  --> tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:19:16
+Error [jet.RawMemoryOutsideKernel]: `os_load_i64` at Compiler/JetRuntime/Source/Host.jet:3 is a raw memory operation outside the package's memory kernel
+  --> tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:16:65
     |
- 19 |         return os_load_i64(address)
-    |                ^^^^^^^^^^^
+ 16 |     #Unsafe("the host holds the word at this address") { return os_load_i64(address) }
+    |                                                                 ^^^^^^^^^^^
  Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.
  Fix: Outside the kernel, read and write through a `[T]` list or a `View<T>` a kernel owner hands out; to make `Compiler/JetRuntime/Source/Host.jet` a kernel file, add `Compiler/JetRuntime/Source/Host.jet` to `policy.memory` in `package.jet`.
 More: jet-lang.dev/e/E3113
+
+Error [jet.RawAddressIntoKernel]: `_word` carries the caller-chosen address `address` to `os_load_i64`
+  --> tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:10:77
+    |
+ 10 |     #Unsafe("the kernel's own leaf reads a word its caller lends") { return os_load_i64(address) }
+    |                                                                             ^^^^^^^^^^^
+ Why: Code outside the kernel files calls `_word` without a gate, so the address `os_load_i64` uses would skip the kernel's audit.
+ Fix: Take an owner or a `View<T>` in place of `address`, or mark `_word` `#Unsafe("…")` so each caller vouches for the address.
+More: jet-lang.dev/e/E3114
