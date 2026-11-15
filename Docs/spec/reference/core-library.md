@@ -4120,9 +4120,9 @@ becomes a nested ordered object, and the keys keep the order written. A
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn EncodingError!` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
 | `json.reader<R: Reader>(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader<R> EncodingError!` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
-| `json.writer(output, limits, canonical)` | `JSONWriter EncodingError!` | Construct a bounded file-backed event writer. |
+| `json.writer<W: Writer>(output, limits, canonical)` | `JSONWriter<W> EncodingError!` | Construct a bounded event writer to any byte sink: a `FileWriter`, a socket, or a program's own `Writer` type. |
 | `JSONReader<R>.next()` | `DataEvent? EncodingError!` | Return the next event or stable end-of-input. |
-| `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output, or validate and finish the stream. |
+| `JSONWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output through the sink's `flush`, or validate and finish the stream. |
 
 Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
 number lexemes until `Decode<T>` selects the destination representation. Its
@@ -4145,9 +4145,9 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `Dyn? EncodingError!` | Return the first nonblank row. |
 | `jsonl.reader<R: Reader>(input, limits)` | `JSONLReader<R> EncodingError!` | Construct a bounded line stream over any byte source. |
-| `jsonl.writer(output, limits)` | `JSONLWriter EncodingError!` | Construct a bounded file-backed line writer. |
+| `jsonl.writer<W: Writer>(output, limits)` | `JSONLWriter<W> EncodingError!` | Construct a bounded line writer to any byte sink. |
 | `JSONLReader<R>.next()` | `Dyn? EncodingError!` | Return the next row or stable end-of-input. |
-| `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit EncodingError!` | Write records, flush output, or finish the stream. |
+| `JSONLWriter<W>.write(value)` / `flush()` / `finish()` | `Unit EncodingError!` | Write records, flush output, or finish the stream. A record's LF is written before the next record, by `flush` or by `finish`, so a flushed sink ends on a whole line. |
 
 ### `core.encoding.csv` — comma-separated rows
 
@@ -4159,7 +4159,7 @@ ending, otherwise an `Unsupported` error), drops the first record when
 blank physical rows (D-ROWS1).
 The filesystem query helper decodes header-named records into a typed query;
 it is distinct from the physical row parser.
-The public `CSVReader<R>` and file-backed `CSVWriter` are ordinary
+The public `CSVReader<R>` and `CSVWriter<W>` are ordinary
 source-owned holders, not native resource-table handles. The typed
 `core.data.csv_reader<T>` is Core source over a `CSVReader<FileReader>`: each
 `next` reads one record (the header on the first pull) and decodes it, so rows
@@ -4171,9 +4171,9 @@ stream one at a time.
 | `csv.parse(text, delimiter, header, skip_blank)` / `decode(text)` | `Dyn EncodingError!` | Parse rows as an array of arrays through the same engine and options as `csv.rows`. |
 | `csv.to_string<T: Encode>(rows, formulas)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. With the default `formulas: .Escape`, a text cell that opens with `=`, `+`, `-`, `@`, a tab or a carriage return and is not a number is written after an apostrophe, so a spreadsheet shows it rather than running it; numeric cells are unchanged and `formulas: .Keep` turns the escape off. `csv.write_dict(rows, formulas)` follows the same rule. |
 | `csv.reader<R: Reader>(source, limits, delimiter, header, skip_blank)` | `CSVReader<R> EncodingError!` | Construct an incremental CSV reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. Reader defaults retain the header and blank records. No reader strips an apostrophe, so a cell that opens with one round-trips exactly. |
-| `csv.writer(target, limits, formulas)` | `CSVWriter EncodingError! -[FS]>` | Construct an incremental file-backed CSV writer. The writer escapes formula cells as `csv.to_string` does. |
+| `csv.writer<W: Writer>(target, limits, formulas)` | `CSVWriter<W> EncodingError!` | Construct an incremental CSV writer to any byte sink. The writer escapes formula cells as `csv.to_string` does. |
 | `CSVReader<R>.next()` | `CSVRow? EncodingError! -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. A source read failure is an `IO` error whose cause keeps the `IOError` kind and OS code. |
-| `CSVWriter.write(fields)` / `flush()` / `finish()` | `Unit EncodingError! -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
+| `CSVWriter<W>.write(fields)` / `flush()` / `finish()` | `Unit EncodingError! -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record, a flush or finish, so a flushed sink ends on a whole record. |
 | `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
@@ -4222,7 +4222,8 @@ codec must not remove its native options or located error payloads.
 | `xml.canonical(tree, options)` | `String XMLError!` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
 | `xml.reader<R: Reader>(input, limits, options)` | `XMLReader<R> EncodingError!` | Construct a bounded XML event reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `XMLError!` | Inspect attributes, content, expanded names, and the document root. |
-| `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write XML events, flush output, or validate and finish the stream. |
+| `xml.writer<W: Writer>(output, limits, options)` | `XMLWriter<W> EncodingError!` | Construct a bounded XML event writer to any byte sink. |
+| `XMLWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write XML events, flush output, or validate and finish the stream. |
 
 XML rendering is fallible at both runtime and compile time. Invalid document
 trees return the located `XMLError`; callers must handle it explicitly rather
@@ -4251,9 +4252,9 @@ part; its helper functions are not exports of the public CBOR module.
 | `cbor.parse(bytes, options)` | `Dyn CBORError!` | Parse a whole value under depth, item, allocation, and canonical limits. |
 | `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] CBORError!` | Encode ordinary or canonical CBOR. |
 | `cbor.reader<R: Reader>(input, limits)` | `CBORReader<R> EncodingError!` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
-| `cbor.writer(output, limits)` | `CBORWriter EncodingError!` | Construct a bounded file-backed event writer. |
+| `cbor.writer<W: Writer>(output, limits)` | `CBORWriter<W> EncodingError!` | Construct a bounded event writer to any byte sink. |
 | `CBORReader<R>.next()` | `DataEvent? EncodingError!` | Return the next event or stable end-of-input. |
-| `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output, or validate and finish the stream. |
+| `CBORWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes
 

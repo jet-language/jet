@@ -186,15 +186,16 @@ finish: fn(&self) encoding.EncodingError!
 `&self` is the edit access because each call advances state; callers keep a
 handle in a changeable binding. Constructors consume their byte source or
 file handle with `&&`. A reader takes any Prelude `Reader` (a `FileReader`, a
-socket, or a program's own type); a writer takes a `FileWriter`:
+socket, or a program's own type); a writer takes any Prelude `Writer` (a
+`FileWriter`, a socket, or a program's own type):
 
 ```jet
 reader<R: Reader>(input: &&R,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Reader<R> encoding.EncodingError!
-writer(output: &&files.FileWriter,
+writer<W: Writer>(output: &&W,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
-    -> Writer encoding.EncodingError!
+    -> Writer<W> encoding.EncodingError!
 ```
 
 `json.writer` alone adds `canonical: Bool{false}`. Invalid limits or setup I/O
@@ -601,10 +602,10 @@ xml.reader<R: Reader>(input: &&R,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
     -> xml.XMLReader<R> encoding.EncodingError!
-xml.writer(output: &&files.FileWriter,
+xml.writer<W: Writer>(output: &&W,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
-    -> xml.XMLWriter encoding.EncodingError!
+    -> xml.XMLWriter<W> encoding.EncodingError!
 ```
 
 `xml.XMLParseOptions` is

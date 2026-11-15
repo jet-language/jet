@@ -2,8 +2,6 @@
 // engine reused from origin/port/compiler@3aab69fde; every tier calls this API.
 use {
     core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
-    rt: jet.runtime.encoding
-    core.files.[FileWriter]
     core.prelude.[min, max]
     mem: core.mem
     stream: __core_encoding_stream
@@ -257,11 +255,13 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()},
     XMLReader<R>{input: input, limits: limits, scanner: scanner, terminal: None, total: 0, eof: false, allocation: stream.budget(limits)}
 }
 
-/// Bounded XML event output. The source stream renderer validates each event
-/// and the rendered bytes go to the buffered file writer; the first error
-/// latches and every later call returns it.
-XMLWriter: struct {
-    output: FileWriter
+/// Bounded XML event output to a consumed byte sink: a
+/// `files.FileWriter.move()`, a socket, or any other `Writer`. The source
+/// stream renderer validates each event and its rendered bytes go to the
+/// sink in one write; the first error latches and every later call returns
+/// it.
+XMLWriter: struct<W: Writer> {
+    output: W
     limits: EncodingLimits
     renderer: engine.StreamWriter
     terminal: EncodingError?
@@ -299,10 +299,9 @@ XMLWriter: struct {
                 return self.fail(writer_error(.Limit, self.total, "max_total_bytes {maximum} exceeded"))
             }
         }
-        window: bytes[0..<bytes.len()]
-        rt.write_bytes(self.output, window) ?? {
+        self.output.write_bytes(bytes) ?? {
             self.allocation.release(bytes.len())
-            return self.fail(io_error(self.total, err))
+            return self.fail(io_error(self.total, stream.io_cause(err)))
         }
         self.allocation.release(bytes.len())
         self.total = next_total
@@ -310,7 +309,7 @@ XMLWriter: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        rt.flush(self.output) ?? return self.fail(io_error(self.total, err))
+        self.output.flush() ?? return self.fail(io_error(self.total, stream.io_cause(err)))
     }
 
     finish: fn(&self) EncodingError! -[IO]> {
@@ -322,7 +321,7 @@ XMLWriter: struct {
     }
 }
 
-writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter EncodingError! {
+writer: fn<W: Writer>(output: &&W, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter<W> EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
@@ -331,7 +330,7 @@ writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, 
         return Err(error)
     }
     renderer: engine.StreamWriter.new(kernel.render_encoding(xml.encoding), kernel.lexical_policy(xml.lexical))
-    XMLWriter{output: output, limits: limits, renderer: renderer, terminal: None, total: 0, finished: false, allocation: stream.budget(limits)}
+    XMLWriter<W>{output: output, limits: limits, renderer: renderer, terminal: None, total: 0, finished: false, allocation: stream.budget(limits)}
 }
 
 writer_error: fn(kind: EncodingErrorKind, offset: Int, reason: String) -> EncodingError Never! {

@@ -13,7 +13,7 @@ reader_terminal: fn(reader: &cbor.CBORReader<files.FileReader>, reason: String) 
     return false
 }
 
-writer_terminal: fn(writer: &cbor.CBORWriter, reason: String) -> Bool {
+writer_terminal: fn(writer: &cbor.CBORWriter<files.FileWriter>, reason: String) -> Bool {
     if writer.flush() == {
         .Err(error) -> return error.reason == reason
         .Ok(_) -> return false

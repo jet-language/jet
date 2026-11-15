@@ -14,7 +14,8 @@
 // one bad record fails the whole call with no records. The bounded `reader`
 // consumes any byte source (`files.FileReader.move()`, a socket, any `Reader`)
 // incrementally: it holds one buffer and one record, yields the records before
-// a bad one, and its first error is sticky.
+// a bad one, and its first error is sticky. The bounded `writer` writes to any
+// byte sink (`files.FileWriter.move()`, a socket, any `Writer`).
 // 
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
@@ -24,20 +25,20 @@ use {
     core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
     json: core.encoding.json
     stream: __core_encoding_stream
-    core.files.[FileWriter]
 }
 
-/// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
-JSONLWriter: struct {
-    output: stream.JSONLinesPush
+/// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet: a
+/// record's LF is written before the next record, by `flush`, or by `finish`.
+JSONLWriter: struct<W: Writer> {
+    output: stream.JSONLinesPush<W>
     write: fn(&self, value: &&Dyn) EncodingError! -[IO]> { self.output.write(value) }
     flush: fn(&self) EncodingError! -[IO]> { self.output.flush() }
     finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
 }
 
-writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
-    output: stream.jsonl_writer(target, limits) ?? return Err(err)
-    Ok(JSONLWriter{output: output.move()})
+writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLWriter<W> EncodingError! {
+    output: stream.jsonl_writer<W>(target, limits) ?? return Err(err)
+    Ok(JSONLWriter<W>{output: output.move()})
 }
 
 /// A bounded pull reader over a consumed byte source: one nonblank record per

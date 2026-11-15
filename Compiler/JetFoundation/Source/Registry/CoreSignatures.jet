@@ -152,7 +152,6 @@ core_param_optional: fn(label: String, zone: ParamZone, default: CoreCallDefault
 
 core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCallParameterContract]? {
     absent: CoreCallDefault.Absent
-    limits: CoreCallDefault.StaticCall{type_name: "EncodingLimits", method: "safe"}
     if {
         module_name == "core.testing" && member == "histories" -> Val([CoreCallParameterContract]{
             core_param_required_either("seed"), core_param_required_either("cases"),
@@ -201,17 +200,6 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_required("text"), core_param_optional("delimiter", ParamZone.Either, CoreCallDefault.String{value: ","}),
             core_param_optional("header", ParamZone.Either, CoreCallDefault.Bool{value: false}),
             core_param_optional("skip_blank", ParamZone.Either, CoreCallDefault.Bool{value: false}),
-        })
-        module_name == "core.encoding.xml" && member == "writer" -> Val([CoreCallParameterContract]{
-            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
-            core_param_optional("options", ParamZone.Either, CoreCallDefault.StaticCall{type_name: "XMLRenderOptions", method: "safe"}),
-        })
-        module_name == "core.encoding.json" && member == "writer" -> Val([CoreCallParameterContract]{
-            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
-            core_param_optional("canonical", ParamZone.Either, CoreCallDefault.Bool{value: false}),
-        })
-        core_sig_one_of(module_name, [String]{"core.encoding.jsonl", "core.encoding.csv", "core.encoding.cbor"}) && member == "writer" -> Val([CoreCallParameterContract]{
-            core_param_required("target"), core_param_optional("limits", ParamZone.Either, limits),
         })
         module_name == "core.mod" && member == "load" -> Val([CoreCallParameterContract]{
             core_param_required("path"), core_param_required_label("grant"),

@@ -3450,7 +3450,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 401,
+      "line": 344,
       "column": 5,
       "reason": "the terminated raw path and the 128-byte stat fact row are live for the syscall"
     },
@@ -5102,49 +5102,49 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 99,
+      "line": 100,
       "column": 5,
       "reason": "inspect private typed carriers without changing public Dyn variants"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 165,
+      "line": 166,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/CborStream.jet",
-      "line": 235,
+      "line": 234,
       "column": 9,
       "reason": "the retained key copies exactly the already validated text bytes"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/CborStream.jet",
-      "line": 337,
+      "line": 336,
       "column": 17,
       "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 555,
+      "line": 554,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1071,
+      "line": 1076,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1229,
+      "line": 1234,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -5172,91 +5172,91 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 25,
+      "line": 24,
       "column": 5,
       "reason": "the shared parser validated this exact numeric lexeme"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 439,
+      "line": 438,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 579,
+      "line": 578,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 584,
+      "line": 583,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 776,
+      "line": 775,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 787,
+      "line": 786,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1734,
+      "line": 1739,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1749,
+      "line": 1754,
       "column": 13,
       "reason": "every byte before the closing quote is printable ASCII, so it is whole UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1907,
+      "line": 1912,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1912,
+      "line": 1917,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1978,
+      "line": 1983,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2122,
+      "line": 2127,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2158,
+      "line": 2163,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
@@ -5284,14 +5284,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 696,
+      "line": 686,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 764,
+      "line": 754,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -10491,7 +10491,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 74:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 235:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 93:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 401:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 344:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 31:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 488:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 494:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
@@ -10727,34 +10727,34 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Data/Data.jet | 2417:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Data/Data.jet | 3373:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Data/Data.jet | 3707:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Encoding/Cbor.jet | 99:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Cbor.jet | 165:5 | "validated private carriers retain byte strings for typed Encode" |
-| Core | Core/Encoding/CborStream.jet | 235:9 | "the retained key copies exactly the already validated text bytes" |
-| Core | Core/Encoding/CborStream.jet | 337:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/Csv.jet | 555:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Encoding/Csv.jet | 1071:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/Csv.jet | 1229:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
+| Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Encoding/CborStream.jet | 234:9 | "the retained key copies exactly the already validated text bytes" |
+| Core | Core/Encoding/CborStream.jet | 336:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| Core | Core/Encoding/Csv.jet | 554:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Encoding/Csv.jet | 1076:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Csv.jet | 1234:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 551:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 1261:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Json.jet | 1266:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Stream.jet | 25:5 | "the shared parser validated this exact numeric lexeme" |
-| Core | Core/Encoding/Stream.jet | 439:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/Encoding/Stream.jet | 579:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/Encoding/Stream.jet | 584:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/Encoding/Stream.jet | 776:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/Encoding/Stream.jet | 787:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 1734:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1749:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
-| Core | Core/Encoding/Stream.jet | 1907:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 1912:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 1978:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 2122:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 2158:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/Stream.jet | 24:5 | "the shared parser validated this exact numeric lexeme" |
+| Core | Core/Encoding/Stream.jet | 438:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 578:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 583:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 775:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 786:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 1739:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1754:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
+| Core | Core/Encoding/Stream.jet | 1912:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 1917:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 1983:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2127:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2163:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XmlEngine.jet | 175:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2676:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 696:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 764:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 686:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 754:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 650:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 134:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 139:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |

@@ -8,7 +8,6 @@ core_value_fn_none: fn(params: [Type]) -> Type Never! {
 core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     read: AccessConvention.Read
     write: AccessConvention.Write
-    moved: AccessConvention.Move
     unit: core_sig_named("Unit")
     data: core_sig_named("Dyn")
     io_error: core_sig_named("IOError")
@@ -339,19 +338,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         }
         if member == "content" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.List{element: data}, xml_error))))
-        }
-        if member == "writer" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(core_sig_named("FileWriter"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
-                core_sig_positional(xml_render_options, read),
-            }, Val(core_sig_result(core_sig_named("XMLWriter"), encoding_error))))
-        }
-    }
-    if module_name == "core.encoding.cbor" {
-        if member == "writer" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(core_sig_named("FileWriter"), moved), core_sig_positional(core_sig_named("EncodingLimits"), read),
-            }, Val(core_sig_result(core_sig_named("CBORWriter"), encoding_error))))
         }
     }
     if module_name == "core.files" {

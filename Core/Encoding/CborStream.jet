@@ -1,13 +1,12 @@
 // Private core.encoding part. Native authority:
 // CBORReader::{read_byte,arg,payload,string,retain_key,close_event,next_event}
 // CBORWriter::{scalar,accept,write_key,close_array,close_object,write_event,
-// flush_output,finish_output}. The reader pulls from any Prelude `Reader`;
-// only the writer's file and the allocation leaves cross the host boundary.
-// The old byte-array cbor.jet reader is not this contract.
+// flush_output,finish_output}. The reader pulls from any Prelude `Reader` and
+// the writer pushes to any Prelude `Writer`; only the allocation leaves cross
+// the host boundary. The old byte-array cbor.jet reader is not this contract.
 use {
     core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
     encoding: core.encoding
-    core.files.[FileWriter]
     mem: core.mem
     math: core.math
     stream: __core_encoding_stream
@@ -479,8 +478,8 @@ frame_heap: fn(frame: WriteFrame) -> Int Never! {
     total
 }
 
-CBORPush: struct {
-    output: FileWriter
+CBORPush: struct<W: Writer> {
+    output: W
     limits: EncodingLimits
     terminal: EncodingError?
     total: Int
@@ -602,10 +601,9 @@ CBORPush: struct {
                 return Err(error(.Limit, self.total, "$", "max_total_bytes {maximum} exceeded"))
             }
         }
-        window: bytes[0..<bytes.len()]
-        rt.write_bytes(self.output, window) ?? {
+        self.output.write_bytes(bytes) ?? {
             release<U8>(self.allocation, bytes)
-            return Err(io_error(self.total, "$", err))
+            return Err(io_error(self.total, "$", stream.io_cause(err)))
         }
         self.total += size
         self.root_written = true
@@ -704,7 +702,7 @@ CBORPush: struct {
 
     flush: fn(&self) EncodingError! -[IO, Time.Wait]> {
         if self.terminal == .Val(first) -> return Err(first.copy())
-        rt.flush(self.output) ?? return Err(self.fail(io_error(self.total, "$", err)))
+        self.output.flush() ?? return Err(self.fail(io_error(self.total, "$", stream.io_cause(err))))
     }
 
     finish: fn(&self) EncodingError! -[IO, Time.Wait]> {
@@ -716,9 +714,9 @@ CBORPush: struct {
     }
 }
 
-writer: fn(output: &&FileWriter, limits: EncodingLimits) -[FS]> CBORPush EncodingError! {
+writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> CBORPush<W> EncodingError! {
     limits_checked(limits) ?? return Err(err)
-    Ok(CBORPush{output: output.move(), limits: limits, terminal: None, total: 0, frames: [WriteFrame]{}, root_written: false, finished: false, retained: 0, allocation: stream.budget(limits)})
+    Ok(CBORPush<W>{output: output.move(), limits: limits, terminal: None, total: 0, frames: [WriteFrame]{}, root_written: false, finished: false, retained: 0, allocation: stream.budget(limits)})
 }
 
 #Test("CBOR checked allocation maps heap and allocator failures distinctly") {

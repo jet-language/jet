@@ -1,7 +1,7 @@
 // core.encoding / core.data raw leaves. Rust providers: (text into bytes),
-// (stream writes), (the hostile streaming law
-// seam, active only when JET_ENC_HOSTILE_IO is set):11 (host path metadata).
-// Codec policy is Jet.
+// (the hostile streaming law seam, active only when JET_ENC_HOSTILE_IO is
+// set; FileReader.read_into and FileWriter.write_bytes meet it), (host path
+// metadata). Codec policy is Jet.
 
 // text.into_bytes() as a fresh [U8]; the moved-in String is dropped once
 // its bytes are copied.
@@ -66,7 +66,7 @@ encoding_cause_take: fn(kind: I64, present: Bool, code: I64, message: I64) -> I6
     result
 }
 
-// jet_raw_encoding_cause of an OS error.
+// The EncodingCause of an OS error.
 encoding_cause_errno: fn(code: I64) -> I64 { encoding_cause_take(rt_io_error_kind_name(code), true, code, host_errno_cause(code)) }
 
 encoding_cause_custom: fn(kind: I64, message: I64) -> I64 { encoding_cause_take(kind, false, I64{0}, jet_rt_string_clone(message)) }
@@ -233,43 +233,36 @@ encoding_hostile_write_chunk: fn(state: I64, remaining: I64) -> I64 {
     if (chunk < remaining) -> chunk else -> remaining
 }
 
-encoding_hostile_fail_cause: fn() -> I64 { encoding_cause_custom(rt_static_text("Other"), rt_static_text("hostile encoding I/O failure")) }
-
-// File::write_all straight to the descriptor (the seam bypasses BufWriter).
-encoding_file_write: fn(writer: I64, bytes: I64, length: I64) -> I64 {
-    failure: host_write_all(fd_word(writer, I64{8}), bytes, length)
-    if (failure == I64{0}) -> return I64{0}
-    if (failure == HOST_WRITE_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write whole buffer"))
-    encoding_cause_errno(-failure)
-}
-
-// The hostile write; a cause or 0.
+// The hostile write plan for one FileWriter.write_bytes: 0 once written, 1
+// for a pending interrupt, 2 when the JET_ENC_HOSTILE_FAIL_WRITE_AFTER budget
+// is spent, else the failed descriptor write (-errno or HOST_WRITE_ZERO). The
+// bytes go straight to the descriptor in the plan's chunks.
 encoding_hostile_write: fn(state: I64, writer: I64, bytes: I64, length: I64) -> I64 {
     rt_text_store(wrapping(state + I64{80}), rt_text_word(wrapping(state + I64{80})) + I64{1})
     pending: rt_text_word(wrapping(state + I64{32}))
     if (pending != I64{0}) {
         rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
         rt_text_store(wrapping(state + I64{32}), pending - I64{1})
-        return encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted"))
+        return I64{1}
     }
     limited: rt_text_word(wrapping(state + I64{56})) != I64{0}
     limit: rt_text_word(wrapping(state + I64{64}))
-    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{128})), limit)) -> return encoding_hostile_fail_cause()
+    if (limited && !alloc_unsigned_less(rt_text_word(wrapping(state + I64{128})), limit)) -> return I64{2}
     offset := I64{0}
     loop offset < length {
         chunk: encoding_hostile_write_chunk(state, length - offset)
         total: rt_text_word(wrapping(state + I64{128}))
         if (limited && alloc_unsigned_less(limit, total + chunk)) {
             allowed: limit - total
-            if (allowed == I64{0}) -> return encoding_hostile_fail_cause()
-            cause: encoding_file_write(writer, bytes + offset, allowed)
-            if (cause != I64{0}) -> return cause
+            if (allowed == I64{0}) -> return I64{2}
+            failure: host_write_all(fd_word(writer, I64{8}), bytes + offset, allowed)
+            if (failure != I64{0}) -> return failure
             rt_text_store(wrapping(state + I64{128}), total + allowed)
             rt_text_store(wrapping(state + I64{104}), rt_text_word(wrapping(state + I64{104})) + allowed)
-            return encoding_hostile_fail_cause()
+            return I64{2}
         }
-        cause: encoding_file_write(writer, bytes + offset, chunk)
-        if (cause != I64{0}) -> return cause
+        failure: host_write_all(fd_word(writer, I64{8}), bytes + offset, chunk)
+        if (failure != I64{0}) -> return failure
         rt_text_store(wrapping(state + I64{128}), total + chunk)
         rt_text_store(wrapping(state + I64{104}), rt_text_word(wrapping(state + I64{104})) + chunk)
         offset += chunk
@@ -277,64 +270,14 @@ encoding_hostile_write: fn(state: I64, writer: I64, bytes: I64, length: I64) -> 
     I64{0}
 }
 
-// A cause or 0.
-encoding_write_all: fn(writer: I64, bytes: I64, length: I64) -> I64 {
-    if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
-    state: encoding_hostile_state()
-    if (state != I64{0}) -> return encoding_hostile_write(state, writer, bytes, length)
-    offset := I64{0}
-    loop offset < length {
-        chunk: if (length - offset < ENCODING_IO_CHUNK) -> length - offset else -> ENCODING_IO_CHUNK
-        failure: files_writer_write(writer, wrapping(bytes + offset), chunk)
-        if (failure != I64{0}) {
-            if (failure == FILES_WRITE_WHOLE_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write whole buffer"))
-            if (failure == FILES_WRITE_BUFFERED_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data"))
-            return encoding_cause_errno(-failure)
-        }
-        offset += chunk
-    }
-    I64{0}
-}
-
-// A cause or 0. The seam flushes the File itself (a no-op), not the BufWriter.
-encoding_flush: fn(writer: I64) -> I64 {
-    if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
-    state: encoding_hostile_state()
-    if (state != I64{0}) {
-        rt_text_store(wrapping(state + I64{88}), rt_text_word(wrapping(state + I64{88})) + I64{1})
-        pending: rt_text_word(wrapping(state + I64{32}))
-        if (pending != I64{0}) {
-            rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
-            rt_text_store(wrapping(state + I64{32}), pending - I64{1})
-            return encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted"))
-        }
-        return I64{0}
-    }
-    failure: files_writer_flush(writer)
-    if (failure == I64{0}) -> return I64{0}
-    if (failure == FILES_WRITE_BUFFERED_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data"))
-    encoding_cause_errno(-failure)
-}
-
-// (a borrowed [U8]), and.
-#Export(c) jet_raw_encoding_write_bytes: fn(writer: I64, data: I64, length: I64, error: I64) -> I64 {
-    temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
-    packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
-    if temporary -> net_copy_packed(data, length, packed)
-    cause: encoding_write_all(writer, packed, length)
-    if temporary -> jet_rt_free(packed, length, I64{8})
-    if (cause != I64{0}) -> return encoding_fail(cause, error)
-    I64{1}
-}
-#Export(c) jet_raw_encoding_flush: fn(writer: I64, error: I64) -> I64 {
-    cause: encoding_flush(writer)
-    if (cause != I64{0}) -> return encoding_fail(cause, error)
-    I64{1}
-}
-#Export(c) jet_raw_encoding_write_text: fn(writer: I64, text: I64, error: I64) -> I64 {
-    cause: encoding_write_all(writer, rt_text_data(text), rt_text_len(text))
-    if (cause != I64{0}) -> return encoding_fail(cause, error)
-    I64{1}
+// The hostile plan before one FileWriter.flush; true for a pending interrupt.
+encoding_hostile_flush_interrupted: fn(state: I64) -> Bool {
+    rt_text_store(wrapping(state + I64{88}), rt_text_word(wrapping(state + I64{88})) + I64{1})
+    pending: rt_text_word(wrapping(state + I64{32}))
+    if (pending == I64{0}) -> return false
+    rt_text_store(wrapping(state + I64{112}), rt_text_word(wrapping(state + I64{112})) + I64{1})
+    rt_text_store(wrapping(state + I64{32}), pending - I64{1})
+    true
 }
 
 // next_read_cap: the read plan (last entry repeats), else one byte under

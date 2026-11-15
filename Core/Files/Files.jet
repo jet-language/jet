@@ -430,8 +430,7 @@ FileWriter: struct {
     }
 
     /// `write_bytes` hands over every byte, as `write_all` does; the bytes
-    /// are buffered until `flush`, `fsync` or close. `write` also returns
-    /// the count.
+    /// are buffered until `flush`, `fsync` or close.
     impl Writer {
         write_bytes: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! {
             rt.writer_write_all(self, bytes)
@@ -441,15 +440,6 @@ FileWriter: struct {
         // the runtime's flush, never the handle's by name.
         flush: fn(&self) -[Time.Wait]> IOError! {
             rt.writer_flush(self)
-        }
-
-        write: fn(&self, bytes: [U8]) -[Time.Wait]> Int IOError! {
-            rt.writer_write_all(self, bytes) ?? return Err(err)
-            Ok(bytes.len())
-        }
-
-        write_all: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! {
-            rt.writer_write_all(self, bytes)
         }
     }
 }

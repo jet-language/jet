@@ -5,7 +5,6 @@
 use {
     core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
     encoding: core.encoding
-    core.files.[FileWriter]
     mem: core.mem
     math: core.math
     rt: jet.runtime.encoding
@@ -1192,8 +1191,10 @@ CanonicalFrame: struct {
     retained: U64
 }
 
-JSONPush: struct {
-    output: FileWriter
+JSONPush: struct<W: Writer> {
+    output: W
+    // The bytes of one write to `output`, kept so their room is reused.
+    out: [U8]
     limits: EncodingLimits
     frames: [WriteFrame]
     root_written: Bool
@@ -1224,7 +1225,9 @@ JSONPush: struct {
 
     write_bytes: fn(&self, bytes: View<U8>) EncodingError! -[IO]> {
         self.ensure_total(bytes.len())
-        rt.write_bytes(self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        self.out.clear()
+        loop byte in bytes -> self.out.push(byte)
+        self.output.write_bytes(self.out) ?? return Err(io_error(self.total, 1, self.total + 1, io_cause(err)))
         self.total += bytes.len()
     }
 
@@ -1247,7 +1250,9 @@ JSONPush: struct {
 
     write_text: fn(&self, text: String) EncodingError! -[IO]> {
         self.ensure_total(text.count_bytes())
-        rt.write_text(self.output, text) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        self.out.clear()
+        loop i in 0..<text.count_bytes() -> self.out.push(byte_at(text, i))
+        self.output.write_bytes(self.out) ?? return Err(io_error(self.total, 1, self.total + 1, io_cause(err)))
         self.total += text.count_bytes()
     }
 
@@ -1604,8 +1609,8 @@ JSONPush: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        rt.flush(self.output) ?? {
-            error: io_error(self.total, 1, self.total + 1, err)
+        self.output.flush() ?? {
+            error: io_error(self.total, 1, self.total + 1, io_cause(err))
             self.discard()
             self.terminal = Val(error)
             return Err(error)
@@ -1653,9 +1658,9 @@ escaped_unit: fn(text: String, at: Int, out: &[U8#6]) -> Int Never! {
     width
 }
 
-json_writer: fn(output: &&FileWriter, limits: EncodingLimits, canonical: Bool) -> JSONPush EncodingError! {
+json_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits, canonical: Bool) -> JSONPush<W> EncodingError! {
     validate_limits(limits)
-    Ok(JSONPush{output: output, limits: limits, frames: [WriteFrame]{}, root_written: false, finished: false, terminal: None, total: 0, canonical: canonical, canonical_frames: [CanonicalFrame]{}, canonical_retained: 0})
+    Ok(JSONPush<W>{output: output, out: [U8]{}, limits: limits, frames: [WriteFrame]{}, root_written: false, finished: false, terminal: None, total: 0, canonical: canonical, canonical_frames: [CanonicalFrame]{}, canonical_retained: 0})
 }
 
 canonical_frame: fn(is_object: Bool) -> CanonicalFrame Never! {
@@ -1897,7 +1902,7 @@ jsonl_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, typed_numbers: B
     Ok(JSONLinesPull<R>{parser: parser, record_index: 0, terminal: None})
 }
 
-write_tree: fn(writer: &JSONPush, value: Dyn) EncodingError! -[IO]> {
+write_tree: fn<W: Writer>(writer: &JSONPush<W>, value: Dyn) EncodingError! -[IO]> {
     if value == {
         .Null -> writer.write(DataEvent.Null)
         .Bool(v) -> writer.write(DataEvent.Bool(v))
@@ -1994,12 +1999,12 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
     Ok(size)
 }
 
-jsonl_wire_add: fn(writer: JSONPush, left: Int, right: Int) -> Int EncodingError! {
+jsonl_wire_add: fn<W: Writer>(writer: JSONPush<W>, left: Int, right: Int) -> Int EncodingError! {
     if left > 18446744073709551615 - right -> return Err(writer.error(.Limit, "JSONL record wire size overflow"))
     Ok(left + right)
 }
 
-jsonl_wire_size: fn(writer: JSONPush, value: Dyn) -> Int EncodingError! {
+jsonl_wire_size: fn<W: Writer>(writer: JSONPush<W>, value: Dyn) -> Int EncodingError! {
     if value == {
         .Null -> Ok(4)
         .Bool(flag) -> Ok(if flag -> 4 else -> 5)
@@ -2033,23 +2038,27 @@ jsonl_wire_size: fn(writer: JSONPush, value: Dyn) -> Int EncodingError! {
     }
 }
 
-// Native JSONL policy: close the prior LF before validating the next record,
-// reserve this record plus LF, and leave its LF pending across flush/drop.
-JSONLinesPush: struct {
-    writer: JSONPush
+// Native JSONL policy: close the prior LF before validating the next record
+// and reserve this record plus LF. The LF stays pending until the next
+// record, a flush or finish writes it, so a flushed file ends on a whole line.
+JSONLinesPush: struct<W: Writer> {
+    writer: JSONPush<W>
     finished: Bool
     terminal: EncodingError?
     record_index: Int
     pending_lf: Bool
 
+    close_line: fn(&self) EncodingError! -[IO]> {
+        if !self.pending_lf -> return
+        self.writer.ensure_total(1) ?? return self.fail(err)
+        self.writer.write_byte(U8{10}) ?? return self.fail(err)
+        self.pending_lf = false
+    }
+
     write: fn(&self, value: &&Dyn) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return self.fail(self.writer.state_error("write called after finish"))
-        if self.pending_lf {
-            self.writer.ensure_total(1) ?? return self.fail(err)
-            self.writer.write_byte(U8{10}) ?? return self.fail(err)
-            self.pending_lf = false
-        }
+        self.close_line() ?? return Err(err)
         _: jsonl_tree_size(value, 0, self.writer.limits) ?? {
             out := err
             out.byte_offset = self.writer.total
@@ -2080,29 +2089,25 @@ JSONLinesPush: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
+        self.close_line() ?? return Err(err)
         self.writer.flush() ?? return self.fail(err)
     }
 
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
-        if self.pending_lf {
-            self.writer.ensure_total(1) ?? return self.fail(err)
-            self.writer.write_byte(U8{10}) ?? return self.fail(err)
-            self.pending_lf = false
-        }
         self.flush()
         self.finished = true
     }
 }
 
-jsonl_writer: fn(output: &&FileWriter, limits: EncodingLimits) -> JSONLinesPush EncodingError! {
+jsonl_writer: fn<W: Writer>(output: &&W, limits: EncodingLimits) -> JSONLinesPush<W> EncodingError! {
     writer: json_writer(output, limits, false) ?? {
         error := err
         error.format = .JSONL
         return Err(error)
     }
-    Ok(JSONLinesPush{writer: writer.move(), finished: false, terminal: None, record_index: 0, pending_lf: false})
+    Ok(JSONLinesPush<W>{writer: writer.move(), finished: false, terminal: None, record_index: 0, pending_lf: false})
 }
 
 #Test("borrowed Object entries preserve insertion order") {

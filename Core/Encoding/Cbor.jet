@@ -6,7 +6,6 @@ use {
     math: core.math
     parser: __core_encoding_cbor_parse
     codec: __core_encoding_cbor_stream
-    core.files.[FileWriter]
     typed_errors.[typed_parse_error]
 }
 
@@ -16,8 +15,10 @@ CBORReader: struct<R: Reader> {
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
 
-CBORWriter: struct {
-    output: codec.CBORPush
+// A bounded CBOR event writer to any byte sink: a FileWriter, a socket, or a
+// program's own `Writer` type.
+CBORWriter: struct<W: Writer> {
+    output: codec.CBORPush<W>
 
     write: fn(&self, event: &&DataEvent) EncodingError! -[IO, Time.Wait]> { self.output.write(event) }
     flush: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.flush() }
@@ -31,9 +32,9 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()})
     Ok(CBORReader<R>{input: source.move()})
 }
 
-writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
-    target: codec.writer(output, limits) ?? return Err(err)
-    Ok(CBORWriter{output: target.move()})
+writer: fn<W: Writer>(output: &&W, limits: EncodingLimits{EncodingLimits.safe()}) -> CBORWriter<W> EncodingError! {
+    target: codec.writer<W>(output, limits) ?? return Err(err)
+    Ok(CBORWriter<W>{output: target.move()})
 }
 
 #Equatable

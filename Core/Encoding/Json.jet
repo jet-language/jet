@@ -35,7 +35,6 @@
 use {
     core: core
     core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, __DecodeSource, __Decoding]
-    core.files.[FileWriter]
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
@@ -189,10 +188,11 @@ JSONReader: struct<R: Reader> {
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
 
-/// Bounded event output. The source push engine owns framing, canonicalization,
-/// limits and sticky errors; its registered leaves perform only file operations.
-JSONWriter: struct {
-    output: stream.JSONPush
+/// Bounded event output to a consumed byte sink: a `files.FileWriter.move()`,
+/// a socket, or any other `Writer`. The source push engine owns framing,
+/// canonicalization, limits and sticky errors.
+JSONWriter: struct<W: Writer> {
+    output: stream.JSONPush<W>
 
     write: fn(&self, event: &&DataEvent) EncodingError! -[IO]> {
         self.output.write(event)
@@ -203,9 +203,9 @@ JSONWriter: struct {
     finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
 }
 
-writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -[FS]> JSONWriter EncodingError! {
-    output: stream.json_writer(target, limits, canonical) ?? return Err(err)
-    Ok(JSONWriter{output: output.move()})
+writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -> JSONWriter<W> EncodingError! {
+    output: stream.json_writer<W>(target, limits, canonical) ?? return Err(err)
+    Ok(JSONWriter<W>{output: output.move()})
 }
 
 /// RFC 6901 JSON Pointer selection. `""` is the whole

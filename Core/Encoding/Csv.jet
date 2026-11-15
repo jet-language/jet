@@ -6,7 +6,6 @@ use {
     stream: __core_encoding_stream
     encoding: core.encoding
     rt: jet.runtime.encoding
-    core.files.[FileWriter]
     files: core.files
     mem: core.mem
     core.data.[Query]
@@ -793,14 +792,17 @@ csv_limits: fn(limits: EncodingLimits) EncodingError! {
     }
 }
 
-CSVWriter: struct {
-    output: FileWriter
+// A bounded record writer to any byte sink (a FileWriter, a socket, or any
+// other `Writer`). Each record goes to it in one write, its CRLF in another.
+CSVWriter: struct<W: Writer> {
+    output: W
     limits: EncodingLimits
     terminal: EncodingError?
     total: Int
     record_index: Int
     finished: Bool
     pending_crlf: Bool
+    // The bytes of one write to `output`, kept so their room is reused.
     buffer: [U8]
     // What a text cell that opens a formula is written as.
     formulas: CSVFormulas
@@ -815,11 +817,14 @@ CSVWriter: struct {
         error
     }
 
-    byte: fn(&self, value: U8, count: Int) EncodingError! -[IO]> {
-        self.buffer[0] = value
-        self.buffer[1] = value
-        window: self.buffer[0..<count]
-        rt.write_bytes(self.output, window) ?? return Err(self.io_error(err))
+    // Writes `buffer` to the sink, if it holds any bytes, and empties it.
+    drain: fn(&self) EncodingError! -[IO]> {
+        if self.buffer.len() == 0 -> return
+        self.output.write_bytes(self.buffer) ?? {
+            self.buffer.clear()
+            return Err(self.io_error(stream.io_cause(err)))
+        }
+        self.buffer.clear()
     }
 
     close_record: fn(&self) EncodingError! -[IO]> {
@@ -827,10 +832,9 @@ CSVWriter: struct {
         if self.limits.max_total_bytes == .Val(limit) {
             if self.total > limit - 2 -> return Err(self.error(.Limit, 0, "max_total_bytes {limit} exceeded"))
         }
-        self.buffer[0] = U8{13}
-        self.buffer[1] = U8{10}
-        window: self.buffer[0..<2]
-        rt.write_bytes(self.output, window) ?? return Err(self.io_error(err))
+        self.buffer.push(U8{13})
+        self.buffer.push(U8{10})
+        self.drain() ?? return Err(err)
         self.total += 2
         self.pending_crlf = false
     }
@@ -861,23 +865,23 @@ CSVWriter: struct {
             }
         }
         loop i in 0..<row.len() {
-            if i > 0 -> self.byte(U8{44}, 1) ?? return Err(err)
+            if i > 0 -> self.buffer.push(U8{44})
             field: row[i]
             quoted := false
             loop at in 0..<field.count_bytes() {
                 byte: stream.byte_at(field, at)
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
             }
-            if quoted -> self.byte(U8{34}, 1) ?? return Err(err)
-            if __formula_escaped(field, self.formulas) -> self.byte(U8{39}, 1) ?? return Err(err)
-            if quoted {
-                loop at in 0..<field.count_bytes() {
-                    byte: stream.byte_at(field, at)
-                    self.byte(byte, if byte == (U8{34}) -> 2 else -> 1) ?? return Err(err)
-                }
-                self.byte(U8{34}, 1) ?? return Err(err)
-            } else { rt.write_text(self.output, field) ?? return Err(self.io_error(err)) }
+            if quoted -> self.buffer.push(U8{34})
+            if __formula_escaped(field, self.formulas) -> self.buffer.push(U8{39})
+            loop at in 0..<field.count_bytes() {
+                byte: stream.byte_at(field, at)
+                self.buffer.push(byte)
+                if quoted && byte == (U8{34}) -> self.buffer.push(byte)
+            }
+            if quoted -> self.buffer.push(U8{34})
         }
+        self.drain() ?? return Err(err)
         self.total += wire
         self.pending_crlf = true
         self.record_index += 1
@@ -891,10 +895,15 @@ CSVWriter: struct {
         }
     }
 
+    // A held CRLF is written first, so a flushed file ends on a whole record.
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        rt.flush(self.output) ?? {
-            error: self.io_error(err)
+        self.close_record() ?? {
+            self.terminal = Val(err)
+            return Err(err)
+        }
+        self.output.flush() ?? {
+            error: self.io_error(stream.io_cause(err))
             self.terminal = Val(error)
             return Err(error)
         }
@@ -903,18 +912,14 @@ CSVWriter: struct {
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
-        self.close_record() ?? {
-            self.terminal = Val(err)
-            return Err(err)
-        }
         self.flush() ?? return Err(err)
         self.finished = true
     }
 }
 
-writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, formulas: CSVFormulas{CSVFormulas.Escape}) -[FS]> CSVWriter EncodingError! {
+writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}, formulas: CSVFormulas{CSVFormulas.Escape}) -> CSVWriter<W> EncodingError! {
     csv_limits(limits) ?? return Err(err)
-    Ok(CSVWriter{output: target.move(), limits: limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false, buffer: [U8]{0, 0}, formulas: formulas})
+    Ok(CSVWriter<W>{output: target.move(), limits: limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false, buffer: [U8]{}, formulas: formulas})
 }
 
 // A record that takes its fields, not a copy of them.

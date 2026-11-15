@@ -24,11 +24,4 @@ encoding: module {
     // Ok when `bytes` is strict UTF-8, else the Utf8Error text. `priv`: the
     // codecs validate before they take bytes as text.
     #Import(c) priv utf8_validate: fn(bytes: [U8]) Err! = "jet_string_validate_utf8"
-
-    // The codec writers' file I/O: a write or flush, failing with the codec's
-    // cause. The readers pull through their `Reader`. `priv`: only the
-    // streaming codecs call them, on the writer they own.
-    #Import(c) priv write_bytes: fn(writer: &FileWriter, bytes: View<U8>) -[IO]> EncodingCause! = "jet_raw_encoding_write_bytes"
-    #Import(c) priv write_text: fn(writer: &FileWriter, text: String) -[IO]> EncodingCause! = "jet_raw_encoding_write_text"
-    #Import(c) priv flush: fn(writer: &FileWriter) -[IO]> EncodingCause! = "jet_raw_encoding_flush"
 }
