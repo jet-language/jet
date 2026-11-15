@@ -37,6 +37,7 @@ use {
         TOKEN_EQ_EQ,
         TOKEN_GE,
         TOKEN_GT,
+        TOKEN_IDENT,
         TOKEN_KW_ELSE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -51,6 +52,7 @@ use {
         TOKEN_RPAREN,
         TOKEN_SEMI,
         TOKEN_STRING,
+        TOKEN_UNIFIED_ARROW,
     ]
 }
 
@@ -931,20 +933,25 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
         // with the retired `when`). The comparison marker enters dispatch;
         // arm heads carry no repeated `subject OP`.
         .Switch(subject, arms, else_body, span) -> {
-            jfmt_write(f, "if")
-            jfmt_write(f, " ")
-            if parser_is_subjectless_guard(subject, span) {
-                if jfmt_switch_was_classic_if(f, arms, span) {
-                    if f.simplify && arms.len() > 1 {
-                        jfmt_fmt_guard_dispatch(f, arms, else_body, span)
+            hole_end: jfmt_hole_table_end(f, span.start)
+            if hole_end >= 0 {
+                jfmt_write_verbatim(f, span.start, hole_end, false)
+            } else {
+                jfmt_write(f, "if")
+                jfmt_write(f, " ")
+                if parser_is_subjectless_guard(subject, span) {
+                    if jfmt_switch_was_classic_if(f, arms, span) {
+                        if f.simplify && arms.len() > 1 {
+                            jfmt_fmt_guard_dispatch(f, arms, else_body, span)
+                        } else {
+                            jfmt_fmt_classic_switch(f, arms, else_body, span.start)
+                        }
                     } else {
-                        jfmt_fmt_classic_switch(f, arms, else_body, span.start)
+                        jfmt_fmt_guard_dispatch(f, arms, else_body, span)
                     }
                 } else {
-                    jfmt_fmt_guard_dispatch(f, arms, else_body, span)
+                    jfmt_fmt_dispatch(f, subject, arms, else_body, false, span)
                 }
-            } else {
-                jfmt_fmt_dispatch(f, subject, arms, else_body, false, span)
             }
         }
         .Break(_) -> jfmt_write(f, "break")
@@ -1371,6 +1378,36 @@ jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [
         if jfmt_one_line_trial_end(f, mark) -> return
     }
     jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
+}
+
+// A hole table (`if n % _ == 0 { 15 -> … }`) keeps its source as written,
+// since its arms hold the header filled with each candidate. The end of the
+// table's closing `}` for the `if` at `start`; -1 when the header has no
+// hole. A `_` in a case's payload (`r == .Val(_)`) is a wildcard, not a hole.
+jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
+    index := jfmt_first_token_at(f, start) + 1
+    case_groups := [Bool]{}
+    hole := false
+    loop index < f.source_toks.len() {
+        token: f.source_toks[index]
+        if case_groups.len() == 0 {
+            if token.kind == TOKEN_LBRACE {
+                if !hole || index >= f.brace_closes.len() || f.brace_closes[index] < 0 -> return -1
+                return f.source_toks[f.brace_closes[index]].span.end
+            }
+            if token.kind == TOKEN_UNIFIED_ARROW || token.kind == TOKEN_SEMI || token.kind == TOKEN_RBRACE -> return -1
+        }
+        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET {
+            opener: f.source_toks[index - 1]
+            case_groups.push(opener.kind == TOKEN_IDENT && parser_pascal_name(jfmt_src_text(f, opener.span.start, opener.span.end)))
+        }
+        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && case_groups.len() > 0 -> _ := case_groups.pop()
+        if token.kind == TOKEN_IDENT && jfmt_src_text(f, token.span.start, token.span.end) == "_" {
+            if case_groups.len() == 0 || !case_groups[case_groups.len() - 1] -> hole = true
+        }
+        index += 1
+    }
+    -1
 }
 
 // A statement table's span is its `if`: find the table's `{` (the last one

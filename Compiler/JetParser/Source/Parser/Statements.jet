@@ -707,6 +707,10 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
         parser_sync_stmt(state)
         return Stmt.Expr{expr: condition.expr}
     }
+    if parser_current_kind(state) == TOKEN_LBRACE && parser_dispatch_hole_count(condition.expr) > 0 {
+        parser_bump(state)
+        return parser_parse_if_hole_table(state, condition.expr, start.span)
+    }
     braced: parser_current_kind(state) == TOKEN_LBRACE
     if braced {
         // E0992: an old implicit-dispatch body (its first line is `head ->`)
@@ -853,6 +857,22 @@ parser_parse_if_guard_arms: fn(state: &JetParserState, start: Span) -> Stmt {
         if state.position == arm_position -> parser_bump(state)
     }
     Stmt.Switch{subject: Expr.Bool{value: true, span: start, id: parser_node_id(state)}, arms: arms, else_body: else_body, span: start}
+}
+
+// `if H[_] { candidate -> body }`. A comparison header over a subject is the
+// comparison table; any other header is a guard table, its arms read against
+// the hole marker so that each arm atom becomes the header filled with it.
+parser_parse_if_hole_table: fn(state: &JetParserState, header: &&Expr, start: Span) -> Stmt {
+    compared: parser_dispatch_hole_comparison(header)
+    if compared == .Val(table) -> return parser_parse_if_arms(state, table.subject, start, table.op)
+    saved_else_arms: state.else_arms.len()
+    marker: parser_dispatch_hole_marker(header)
+    state.dispatch_hole_headers.push(header)
+    parsed: parser_parse_if_arms(state, marker, start, BinOp.Eq)
+    _ := state.dispatch_hole_headers.pop()
+    loop state.else_arms.len() > saved_else_arms -> _ := state.else_arms.pop()
+    if parsed == .Switch(_, arms, else_body, span) -> return Stmt.Switch{subject: Expr.Bool{value: true, span: start, id: parser_node_id(state)}, arms: arms, else_body: else_body, span: span}
+    parsed
 }
 
 // A subjectless readiness arm is a `value, receiver` pair or

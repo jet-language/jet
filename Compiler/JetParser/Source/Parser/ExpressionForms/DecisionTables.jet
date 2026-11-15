@@ -9,7 +9,9 @@ use {
         AST_NODE_GENERATED,
         AccessConvention,
         BinOp,
+        CallArg,
         Expr,
+        EnumLitArg,
         Lambda,
         LambdaParam,
         NamedSpan,
@@ -215,6 +217,7 @@ parser_expression_form_pattern_condition: fn(state: &JetParserState, subject: Ex
         parser_expression_form_error(state, "E0366", pattern.span, "pattern arms need `==` — this table uses `{op_text}`", "structural patterns compare by shape under `if subject == {{ … }}` only", "write `if subject == {{ … }}` for pattern arms, or use a Bool head")
         return Expr.Bool{value: false, span: pattern.span, id: parser_node_id(state)}
     }
+    if parser_dispatch_hole_marked(subject) -> return parser_dispatch_hole_pattern(state, subject, pattern)
     Expr.PatternTest{subject: subject, pattern: pattern.pattern, span: pattern.span, id: parser_node_id(state)}
 }
 
@@ -244,6 +247,9 @@ parser_expression_form_arm_atom: fn(state: &JetParserState, subject: Expr, op: B
         return inner
     }
     raw: parser_expression_form_dispatch_atom(state, depth + 1)
+    // A hole table's arm atom is a candidate whatever its type: a Bool or
+    // comparison candidate is written in parentheses.
+    if parser_dispatch_hole_marked(subject) -> return parser_dispatch_hole_filled(state, raw.expr)
     is_predicate: if raw.expr == {
         .Binary(binary_op, _, _, _, _) -> binary_op == BinOp.Eq || binary_op == BinOp.Ne || binary_op == BinOp.Lt || binary_op == BinOp.Gt || binary_op == BinOp.Le || binary_op == BinOp.Ge || binary_op == BinOp.Compare || binary_op == BinOp.And || binary_op == BinOp.Or
         .PatternTest(_, _, _, _) -> true
@@ -294,7 +300,9 @@ parser_expression_form_arm_alternates: fn(state: &JetParserState, subject: Expr,
 
 // The operand after `&&` / `||`: a parenthesized arm head, or a `|` group
 // that still distributes (and needs parentheses when it has several atoms).
+// In a hole table it is an ordinary Bool operand.
 parser_expression_form_arm_bool_operand: fn(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
+    if parser_dispatch_hole_marked(subject) -> return parser_expression_form_dispatch_atom(state, depth + 1).expr
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         inner: parser_expression_form_dispatch_condition(state, subject, op, depth + 1)
@@ -577,6 +585,161 @@ parser_expression_form_pattern_arm: fn(cond: Expr) -> Bool Never! {
     false
 }
 
+// The dispatch hole: a `_` in an `if` header marks where each arm's
+// candidate goes, so `if n % _ == 0 { 15 -> … }` tests `n % 15 == 0`.
+// Each arm gets its own copy of the header with its candidate in the hole:
+// every attempt evaluates the header afresh, a candidate runs only where its
+// arm is reached, and `&&`/`||` after a candidate keep their precedence.
+PARSER_DISPATCH_HOLE: "_"
+
+// How many holes `expr` holds where a candidate can go: in an operand, a
+// parenthesized group, a receiver, an index or a call argument.
+parser_dispatch_hole_count: fn(expr: Expr) -> Int Never! {
+    count := 0
+    if expr == {
+        .Ident(name, _, _) -> {
+            if name == PARSER_DISPATCH_HOLE -> count = 1
+        }
+        .Binary(_, left, right, _, _) -> count = parser_dispatch_hole_count(left) + parser_dispatch_hole_count(right)
+        .Unary(_, operand, _, _) -> count = parser_dispatch_hole_count(operand)
+        .Paren(value, _, _) -> count = parser_dispatch_hole_count(value)
+        .Field(base, _, _, _) -> count = parser_dispatch_hole_count(base)
+        .Index(base, index, _, _, _) -> count = parser_dispatch_hole_count(base) + parser_dispatch_hole_count(index)
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands -> count += parser_dispatch_hole_count(operand)
+        }
+        .Call(call, _) -> {
+            loop arg in call.args -> count += parser_dispatch_hole_count(arg.expr)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
+            count = parser_dispatch_hole_count(receiver)
+            loop arg in args -> count += parser_dispatch_hole_count(arg.expr)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    count
+}
+
+parser_dispatch_hole_is: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _, _) -> return name == PARSER_DISPATCH_HOLE
+    false
+}
+
+// `header` with `candidate` in its hole. Every rebuilt node gets a fresh id,
+// since each arm's copy of the header is checked on its own.
+parser_dispatch_hole_fill: fn(state: &JetParserState, header: &&Expr, candidate: &&Expr) -> Expr {
+    if parser_dispatch_hole_count(header) == 0 -> return header
+    if header == {
+        .Ident(_, _, _) -> candidate
+        .Binary(op, left, right, span, _) -> {
+            if parser_dispatch_hole_count(left) > 0 -> return Expr.Binary{op: op, left: parser_dispatch_hole_fill(state, left, candidate), right: right, span: span, id: parser_node_id(state)}
+            Expr.Binary{op: op, left: left, right: parser_dispatch_hole_fill(state, right, candidate), span: span, id: parser_node_id(state)}
+        }
+        .Unary(op, operand, span, _) -> Expr.Unary{op: op, operand: parser_dispatch_hole_fill(state, operand, candidate), span: span, id: parser_node_id(state)}
+        .Paren(value, span, _) -> Expr.Paren{value: parser_dispatch_hole_fill(state, value, candidate), span: span, id: parser_node_id(state)}
+        .Field(base, member, span, _) -> Expr.Field{base: parser_dispatch_hole_fill(state, base, candidate), member: member, span: span, id: parser_node_id(state)}
+        .Index(base, index, span, kind, _) -> {
+            if parser_dispatch_hole_count(base) > 0 -> return Expr.Index{base: parser_dispatch_hole_fill(state, base, candidate), index: index, span: span, kind: kind, id: parser_node_id(state)}
+            Expr.Index{base: base, index: parser_dispatch_hole_fill(state, index, candidate), span: span, kind: kind, id: parser_node_id(state)}
+        }
+        .CompareChain(operands, ops, hooks, span, _) -> {
+            filled := operands
+            at := 0
+            loop at < filled.len() && parser_dispatch_hole_count(filled[at]) == 0 -> at += 1
+            filled[at] = parser_dispatch_hole_fill(state, filled[at], candidate)
+            Expr.CompareChain{operands: filled, ops: ops, hooks: hooks, span: span, id: parser_node_id(state)}
+        }
+        .Call(call, _) -> {
+            rebuilt := call
+            rebuilt.args = parser_dispatch_hole_fill_args(state, call.args, candidate)
+            Expr.Call{call: rebuilt, id: parser_node_id(state)}
+        }
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
+            if parser_dispatch_hole_count(receiver) > 0 -> return Expr.MethodCall{receiver: parser_dispatch_hole_fill(state, receiver, candidate), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: parser_node_id(state)}
+            Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_dispatch_hole_fill_args(state, args, candidate), id: parser_node_id(state)}
+        }
+        // `parser_dispatch_hole_count` finds no hole in these forms.
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> candidate
+    }
+}
+
+parser_dispatch_hole_fill_args: fn(state: &JetParserState, args: [CallArg], candidate: &&Expr) -> [CallArg] {
+    filled := args
+    at := 0
+    loop at < filled.len() && parser_dispatch_hole_count(filled[at].expr) == 0 -> at += 1
+    if at == filled.len() -> return filled
+    arg := filled[at]
+    arg.expr = parser_dispatch_hole_fill(state, arg.expr.move(), candidate)
+    filled[at] = arg
+    filled
+}
+
+// The subject the arms of a hole table are parsed against: a generated `_`.
+// An arm atom against it becomes the innermost table's header holding the
+// atom (`state.dispatch_hole_headers`).
+parser_dispatch_hole_marker: fn(header: Expr) -> Expr Never! {
+    Expr.Ident{name: PARSER_DISPATCH_HOLE, span: expr_span(header), id: AST_NODE_GENERATED}
+}
+
+parser_dispatch_hole_marked: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _, id) -> return name == PARSER_DISPATCH_HOLE && id == AST_NODE_GENERATED
+    false
+}
+
+// The innermost hole table's header holding `candidate`.
+parser_dispatch_hole_filled: fn(state: &JetParserState, candidate: &&Expr) -> Expr {
+    header := state.dispatch_hole_headers[state.dispatch_hole_headers.len() - 1]
+    parser_dispatch_hole_fill(state, header.move(), candidate)
+}
+
+// A bare `.Case` head reads as a pattern; outside `subject == _` the case is
+// the candidate value. Any other pattern stays a pattern test.
+parser_dispatch_hole_pattern: fn(state: &JetParserState, subject: Expr, pattern: ParsedPattern) -> Expr {
+    if pattern.pattern == .Variant(variant, bindings, leading_dot, span) {
+        if bindings.len() == 0 && leading_dot {
+            case_value: Expr.EnumLit{type_name: "", variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: true, span: span, id: parser_node_id(state)}
+            return parser_dispatch_hole_filled(state, case_value)
+        }
+    }
+    Expr.PatternTest{subject: subject, pattern: pattern.pattern, span: pattern.span, id: parser_node_id(state)}
+}
+
+// `subject OP _` (or `_ == subject`, `_ != subject`) is the comparison table
+// over `subject`, which keeps its pattern and range heads and its coverage.
+ParserDispatchHoleComparison: struct {
+    subject: Expr
+    op: BinOp
+}
+
+parser_dispatch_hole_comparison: fn(header: Expr) -> ParserDispatchHoleComparison? Never! {
+    if header == .Binary(op, left, right, _, _) {
+        if parser_expression_form_dispatch_op_kind(op) {
+            if parser_dispatch_hole_is(right) && parser_dispatch_hole_count(left) == 0 -> return Val(ParserDispatchHoleComparison{subject: left, op: op})
+            if parser_dispatch_hole_is(left) && parser_dispatch_hole_count(right) == 0 && (op == BinOp.Eq || op == BinOp.Ne) -> return Val(ParserDispatchHoleComparison{subject: right, op: op})
+        }
+    }
+    None
+}
+
+parser_expression_form_dispatch_op_kind: fn(op: BinOp) -> Bool Never! {
+    op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
+}
+
+// A value hole table. A general header reads its arms against the hole
+// marker, so each arm's atoms become filled headers; it needs an `else` like
+// any table with comparison heads.
+parser_expression_form_parse_hole_table: fn(state: &JetParserState, header: &&Expr, start: Span, depth: Int) -> ParsedExpr {
+    compared: parser_dispatch_hole_comparison(header)
+    if compared == .Val(table) -> return parser_expression_form_parse_dispatch_table(state, table.subject, table.op, start, depth + 1)
+    saved_else_arms: state.else_arms.len()
+    marker: parser_dispatch_hole_marker(header)
+    state.dispatch_hole_headers.push(header)
+    parsed: parser_expression_form_parse_dispatch_table(state, marker, BinOp.Eq, start, depth + 1)
+    _ := state.dispatch_hole_headers.pop()
+    loop state.else_arms.len() > saved_else_arms -> _ := state.else_arms.pop()
+    parsed
+}
+
 // `lint_style` marks the root of a value `if` chain, which reports L0507 when
 // it is chained or spans several lines; `parts` collects each condition and
 // branch value so the root can rebuild the chain as one arm table.
@@ -601,6 +764,10 @@ parser_expression_form_parse_if: fn(state: &JetParserState, depth: Int, lint_sty
     cond_start: parser_current(state).span.start
     condition: parser_parse_expression_no_struct_lit(state, depth + 1)
     cond_span: Span{start: cond_start, end: parser_prev_token_end(state)}
+    if parser_current_kind(state) == TOKEN_LBRACE && parser_dispatch_hole_count(condition.expr) > 0 {
+        parser_bump(state)
+        return parser_expression_form_parse_hole_table(state, condition.expr, start.span, depth + 1)
+    }
     parser_expect_unified_arrow(state, "after the condition of a value-producing `if`")
     // As Rust's `?`: once the arrow is missing (a classic `if c {` statement
     // read as a value), the value form ends here. A speculative parse that

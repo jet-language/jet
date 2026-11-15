@@ -13,6 +13,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [ComprehensionForms](ComprehensionForms.jet)
 - [DebugTrace](DebugTrace.jet) — `debug(value)` returns its value unchanged and writes one stderr line with the file, line, expression text, and Debug form.
 - [DefaultRefs](DefaultRefs.jet) — A default may reference an earlier parameter.
+- [DispatchHole](DispatchHole.jet) — A `_` in an `if` header is its hole.
 - [FencedNames](FencedNames.jet) — `<: … :>` repeats its whole statement once per entry without creating a list.
 - [FirstHour](FirstHour.jet) — First-hour tour: one small command-line tool that also builds as a native binary.
 - [FirstHourExpert](FirstHourExpert.jet) — Expert variant of FirstHour.jet.

@@ -1324,6 +1324,11 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
     if expr == {
         // S68 `if` used as a value.
         .If(_, _, _, _, _, _, _) -> {
+            hole_end: jfmt_hole_table_end(f, expr_span(expr).start)
+            if hole_end >= 0 {
+                jfmt_write_verbatim(f, expr_span(expr).start, hole_end, false)
+                return
+            }
             if jfmt_is_guard_expr(f, expr) {
                 jfmt_fmt_guard_expr(f, expr)
                 return

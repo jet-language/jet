@@ -115,6 +115,9 @@ JetParserState: struct {
     // The block depth of a braceless arm body in an arm table (-1 = none);
     // its statement may end before the `,` that separates compact arms.
     table_arm_block_depth: Int{-1}
+    // The headers of the hole tables (`if n % _ == 0 { … }`) whose arms are
+    // being read, innermost last; an arm atom fills the innermost one.
+    dispatch_hole_headers: [Expr]{[Expr]{}}
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
     block_depth: Int{0}
