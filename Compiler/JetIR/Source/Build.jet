@@ -1033,7 +1033,7 @@ ir_operator_hook_key: fn(p: IRProgram, render_impls: &[String:Int], trait_short:
 ir_program_bind_decls: fn(p: &IRProgram, decls: DeclTable) Never! {
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
     loop (row, function) in p.functions {
-        if decl_table_find(decls, function.key) == .Val(id) {
+        if decl_table_find(decls, p.symbols, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = row
         }
     }

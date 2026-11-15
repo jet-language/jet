@@ -32,6 +32,7 @@ use {
         decl_id_index,
         decl_table_add,
         decl_table_find,
+        decl_table_find_symbol,
         decl_table_index,
         Diagnostic,
         Dimension,
@@ -1542,13 +1543,13 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
 // one keyed lookup of its DeclID. None means the target is unknown; callers
 // must not manufacture a false ABI.
 sema_registration_callable_row: fn(graph: SemaRegistrationGraph, key: String) -> SemaRegistrationCallableRow? Never! {
-    id: decl_table_find(graph.decls, key) ?? return None
+    id: decl_table_find(graph.decls, graph.symbols, key) ?? return None
     Val(graph.callables[decl_id_index(id)])
 }
 
-// The DeclID of the callable registered under `key`.
-sema_registration_callable_id: fn(graph: SemaRegistrationGraph, key: String) -> DeclID? Never! {
-    decl_table_find(graph.decls, key)
+// The DeclID of the callable registered as the run-wide `symbol`.
+sema_registration_callable_id: fn(graph: SemaRegistrationGraph, symbol: SymbolID) -> DeclID? Never! {
+    decl_table_find_symbol(graph.decls, symbol)
 }
 
 // The key text of a run-wide symbol; a body's own id names none ("").
@@ -1560,7 +1561,8 @@ sema_registration_symbol_key: fn(graph: SemaRegistrationGraph, id: SymbolID) -> 
 // The callable registered as `target`; a body's own id names none.
 sema_registration_callable_row_of: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaRegistrationCallableRow? Never! {
     if symbol_is_local(target) -> return None
-    sema_registration_callable_row(graph, symbol_table_key(graph.symbols, target))
+    id: decl_table_find_symbol(graph.decls, target) ?? return None
+    Val(graph.callables[decl_id_index(id)])
 }
 
 sema_registration_callable_abi: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaRegistrationCallableABI? {
@@ -1794,22 +1796,22 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
     callables := [SemaRegistrationCallableRow]{}
     loop (module_index, module_row) in graph.modules {
         loop (index, function) in module_row.functions {
-            _: decl_table_add(decls, graph.symbols, function.symbol)
+            _: decl_table_add(decls, function.symbol)
             callables.push(SemaRegistrationCallableRow.Function{module_index: module_index, row: index})
         }
         loop (index, function) in module_row.foreign_functions {
-            _: decl_table_add(decls, graph.symbols, function.symbol)
+            _: decl_table_add(decls, function.symbol)
             callables.push(SemaRegistrationCallableRow.Foreign{module_index: module_index, row: index})
         }
         loop (owner, nominal) in module_row.nominals {
             loop (index, method) in nominal.methods {
-                _: decl_table_add(decls, graph.symbols, method.symbol)
+                _: decl_table_add(decls, method.symbol)
                 callables.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
             }
         }
         loop (owner, implementation) in module_row.impls {
             loop (index, method) in implementation.methods {
-                _: decl_table_add(decls, graph.symbols, method.symbol)
+                _: decl_table_add(decls, method.symbol)
                 callables.push(SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
             }
         }

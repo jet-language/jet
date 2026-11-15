@@ -8763,7 +8763,7 @@ sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, mo
     loop node in tree.nodes {
         if node.kind == .Call(callee, type_args, _) {
             if type_args.len() == 0 -> next
-            row: sema_registration_callable_row(graph, graph.decls.rows[callee.row].key) ?? next
+            row: sema_registration_callable_row_of(graph, graph.decls.rows[callee.row].symbol) ?? next
             if row == .Function(declaring, index) {
                 params: graph.modules[declaring].functions[index].declaration.type_params
                 loop (position, arg) in type_args {

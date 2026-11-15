@@ -27,7 +27,7 @@ use {
         TTryConvert,
         core_identity_in_module,
     ]
-    jet_foundation.[DeclTable, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, decl_table_find, module_is_core, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key]
+    jet_foundation.[DeclTable, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, decl_table_find, decl_table_key, module_is_core, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key]
 }
 
 ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
@@ -544,8 +544,8 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
             if key.starts_with("function:") && !keys.contains(key) -> keys.push(key)
         }
         .Call(callee, _, _) -> {
-            key: decls.rows[callee.row].key
-            if key.starts_with("function:") && !keys.contains(key) -> keys.push(key.copy())
+            key: decl_table_key(decls, symbols, callee)
+            if key.starts_with("function:") && !keys.contains(key) -> keys.push(key)
         }
         .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
@@ -762,7 +762,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
             next
         }
         name_rows_set_first(by_key, function.key, index)
-        if decl_table_find(decls, function.key) == .Val(id) {
+        if decl_table_find(decls, symbols[0], function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
         core: module_is_core(function.module_identity)

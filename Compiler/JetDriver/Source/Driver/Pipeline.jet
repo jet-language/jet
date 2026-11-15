@@ -156,6 +156,8 @@ use {
         DeclID,
         DeclTable,
         decl_table_find,
+        decl_table_find_symbol,
+        decl_table_key,
         Diagnostic,
         ModuleID,
         ModuleTable,
@@ -4304,19 +4306,19 @@ jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, func
     // foreign row.
     targets := (loop _ in 0..<decls.rows.len() -> false)
     loop function in functions {
-        if decl_table_find(decls, function.key) == .Val(id) -> targets[id.row.index()] = true
+        if decl_table_find(decls, symbols, function.key) == .Val(id) -> targets[id.row.index()] = true
     }
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
-            if decl_table_find(decls, row.key) == .Val(id) -> targets[id.row.index()] = true
-            if decl_table_find(decls, symbol_table_key(symbols, row.symbol_id)) == .Val(id) {
+            if decl_table_find(decls, symbols, row.key) == .Val(id) -> targets[id.row.index()] = true
+            if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) {
                 targets[id.row.index()] = true
             }
         }
     }
     loop position in 0..<functions.len() {
         missing_id: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
-        missing: decls.rows[missing_id.row].key
+        missing: decl_table_key(decls, symbols, missing_id)
         trap: jet_driver_keep_going_trap_body_row(kg, functions[position], "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "keep-going trap: this function calls `{missing}`, which did not check")
         functions[position] = trap
     }

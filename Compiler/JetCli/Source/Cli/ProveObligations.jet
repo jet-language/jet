@@ -11,7 +11,7 @@
 // skipped and never guessed, so every counterexample is one the program can
 // reach.
 use {
-    jet_foundation.[BodyTree, DeclTable, FnBody, Span, SymbolID, TIndexProof, TLocal, Type, body_node, body_stmt, body_type]
+    jet_foundation.[BodyTree, DeclTable, FnBody, Span, SymbolID, SymbolTable, TIndexProof, TLocal, Type, body_node, body_stmt, body_type, decl_table_key]
     jet_semindex.[semindex_doc_text]
 }
 
@@ -49,9 +49,11 @@ JetCLISolverScope: struct {
 }
 
 // What a call obligation names its callee by: the run's declaration table
-// and each checked function's name by key.
+// with the symbol table its keys are rows of, and each checked function's
+// name by key.
 JetCLISolverCallees: struct {
     decls: DeclTable
+    symbols: SymbolTable
     names: [String:String]
 }
 
@@ -362,8 +364,8 @@ jet_cli_solver_callee: fn(tree: BodyTree, body: [Int], callees: JetCLISolverCall
     if body_stmt(tree, body[body.len() - 1]) == .ExprStmt(value, _) {
         node: body_node(tree, value)
         if node.kind == .Call(callee, _, _) {
-            key: callees.decls.rows[callee.row].key
-            return callees.names.get(key) ?? key.copy()
+            key: decl_table_key(callees.decls, callees.symbols, callee)
+            return callees.names.get(key) ?? key
         }
         if node.kind == .MethodCall(_, method, _, _) -> return method.name.copy()
     }

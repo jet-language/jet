@@ -738,60 +738,60 @@ DeclID: struct {
     row: Row<DeclRow>
 }
 
-// One registered declaration: its canonical key text (diagnostics, IR
-// names) and kind.
+// One registered declaration: its run-wide symbol (its key text is the
+// symbol table's, read with `decl_table_key`) and kind.
 DeclRow: struct {
-    key: String
+    symbol: SymbolID
     kind: SymbolKind
 }
 
 // Rows in registration order (module order, then each module's callables in
-// row order). `by_key` maps each key to the position in `ids` of its first
-// row once `decl_table_index` ran (A1: one hash of the key and one candidate
-// compare per lookup, not a binary search of the key texts); a later row of a
-// key (a redeclaration) is kept but never found.
+// row order). `by_symbol` maps each symbol to the position in `ids` of its
+// first row once `decl_table_index` ran; a later row of a symbol (a
+// redeclaration) is kept but never found.
 DeclTable: struct {
     rows: Rows<DeclRow>{Rows<DeclRow>{}}
-    by_key: NameRows{name_rows()}
+    by_symbol: [U32:Int]{[U32:Int]{}}
     ids: [DeclID]{[DeclID]{}}
     // Rows added since the last `decl_table_index`.
-    pending: [DeclTableEntry]{[DeclTableEntry]{}}
+    pending: [DeclID]{[DeclID]{}}
 }
 
-DeclTableEntry: struct {
-    key: String
-    id: DeclID
-}
-
-// Appends `symbol`'s row, a run-wide one of `symbols`; `decl_table_index`
-// keys it.
-decl_table_add: fn(table: &DeclTable, symbols: SymbolTable, symbol: Symbol) -> DeclID Never! {
-    decl_table_add_row(table, symbol_table_key(symbols, symbol.id), symbol.kind)
-}
-
-// Appends the row of declaration `key` of kind `kind`; `decl_table_index`
-// keys it.
-decl_table_add_row: fn(table: &DeclTable, key: String, kind: SymbolKind) -> DeclID Never! {
-    id: DeclID{row: table.rows.add(DeclRow{key: key.copy(), kind: kind})}
-    table.pending.push(DeclTableEntry{key: key.copy(), id: id})
+// Appends `symbol`'s row, a run-wide one; `decl_table_index` keys it.
+decl_table_add: fn(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
+    id: DeclID{row: table.rows.add(DeclRow{symbol: symbol.id, kind: symbol.kind})}
+    table.pending.push(id.copy())
     id
 }
 
-// Keys the pending rows. They are in row order, so the first row of each key
-// is the first one met, and a key an earlier index keyed keeps its row.
+// Keys the pending rows. They are in row order, so the first row of each
+// symbol is the first one met, and a symbol an earlier index keyed keeps its
+// row.
 decl_table_index: fn(table: &DeclTable) Never! {
-    if table.pending.len() == 0 -> return
-    entries := compiler_take_rows<DeclTableEntry>(table.pending)
-    loop entry in entries {
-        if name_rows_get_text(table.by_key, entry.key) != None -> next
-        name_rows_set(table.by_key, entry.key, table.ids.len())
-        table.ids.push(entry.id)
+    loop id in compiler_take_rows<DeclID>(table.pending) {
+        symbol: table.rows[id.row].symbol.id
+        if table.by_symbol.get(symbol) != None -> next
+        table.by_symbol[symbol] = table.ids.len()
+        table.ids.push(id)
     }
 }
 
-decl_table_find: fn(table: DeclTable, key: String) -> DeclID? Never! {
-    position: name_rows_get_text(table.by_key, key) ?? return None
+// The declaration registered under key text `key` of `symbols`, the table
+// the declarations' symbols are rows of.
+decl_table_find: fn(table: DeclTable, symbols: SymbolTable, key: String) -> DeclID? Never! {
+    decl_table_find_symbol(table, symbol_find(symbols, key) ?? return None)
+}
+
+// The declaration registered as `symbol`.
+decl_table_find_symbol: fn(table: DeclTable, symbol: SymbolID) -> DeclID? Never! {
+    position: table.by_symbol.get(symbol.id) ?? return None
     Val(table.ids[position])
+}
+
+// The key text of declaration `id` in `symbols`, the table its symbol is a
+// row of.
+decl_table_key: fn(table: DeclTable, symbols: SymbolTable, id: DeclID) -> String Never! {
+    symbol_table_key(symbols, table.rows[id.row].symbol)
 }
 
 decl_id_index: fn(id: DeclID) -> Int Never! {

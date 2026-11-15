@@ -13,6 +13,7 @@ use jet_foundation.[
     TExprType,
     CoreMarkerApplication,
     DeclID,
+    decl_table_key,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -1112,10 +1113,10 @@ sema_program_symbol_key: fn(program: SemaProgramTables, id: SymbolID) -> String 
 // no row (a body's own symbol has none) is a compiler bug, reported rather
 // than lowered to a guessed callee.
 sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
-    key: if symbol_is_local(symbol) -> "" else -> sema_program_symbol_key(program, symbol)
     if program.registration_graph == .Val(graph) {
-        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, key) == .Val(id) -> return Val(id)
+        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, symbol) == .Val(id) -> return Val(id)
     }
+    key: if symbol_is_local(symbol) -> "" else -> sema_program_symbol_key(program, symbol)
     diagnostics.push(sema_error("E0003", span, "the call target `{key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
     None
 }
@@ -1123,7 +1124,7 @@ sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Sp
 // The key text of the registered declaration `id` (diagnostics, call facts,
 // effect node keys). A DeclID is only minted from a graph's table.
 sema_program_decl_key: fn(program: SemaProgramTables, id: DeclID) -> String Never! {
-    if program.registration_graph == .Val(graph) -> return graph.decls.rows[id.row].key.copy()
+    if program.registration_graph == .Val(graph) -> return decl_table_key(graph.decls, graph.symbols, id)
     panic("a DeclID outlived its registration graph")
 }
 

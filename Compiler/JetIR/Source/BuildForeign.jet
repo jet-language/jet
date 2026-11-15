@@ -7,7 +7,7 @@
 
 use {
     jet_backend.[x64_assemble_template]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find, name_rows_set, name_rows_value, type_carrier_identity]
+    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, name_rows_set, name_rows_value, type_carrier_identity]
     jet_sema.[SEMA_GUEST_RUNTIME_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
 }
 
@@ -31,7 +31,7 @@ ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], dec
     loop row in foreign.move() {
         key: ir_symbol_key(p, row.symbol_id)
         if p.foreign.get(key) != None -> next
-        if decl_table_find(decls, key) == .Val(id) {
+        if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) {
             p.decl_foreign[id.row.index()] = p.foreign_rows.len()
             p.foreign_rows.push(row.copy())
         }

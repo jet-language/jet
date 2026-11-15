@@ -34,6 +34,7 @@ use jet_foundation.[
     DeclID,
     DeclTable,
     decl_table_find,
+    decl_table_key,
     Diagnostic,
     diagnostic_registry_row,
     Effect,
@@ -999,11 +1000,11 @@ sema_effect_call_api: fn(program: SemaProgramTables, value: TExpr) -> String Nev
 }
 
 // sema_effect_call_api of a node of a checked flat body; `decls` names a
-// direct callee.
-sema_effect_node_call_api: fn(decls: DeclTable, kind: NodeKind) -> String Never! {
+// direct callee, its key a row of `symbols`.
+sema_effect_node_call_api: fn(decls: DeclTable, symbols: SymbolTable, kind: NodeKind) -> String Never! {
     if kind == {
         .CoreCall(record, _, _, _, _, _) -> sema_effect_member_label(record.module_name, record.member)
-        .Call(callee, _, _) -> sema_effect_decl_label(decls.rows[callee.row].key)
+        .Call(callee, _, _) -> sema_effect_decl_label(decl_table_key(decls, symbols, callee))
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
         .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) -> "intrinsic method"
@@ -5868,7 +5869,7 @@ sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody
     source_index := sema_effect_source_index(module_row.sources)
     sema_effect_add_module_nodes(functions, module_row, input_position, source_index, symbols, prepared.nodes, prepared.node_keys, prepared.diagnostics)
     loop function in functions {
-        row: if decl_table_find(decls, function.key) == .Val(id) -> id.row.index() else -> -1
+        row: if decl_table_find(decls, symbols, function.key) == .Val(id) -> id.row.index() else -> -1
         prepared.node_decls.push(row)
     }
     prepared.source_indices.push(source_index)

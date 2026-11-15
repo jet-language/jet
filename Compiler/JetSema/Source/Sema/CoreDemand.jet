@@ -59,6 +59,7 @@ use jet_foundation.[
     compiler_transfer_rows,
     decl_id_index,
     decl_table_find,
+    decl_table_key,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
@@ -268,8 +269,9 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, host_hooks, threads)
         if wave.len() == 0 {
             loop id in sema_core_stand_in_flush(graph, tally.names) {
-                wave[graph.decls.rows[id.row].key] = true
-                module_index: graph.core_demand_rows.get(graph.decls.rows[id.row].key) ?? next
+                key: decl_table_key(graph.decls, graph.symbols, id)
+                wave[key] = true
+                module_index: graph.core_demand_rows.get(key) ?? next
                 if !affected.contains(module_index) -> affected.push(module_index)
             }
         }
@@ -635,12 +637,10 @@ sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, value
         if node.kind == .GlobalShared(initializer, _) -> named = Val(initializer)
         if named == .Val(decl) {
             if decl.row.index() < graph.decls.rows.len() {
-                key: graph.decls.rows[decl.row].key
-                if symbol_find(graph.symbols, key) == .Val(id) {
-                    if valued.get(id.id) == None {
-                        valued[id.id] = true
-                        names.keys.push(symbol_table_key(graph.symbols, id))
-                    }
+                id: graph.decls.rows[decl.row].symbol
+                if valued.get(id.id) == None {
+                    valued[id.id] = true
+                    names.keys.push(symbol_table_key(graph.symbols, id))
                 }
             }
         }
@@ -835,9 +835,9 @@ sema_core_demand_apply: fn(reads: &SemaCoreDemandReads, start: Int, end: Int, de
         whole: reads.names[at].full || reads.names[at].value
         if reads.names[at].decl == .Val(id) {
             if whole {
-                sema_core_demand_decl_full(decls, id, reads.names[at].value, names)
+                sema_core_demand_decl_full(decls, symbols, id, reads.names[at].value, names)
             } else {
-                sema_core_demand_decl_key(decls, id, names)
+                sema_core_demand_decl_key(decls, symbols, id, names)
             }
         }
         if reads.names[at].symbol == .Val(id) {
@@ -926,7 +926,7 @@ sema_core_stand_in_full: fn(graph: SemaRegistrationGraph, key: String, value: Bo
 sema_core_stand_in_wait: fn(graph: SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames) -> Bool Never! {
     if names.valued -> return false
     if graph.core_stand_ins == .Val(seal) {
-        id: decl_table_find(graph.decls, key) ?? return false
+        id: decl_table_find(graph.decls, graph.symbols, key) ?? return false
         row: decl_id_index(id)
         if names.full_rows.get(row) != None || sema_core_seal_stand_in_at(seal, row) == None -> return false
         names.pending.push(id)
@@ -1076,11 +1076,11 @@ sema_core_demand_expr_reads: fn(node: BodyNode, reads: &SemaCoreDemandReads) Nev
 }
 
 // The key of declaration row `id`, unless named before.
-sema_core_demand_decl_key: fn(decls: DeclTable, id: DeclID, names: &SemaCoreDemandNames) Never! {
+sema_core_demand_decl_key: fn(decls: DeclTable, symbols: SymbolTable, id: DeclID, names: &SemaCoreDemandNames) Never! {
     index: id.row.index()
     if index >= decls.rows.len() || names.decls.get(index) != None -> return
     names.decls[index] = true
-    names.keys.push(decls.rows[id.row].key)
+    names.keys.push(decl_table_key(decls, symbols, id))
 }
 
 // The key of run-wide `id`, unless named before; a body's own id names no
@@ -1093,12 +1093,12 @@ sema_core_demand_symbol_key: fn(symbols: SymbolTable, id: SymbolID, names: &Sema
 
 // The key of declaration row `id`, named where a stand-in will not do
 // (`value`: as a function value), at each such site.
-sema_core_demand_decl_full: fn(decls: DeclTable, id: DeclID, value: Bool, names: &SemaCoreDemandNames) Never! {
+sema_core_demand_decl_full: fn(decls: DeclTable, symbols: SymbolTable, id: DeclID, value: Bool, names: &SemaCoreDemandNames) Never! {
     if id.row.index() >= decls.rows.len() -> return
     if value {
-        names.values.push(decls.rows[id.row].key)
+        names.values.push(decl_table_key(decls, symbols, id))
     } else {
-        names.full.push(decls.rows[id.row].key)
+        names.full.push(decl_table_key(decls, symbols, id))
     }
 }
 
