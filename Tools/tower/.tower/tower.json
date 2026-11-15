@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102582,
+    "rev": 102587,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26294,7 +26294,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-15T00:09:14.389Z",
+      "updated": "2026-11-15T00:24:38.577Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-15T00:09:14.389Z",
       "goals": [
@@ -27250,6 +27250,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T18:28:52.282Z"
+        },
+        {
+          "n": 15,
+          "text": "A user enum whose cases are named Ok/Err: `.Ok(x) -> x` on a subject of that enum resolves to the enum's own case (p134 gave E0108). Proof: jet test Compiler --profile cases --filter a_user_enum_ok_names_its_own_case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T00:18:18.672Z"
         }
       ],
       "refs": [
@@ -27276,13 +27285,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-14T23:06:04.692Z",
+      "updated": "2026-11-15T00:18:18.672Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0vow6jh",
@@ -83512,6 +83521,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:28:31.315Z"
+        },
+        {
+          "n": 13,
+          "text": "A one-line `#Context(allocator: x) { ... }` block means the same as its multi-line form. Today, after jet fmt collapses the block in Examples/Memory/Allocation/ContextAllocatorRead.jet, 'served by the counter' prints false instead of true (the one-line form binds another allocator or a copy). Fix at the root in the parser or sema; proof: a case running both layouts on O0/O1/O2 with identical output, and the example formatted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T00:22:36.767Z"
         }
       ],
       "refs": [
@@ -83524,9 +83542,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-14T23:34:34.351Z",
+      "updated": "2026-11-15T00:22:36.767Z",
       "updatedBy": "Main",
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c0q4s6en",
@@ -98989,8 +99007,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-14T23:42:33.047Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T00:22:57.406Z",
+      "updatedBy": "owner",
       "criteriaLastN": 10
     },
     {
@@ -201891,14 +201909,16 @@
         }
       },
       "draft": false,
-      "status": "open",
+      "status": "ratified",
       "created": "2026-11-14T23:42:11.192Z",
       "reports": [
         {
           "title": "Adversarial design review (dev 08aa682149)",
           "path": "Docs/audits/2026-11-14-memory-chokepoint-review.md"
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-15"
     },
     {
       "id": "D-IFHOLE2",
@@ -204713,6 +204733,19 @@
       "created": "2026-11-14T14:22:20.354Z",
       "answeredAt": "2026-11-14",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0n7cs1p",
+      "cardId": "c0p39lw2",
+      "decisionId": "D-IFHOLE2",
+      "by": "owner",
+      "kind": "question",
+      "text": "Should the hole be <> instead of _ to match pipe syntax so that <> means the value is inserted here? I also am very confused by this ballot, no idea what it means plainly",
+      "status": "answered",
+      "answer": "Plainly: a decision table is Jet's `if` with arms, like a match. Today you write `if light == { .Red -> 30  .Amber -> 5 }`: Jet compares `light` with each arm in turn. The hole form marks where each arm's value goes: `if n % _ == 0 { 15 -> \"FizzBuzz\"  3 -> \"Fizz\" }` means try `n % 15 == 0`, then `n % 3 == 0`. On 2026-09-11 you ruled that every table must have a hole, so `if light == {` would become `if light == _ {`. That migration never ran. The ballot asks which headers stay: (A) keep `if light == {` for plain comparisons and use a hole only when the test is more than one comparison; (B) migrate all ~16,000 tables to a hole; (C) allow both spellings; (D) require the hole everywhere but read the header once. The catch for B: your rule re-runs the header for each arm tried, so `if files.try_lock(path) == _ {` would call try_lock up to once per arm, and ~6,000 tables call a function in the header and would first need a named value.\n\nOn `<>`: yes, we recommend it. `<>` already means 'a value is inserted here' in pipes, so the hole reuses one idea instead of adding one. `_` already means 'ignore this' in patterns and the catch-all arm, and a hole table would hold both meanings at once (`if try_lock(p) == _ { .Val(_) -> ... }`). The one cost is nesting: a hole table directly inside a pipe step would see two `<>` values. The rule we'd propose: a hole table inside a pipe step names the pipe value first, and the compiler refuses the ambiguous form with that fix. The ballot will be rewritten in plain language with `<>` as the hole in every option and re-reviewed; the hole syntax that landed today (`_`) is a one-token parser change to switch.",
+      "created": "2026-11-15T00:22:10.963Z",
+      "answeredAt": "2026-11-15",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -205581,6 +205614,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T00:24:38.577Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0n7cs1p",
+      "note": ""
+    },
+    {
+      "at": "2026-11-15T00:22:57.406Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MEM-CHOKEPOINT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-15T00:22:36.767Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gelll3",
+      "note": "#13 A one-line `#Context(allocator: x) { ... }` block means the "
+    },
+    {
+      "at": "2026-11-15T00:22:10.963Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0n7cs1p",
+      "note": ""
+    },
+    {
+      "at": "2026-11-15T00:18:18.672Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xb6zik",
+      "note": "#15 A user enum whose cases are named Ok/Err: `.Ok(x) -> x` on a"
+    },
     {
       "at": "2026-11-15T00:09:14.389Z",
       "by": "Main",
