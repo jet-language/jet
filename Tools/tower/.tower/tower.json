@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104500,
+    "rev": 104525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49099,30 +49099,30 @@
         },
         {
           "n": 3,
-          "text": "A field read only by encode or decode, by derived equality, hashing or ordering, by reflection, or across an FFI boundary is not reported, and a field read only by derived printing or cloning is reported (goldens/UI snapshots for each).",
+          "text": "A field read only by encode or decode, by derived equality, hashing or ordering, by reflection, or across an FFI boundary is not reported, and a field read only by derived printing or cloning is reported (D-MEMBER-LIVE1=A). Proof: `jet test Compiler --profile ui --filter member_liveness_field_uses_`, one snapshot per use kind.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:36.659Z"
+          "at": "2026-11-15T04:24:25.787Z"
         },
         {
           "n": 4,
-          "text": "Cases created by decode or returned from foreign code count as built; matching a case never makes it built (UI snapshot pair).",
+          "text": "A case created by decode or returned from foreign code counts as built, and matching a case never makes it built. Proof: `jet test Compiler --profile ui --filter member_liveness_case_built_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:39.041Z"
+          "at": "2026-11-15T04:24:26.697Z"
         },
         {
           "n": 5,
-          "text": "Library `pub` members stay exempt; package-private and application members are checked; the findings never stop jet run or jet dev (D-NO-WARNINGS1).",
+          "text": "Library `pub` members stay exempt, package-private and application members are checked, and the findings never stop `jet run` or `jet dev` (D-NO-WARNINGS1=A). Proof: `jet test Compiler --profile cases --filter member_liveness_pub_exempt_and_run_unblocked`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:37.867Z"
+          "at": "2026-11-15T04:24:27.595Z"
         },
         {
           "n": 6,
@@ -49150,7 +49150,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-15T04:24:24.734Z",
+      "updated": "2026-11-15T04:24:27.595Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -49790,12 +49790,12 @@
         },
         {
           "n": 2,
-          "text": "Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Arm target.",
+          "text": "Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Arm target. Proof: `jet test Compiler --profile golden --filter comptime/layout_facts` and `jet test Compiler --profile cases --filter inspect/shapes_match_hand_derived_layouts` on x86_64 Linux and one 32-bit or Arm target.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:54.070Z"
+          "at": "2026-11-15T04:24:28.493Z"
         },
         {
           "n": 3,
@@ -49809,21 +49809,21 @@
         },
         {
           "n": 4,
-          "text": "Every human line names target and compiler identity and says not promised; the dominant-case note appears only when one case sets the size and exceeds the next by a stated ratio.",
+          "text": "Every human line names target and compiler identity and says not promised; the dominant-case note appears only when one case sets the size and exceeds the next by a stated ratio. Proof: `jet test Compiler --profile cases --filter inspect/shapes_human_lines`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:54.070Z"
+          "at": "2026-11-15T04:24:29.495Z"
         },
         {
           "n": 5,
-          "text": "Hover shows a one-line summary from the same record; no second layout computation exists.",
+          "text": "Hover shows a one-line summary from the same record; no second layout computation exists. Proof: `jet test Compiler --profile cases --filter lsp/lsp_hover_layout_summary`, and git grep finds one layout computation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:54.070Z"
+          "at": "2026-11-15T04:24:30.448Z"
         },
         {
           "n": 6,
@@ -49853,8 +49853,8 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.070Z",
-      "updated": "2026-11-13T01:50:33.097Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:30.448Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ]
@@ -52446,12 +52446,12 @@
         },
         {
           "n": 4,
-          "text": "The editor extension in Tools/editors starts `jet self lsp` with no extra settings; a scripted smoke test opens a file and receives its diagnostics.",
+          "text": "The editor extension in Tools/editors starts `jet self lsp` with no extra settings; a scripted smoke test opens a file and receives its diagnostics. Proof: `jet test Compiler --profile cases --filter lsp/editor_extension_starts_lsp`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:02:51.737Z"
+          "at": "2026-11-15T04:24:31.444Z"
         },
         {
           "n": 5,
@@ -52464,21 +52464,21 @@
         },
         {
           "n": 7,
-          "text": "Every `fix_edits` entry in a diagnostic is offered as an LSP code action, and hover on a call shows the callee's effect row (fixture test).",
+          "text": "Every `fix_edits` entry in a diagnostic is offered as an LSP code action, and hover on a call shows the callee's effect row (fixture test). Proof: `jet test Compiler --profile cases --filter lsp/lsp_fix_edits_are_code_actions` and `--filter lsp/lsp_hover_shows_effect_row`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:07:14.181Z"
+          "at": "2026-11-15T04:24:32.407Z"
         },
         {
           "n": 8,
-          "text": "JetSemIndex and JetImpact compile against the current driver and sema API (no Rust-shim calls, no missing SemaCompilerModuleSource fields), and the tests/cases/lsp rows run instead of REFUSED.",
+          "text": "JetSemIndex and JetImpact compile against the current driver and sema API (no Rust-shim calls, no missing SemaCompilerModuleSource fields), and the tests/cases/lsp rows run instead of REFUSED. Proof: `jet check Compiler/JetSemIndex` and `jet check Compiler/JetImpact` exit 0, and `jet test Compiler --profile cases --filter lsp/` reports no REFUSED row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T03:10:04.453Z"
+          "at": "2026-11-15T04:24:33.671Z"
         },
         {
           "n": 10,
@@ -52968,7 +52968,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-15T03:56:43.901Z",
+      "updated": "2026-11-15T04:24:33.671Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -56106,21 +56106,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit.",
+          "text": "From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit. Proof: from a clean checkout, `jet build Compiler/` exits 0 with a scrubbed environment (`env -i PATH=$PATH HOME=$HOME`), and the built jet passes `jet test Compiler --profile cases --filter cli_commands/`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:27:56.361Z"
+          "at": "2026-11-15T04:24:34.818Z"
         },
         {
           "n": 2,
-          "text": "`--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads.",
+          "text": "`--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads. Proof: `jet test Compiler --profile cases --filter cli_commands/build_trace_phases` and `--filter cli_commands/build_trace_file_is_chrome_trace`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:27:57.256Z"
+          "at": "2026-11-15T04:24:35.856Z"
         }
       ],
       "refs": [],
@@ -56134,8 +56134,8 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-07T03:27:57.256Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:35.856Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
@@ -65812,39 +65812,39 @@
         },
         {
           "n": 2,
-          "text": "A planted lost-update race and a planted lock-order deadlock in the test suite each fail within the default run count; the report prints the seed and the interleaving.",
+          "text": "Under `reruns:`, each rerun picks a different task order at the pause points (task start or join, lock, channel send or receive, shared read or write, yield). A test with fewer possible orders than its count runs each order once, depth-first, and says `all N orders`, and reruns run in parallel on virtual time. A planted lost-update race and a planted lock-order deadlock each fail within the default count. The report prints the rerun, its order number, each step with its source line and the replay command, and a deadlock or suspected livelock names who holds what and who waits. Proof: `jet test Compiler --profile cases --filter test_schedules/planted_race_and_deadlock`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:19.302Z"
+          "at": "2026-11-15T04:24:37.823Z"
         },
         {
           "n": 3,
-          "text": "Re-running with the printed seed reproduces the same failure through the replay recorder three times in a row (test).",
+          "text": "`jet test FILE \"name\" --seed=<n>` replays exactly the printed order through the replay recorder, reproducing the same failure three times in a row. Proof: `jet test Compiler --profile cases --filter test_schedules/seed_replays_order`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:19.302Z"
+          "at": "2026-11-15T04:24:39.012Z"
         },
         {
           "n": 4,
-          "text": "D-TEST-SCHEDULES1's reruns: spelling lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars and re-blessed snapshots, and the syntax-ratification chore check passes.",
+          "text": "The `reruns:` spelling lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by `jet self devtools grammars` and re-blessed snapshots, and the deadlock text in spec.md (lines 2872-2888 on 2026-11-06) is updated. Proof: `jet test tests/guards --filter syntax_ratification`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:28:27.305Z"
+          "at": "2026-11-15T04:24:40.405Z"
         },
         {
           "n": 8,
-          "text": "D-TEST-SCHEDULES1=A: #Test(\"…\", reruns: N) with N an Int >= 1 (below 1 is a registered compile error with UI snapshot); also reruns: on TestProfile, t.reruns(n) in fn test and --reruns=<n>, which change only tests that ask for reruns; small order trees run exhaustively depth-first; reruns run in parallel on virtual time; deadlock and suspected livelock are reported failures; --seed replays one order; property tests with reruns: are a compile error; spec.md deadlock text (2872-2888) updated",
+          "text": "D-TEST-SCHEDULES1=A spelling: `#Test(\"…\", reruns: N)` takes a whole number N of at least 1, and a value below 1 is a registered compile error with a UI snapshot. `reruns:` in a TestProfile, `t.reruns(n)` in fn test and `--reruns=<n>` set it for a run, in that order, and change only tests that ask for reruns. A property test with `reruns:` is a compile error. Proof: `jet test Compiler --profile ui --filter test_reruns_` and `jet test Compiler --profile cases --filter test_schedules/reruns_settings_order`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T01:32:49.569Z"
+          "at": "2026-11-15T04:24:36.850Z"
         }
       ],
       "refs": [
@@ -65864,8 +65864,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:19.302Z",
-      "updated": "2026-11-09T19:28:30.290Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:40.405Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
@@ -74024,12 +74024,12 @@
         },
         {
           "n": 3,
-          "text": "D-MUT-NEVER1=A, in the spellings of D-DECL-COLON1=A and D-CALLSITE-MARK2=A: a := name never written in its scope is a registered error with what/why/fix text and a Safe fix that rewrites := to : (name: value). A write is =, a compound assignment, a field or index write rooted at the name, passing it to a & parameter, or calling a method that takes &self; a write inside any lambda, branch, loop, ?? block or compile-time block counts even if it never runs. Reading, x.move(), passing by value and writing through Shared are not writes. UI snapshots per case; every in-repo site migrated in one cutover; golden, UI and cases compares lose 0 rows.",
+          "text": "D-MUT-NEVER1=A, in the spellings of D-DECL-COLON1=A and D-CALLSITE-MARK2=A: a := name never written in its scope is a registered error with what/why/fix text and a Safe fix that rewrites := to : (name: value). A write is =, a compound assignment, a field or index write rooted at the name, passing it to a & parameter, or calling a method that takes &self; a write inside any lambda, branch, loop, ?? block or compile-time block counts even if it never runs. Reading, x.move(), passing by value and writing through Shared are not writes. UI snapshots per case; every in-repo site migrated in one cutover; golden, UI and cases compares lose 0 rows. Proof: `jet test Compiler --profile ui --filter never_reassigned_`, and `jet check` over Core, Compiler and Examples reports no such error.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T15:51:00.711Z"
+          "at": "2026-11-15T04:24:41.567Z"
         }
       ],
       "refs": [],
@@ -74040,8 +74040,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-07T03:24:41.501Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T04:24:41.567Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0r2eell",
@@ -77525,12 +77525,12 @@
         },
         {
           "n": 38,
-          "text": "lowlevel/polyglot_go (Examples/features/lowlevel/polyglot_go.jet) passes its golden on the run and build tiers:  resolves through jet inspect bind output instead of E1002, and its known-failing row is removed.",
+          "text": "lowlevel/polyglot_go (Examples/features/lowlevel/polyglot_go.jet) passes its golden on the run and build tiers:  resolves through jet inspect bind output instead of E1002, and its known-failing row is removed. Proof: `jet test Compiler --profile golden --filter lowlevel/polyglot_go`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T15:56:59.507Z"
+          "at": "2026-11-15T04:24:42.763Z"
         },
         {
           "n": 39,
@@ -78427,7 +78427,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-15T04:09:45.499Z",
+      "updated": "2026-11-15T04:24:42.763Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 153
     },
@@ -79593,12 +79593,12 @@
         },
         {
           "n": 7,
-          "text": "Each of the 157 census rows ($JET_SCRATCH_ROOT/lanes/CoverPort/out/report5-nodiag.tsv) reports its expected diagnostic from sema and passes as a ui row; any row whose expectation contradicts the spec is re-recorded against the spec, with a citation",
+          "text": "Each of the 157 census rows ($JET_SCRATCH_ROOT/lanes/CoverPort/out/report5-nodiag.tsv) reports its expected diagnostic from sema and passes as a ui row; any row whose expectation contradicts the spec is re-recorded against the spec, with a citation Proof: once c8 checks the census in, `jet test tests/guards --filter ui_nodiag_census` reports zero MISSING rows and `jet test Compiler --profile ui` passes those rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T07:36:14.295Z"
+          "at": "2026-11-15T04:24:43.906Z"
         },
         {
           "n": 8,
@@ -79802,7 +79802,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-15T04:12:21.292Z",
+      "updated": "2026-11-15T04:24:43.906Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 27
     },
@@ -84922,21 +84922,21 @@
         },
         {
           "n": 2,
-          "text": "Owner ruling on C-G5-1: the formatter keeps one blank line after a file's leading comment block, so the header never merges into the first item's comment or doc (probes c01, c10, c13). A formatter case pins it, and jet fmt over Examples/ is unchanged apart from restored blank lines.",
+          "text": "Owner ruling on C-G5-1: the formatter keeps one blank line after a file's leading comment block, so the header never merges into the first item's comment or doc (probes c01, c10, c13). A formatter case pins it, and jet fmt over Examples/ is unchanged apart from restored blank lines. Proof: `jet test Compiler --profile cases --filter fmt/leading_comment_block_keeps_blank_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:28:35.757Z"
+          "at": "2026-11-15T04:24:44.917Z"
         },
         {
           "n": 3,
-          "text": "Comment spellings come from the syntax registry (I7): the lexer and the about 30 comment scanners read COMMENT_PREFIX, BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE (CoreSurface.jet:189-195, read by no Jet code today) and a new registry row for the /// doc comment; no Jet source types the literal \"//\" or \"///\" for comment scanning. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd).",
+          "text": "Comment spellings come from the syntax registry (I7): the lexer and the about 30 comment scanners read COMMENT_PREFIX, BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE (CoreSurface.jet:189-195, read by no Jet code today) and a new registry row for the /// doc comment; no Jet source types the literal \"//\" or \"///\" for comment scanning. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd). Proof: git grep for a quoted `//` or `///` literal in Compiler finds only the registry rows, and `jet test Compiler --profile cases --filter fmt/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T21:02:56.939Z"
+          "at": "2026-11-15T04:24:45.909Z"
         },
         {
           "n": 4,
@@ -84976,12 +84976,12 @@
         },
         {
           "n": 8,
-          "text": "Each syntax change this card makes (c5's //! ruling and c7's /% row) lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars and re-blessed snapshots, and the syntax-ratification chore check passes.",
+          "text": "Each syntax change this card makes (c5's //! ruling and c7's /% row) lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars and re-blessed snapshots, and the syntax-ratification chore check passes. Proof: `jet test tests/guards --filter syntax_ratification`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:28:31.315Z"
+          "at": "2026-11-15T04:24:46.861Z"
         },
         {
           "n": 13,
@@ -85004,8 +85004,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-15T00:25:30.977Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:46.861Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 13
     },
     {
@@ -85217,21 +85217,21 @@
         },
         {
           "n": 3,
-          "text": "Every open G5 criterion is one observable, testable outcome that one patch can meet. Criteria merged from older cards that each name a whole feature are split, without dropping any requirement, and each split criterion names its proving test.",
+          "text": "Every open G5 criterion is one observable, testable outcome that one patch can meet. Criteria merged from older cards that each name a whole feature are split without dropping any requirement, and each split criterion names its proving test. Proof: a scan of the Tower board lists no open G5 criterion without a `Proof:` clause or with a `(was #N)` tag.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:20:02.667Z"
+          "at": "2026-11-15T04:24:47.891Z"
         },
         {
           "n": 4,
-          "text": "A new seed release is cut from a dev commit that passes verify-full, so stage-1 builds no longer carry fixed compiler bugs such as the named-comparator double free (fixed in 0de406f2c4).",
+          "text": "A new seed release is cut from a dev commit that passes verify-full, so stage-1 builds no longer carry fixed compiler bugs such as the named-comparator double free (fixed in 0de406f2c4). Proof: the seed release IDENTITY names a dev commit whose verify-full run passed, and the named-comparator double-free case passes on stage 1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:08:05.788Z"
+          "at": "2026-11-15T04:24:49.014Z"
         },
         {
           "n": 5,
@@ -85280,21 +85280,21 @@
         },
         {
           "n": 10,
-          "text": "Single-source census F23 (Docs/audits/2026-11-05-single-source-census.md): Process grants the native boundary can enforce (I9: only hosts encode this). One hand-written home: One row set in `Policy/Authority.jet` (or a Core declaration), checked by sema. Fix: derive the runtime list from the rows; sema reports the refusal at compile time. Drift check: Generator `--check`. Drifted on 2026-11-05: The native and web lists differ (the web list has only the two FS grants) [INFERENCE: web may be narrower on purpose] Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "text": "Single-source census F23 (Docs/audits/2026-11-05-single-source-census.md): Process grants the native boundary can enforce (I9: only hosts encode this). One hand-written home: One row set in `Policy/Authority.jet` (or a Core declaration), checked by sema. Fix: derive the runtime list from the rows; sema reports the refusal at compile time. Drift check: Generator `--check`. Drifted on 2026-11-05: The native and web lists differ (the web list has only the two FS grants) [INFERENCE: web may be narrower on purpose] Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs. Proof: `jet test tests/guards --filter single_source_process_grants` (the generator `--check` runs in the gate).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T15:30:26.975Z"
+          "at": "2026-11-15T04:24:50.043Z"
         },
         {
           "n": 11,
-          "text": "Single-source census F24 (Docs/audits/2026-11-05-single-source-census.md): Process exit codes (stop 70, defect/ICE 101, user 1, usage 2). One hand-written home: One exit-code table in JetFoundation (law D-FAIL-EXIT1). Fix: derive: runtime, CLI, web and testkit use named constants generated from it. Drift check: Guard on bare 70/101 in exit positions. Drifted on 2026-11-05: Not drifted: the values agree today Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "text": "Single-source census F24 (Docs/audits/2026-11-05-single-source-census.md): Process exit codes (stop 70, defect/ICE 101, user 1, usage 2). One hand-written home: One exit-code table in JetFoundation (law D-FAIL-EXIT1). Fix: derive: runtime, CLI, web and testkit use named constants generated from it. Drift check: Guard on bare 70/101 in exit positions. Drifted on 2026-11-05: Not drifted: the values agree today Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs. Proof: `jet test tests/guards --filter single_source_exit_codes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T15:30:27.860Z"
+          "at": "2026-11-15T04:24:51.011Z"
         },
         {
           "n": 12,
@@ -85359,8 +85359,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
-      "updated": "2026-11-14T20:17:42.357Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:24:51.011Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 17
     },
     {
@@ -213996,6 +213996,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:24:51.011Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xuffg1",
+      "note": "#11: proof; was: Single-source census F24 (Docs/audits/2026-11-05-single-source-census.md): Process exit codes (stop 70, defect/ICE 101, user 1, usage 2). One hand-written home: One exit-code table in JetFoundation (l"
+    },
+    {
+      "at": "2026-11-15T04:24:50.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xuffg1",
+      "note": "#10: proof; was: Single-source census F23 (Docs/audits/2026-11-05-single-source-census.md): Process grants the native boundary can enforce (I9: only hosts encode this). One hand-written home: One row set in `Policy/Au"
+    },
+    {
+      "at": "2026-11-15T04:24:49.014Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xuffg1",
+      "note": "#4: proof; was: A new seed release is cut from a dev commit that passes verify-full, so stage-1 builds no longer carry fixed compiler bugs such as the named-comparator double free (fixed in 0de406f2c4)."
+    },
+    {
+      "at": "2026-11-15T04:24:47.891Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0xuffg1",
+      "note": "#3: proof; was: Every open G5 criterion is one observable, testable outcome that one patch can meet. Criteria merged from older cards that each name a whole feature are split, without dropping any requirement, and ea"
+    },
+    {
+      "at": "2026-11-15T04:24:46.861Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gelll3",
+      "note": "#8: proof; was: Each syntax change this card makes (c5's //! ruling and c7's /% row) lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars"
+    },
+    {
+      "at": "2026-11-15T04:24:45.909Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gelll3",
+      "note": "#3: proof; was: Comment spellings come from the syntax registry (I7): the lexer and the about 30 comment scanners read COMMENT_PREFIX, BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE (CoreSurface.jet:189-195, read by no J"
+    },
+    {
+      "at": "2026-11-15T04:24:44.917Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0gelll3",
+      "note": "#2: proof; was: Owner ruling on C-G5-1: the formatter keeps one blank line after a file's leading comment block, so the header never merges into the first item's comment or doc (probes c01, c10, c13). A formatter cas"
+    },
+    {
+      "at": "2026-11-15T04:24:43.906Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#7: proof; was: Each of the 157 census rows ($JET_SCRATCH_ROOT/lanes/CoverPort/out/report5-nodiag.tsv) reports its expected diagnostic from sema and passes as a ui row; any row whose expectation contradicts the spec "
+    },
+    {
+      "at": "2026-11-15T04:24:42.763Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hn7w1n",
+      "note": "#38: proof; was: lowlevel/polyglot_go (Examples/features/lowlevel/polyglot_go.jet) passes its golden on the run and build tiers:  resolves through jet inspect bind output instead of E1002, and its known-failing row is"
+    },
+    {
+      "at": "2026-11-15T04:24:41.567Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c01vsb2c",
+      "note": "#3: proof; was: D-MUT-NEVER1=A, in the spellings of D-DECL-COLON1=A and D-CALLSITE-MARK2=A: a := name never written in its scope is a registered error with what/why/fix text and a Safe fix that rewrites := to : (name"
+    },
+    {
+      "at": "2026-11-15T04:24:40.405Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c09f1iks",
+      "note": "#4: carry the spec text update from c8; proof; was: D-TEST-SCHEDULES1's reruns: spelling lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars and re-blessed snapshots, and t"
+    },
+    {
+      "at": "2026-11-15T04:24:39.012Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c09f1iks",
+      "note": "#3: proof; was: Re-running with the printed seed reproduces the same failure through the replay recorder three times in a row (test)."
+    },
+    {
+      "at": "2026-11-15T04:24:37.823Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c09f1iks",
+      "note": "#2: carry D-TEST-SCHEDULES1=A execution rules from c8; was: A planted lost-update race and a planted lock-order deadlock in the test suite each fail within the default run count; the report prints the seed and the interleaving."
+    },
+    {
+      "at": "2026-11-15T04:24:36.851Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c09f1iks",
+      "note": "#8: split: execution is c2 and c3; spec text is c4; was: D-TEST-SCHEDULES1=A: #Test(\"…\", reruns: N) with N an Int >= 1 (below 1 is a registered compile error with UI snapshot); also reruns: on TestProfile, t.reruns(n) in fn test and --reruns=<n>, which chan"
+    },
+    {
+      "at": "2026-11-15T04:24:35.856Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hnphts",
+      "note": "#2: proof; was: `--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads."
+    },
+    {
+      "at": "2026-11-15T04:24:34.818Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hnphts",
+      "note": "#1: proof; was: From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit."
+    },
+    {
+      "at": "2026-11-15T04:24:33.671Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#8: proof; was: JetSemIndex and JetImpact compile against the current driver and sema API (no Rust-shim calls, no missing SemaCompilerModuleSource fields), and the tests/cases/lsp rows run instead of REFUSED."
+    },
+    {
+      "at": "2026-11-15T04:24:32.407Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#7: proof; was: Every `fix_edits` entry in a diagnostic is offered as an LSP code action, and hover on a call shows the callee's effect row (fixture test)."
+    },
+    {
+      "at": "2026-11-15T04:24:31.444Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#4: proof; was: The editor extension in Tools/editors starts `jet self lsp` with no extra settings; a scripted smoke test opens a file and receives its diagnostics."
+    },
+    {
+      "at": "2026-11-15T04:24:30.448Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08idy63",
+      "note": "#5: proof; was: Hover shows a one-line summary from the same record; no second layout computation exists."
+    },
+    {
+      "at": "2026-11-15T04:24:29.495Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08idy63",
+      "note": "#4: proof; was: Every human line names target and compiler identity and says not promised; the dominant-case note appears only when one case sets the size and exceeds the next by a stated ratio."
+    },
+    {
+      "at": "2026-11-15T04:24:28.493Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c08idy63",
+      "note": "#2: proof; was: Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Ar"
+    },
+    {
+      "at": "2026-11-15T04:24:27.595Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eve9h3",
+      "note": "#5: proof; was: Library `pub` members stay exempt; package-private and application members are checked; the findings never stop jet run or jet dev (D-NO-WARNINGS1)."
+    },
+    {
+      "at": "2026-11-15T04:24:26.697Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eve9h3",
+      "note": "#4: proof; was: Cases created by decode or returned from foreign code count as built; matching a case never makes it built (UI snapshot pair)."
+    },
+    {
+      "at": "2026-11-15T04:24:25.787Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0eve9h3",
+      "note": "#3: proof; was: A field read only by encode or decode, by derived equality, hashing or ordering, by reflection, or across an FFI boundary is not reported, and a field read only by derived printing or cloning is repor"
+    },
     {
       "at": "2026-11-15T04:24:24.734Z",
       "by": "TowerKeeper-1",
