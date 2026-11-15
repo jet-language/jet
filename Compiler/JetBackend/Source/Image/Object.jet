@@ -208,6 +208,12 @@ x64_object_rela_bytes_section: fn(name: String, bytes: &&[U8], target: Int) -> X
 // bytes count one) a `.text` thread is admitted for.
 X64_OBJECT_MIN_WEIGHT_PER_THREAD: 20000
 
+// A function's `.text` weight: one, one per relocation and one per 64 code
+// bytes.
+x64_object_text_weight: fn(function: X64CompiledFunction) -> Int Never! {
+    1 + function.relocs.len() + (function.code.len() >> 6)
+}
+
 // The `.text` threads' inputs, read only: the functions, each one's place in
 // `.text`, per function id + 1 the first function row of that id (-1: none;
 // the entry stub `main` is id -1), and per data object its place in its
@@ -494,8 +500,9 @@ x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 }
 
 // x64_object_functions with the debug sections built on a thread beside
-// the layout and `.text`, and the `.debug_info` subprograms and `.text` on
-// the threads `threads` admits (Dwarf.jet x64_dwarf_sections); the bytes
+// the layout and `.text` when the object admits `.text` threads, and the
+// `.debug_info` subprograms and `.text` on the threads `threads` admits
+// (Dwarf.jet x64_dwarf_sections); the bytes
 // are the same for any thread count. With `debug_info` false the DWARF
 // sections are empty (the static link then carries none); `.eh_frame` is
 // always written. With `own_sections` (a library object) every function and
@@ -561,7 +568,9 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     offsets := [Int]{}
     text_size := 0
     text_align := X64_FUNCTION_ALIGN
+    weight := 0
     loop function in functions {
+        weight += x64_object_text_weight(function)
         if function.align > text_align -> text_align = function.align
         if own_sections {
             offsets.push(0)
@@ -580,18 +589,28 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         loop index in 0..<functions.len() -> function_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + index)
     }
     // `.eh_frame` and the DWARF sections read only the functions, their
-    // debug rows and places, so they are built on a thread of their own
-    // (x64_dwarf_sections, whose subprograms take more) while this one lays
-    // out the data, the symbols and `.text` (x64_object_lay).
+    // debug rows and places, so an object that admits `.text` threads builds
+    // them on a thread of their own (x64_dwarf_sections, whose subprograms
+    // take more) while this one lays out the data, the symbols and `.text`
+    // (x64_object_lay). A smaller object builds both on this thread and
+    // starts none.
     dwarf_symbols: X64DwarfSymbols{
         text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: function_symbols,
     }
     laid_rows := [X64ObjectLaid]{}
     dwarf_rows := [X64DwarfSections]{}
-    task.group x64_object_dwarf_thread {
-        dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, text_size, dwarf_symbols, threads, debug_info)
-        laid_rows.push(x64_object_lay(program, functions, exports, data_exports, threads, own_sections, guard_sections, offsets, function_rows, exported, data_rows, function_symbols))
-        dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+    if {
+        compiler_threads_admit(threads, functions.len(), weight, X64_OBJECT_MIN_WEIGHT_PER_THREAD, 0, 0) <= 1 -> {
+            dwarf_rows.push(x64_dwarf_sections(program, functions, debug, offsets, text_size, dwarf_symbols, threads, debug_info))
+            laid_rows.push(x64_object_lay(program, functions, exports, data_exports, threads, own_sections, guard_sections, offsets, function_rows, exported, data_rows, function_symbols))
+        }
+        else -> {
+            task.group x64_object_dwarf_thread {
+                dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, text_size, dwarf_symbols, threads, debug_info)
+                laid_rows.push(x64_object_lay(program, functions, exports, data_exports, threads, own_sections, guard_sections, offsets, function_rows, exported, data_rows, function_symbols))
+                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+            }
+        }
     }
     laid: laid_rows.pop() ?? panic("the object writer lost its layout")
     if laid.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: laid.errors.move()}
@@ -757,7 +776,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], e
     weights := [Int]{}
     total := 0
     loop function in functions {
-        weight: 1 + function.relocs.len() + (function.code.len() >> 6)
+        weight: x64_object_text_weight(function)
         weights.push(weight)
         total += weight
     }
