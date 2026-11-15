@@ -41,11 +41,13 @@ SemaModulePackage: struct {
 }
 
 // What the loader knows of a module's source: its file from the package
-// root and its package; and the names of the compile's modules some source
-// reads as a value (sema_module_meta_mark_reads).
+// root and its package; whether that file is one of the package's memory
+// kernel files (`policy.memory`); and the names of the compile's modules some
+// source reads as a value (sema_module_meta_mark_reads).
 SemaModuleMetaSource: struct {
     file: String{""}
     package: SemaModulePackage{SemaModulePackage{}}
+    memory_kernel: Bool{false}
     reads: [String:Bool]{[String:Bool]{}}
 }
 

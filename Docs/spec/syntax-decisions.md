@@ -8519,7 +8519,9 @@ pointer step or cast, `alloc_raw`, `free_raw`, `mem.copy`, `mem.fill`,
 list names, and anywhere else in the package is `E3113`. A package whose
 manifest names no `memory` has no kernel file; a single program (a source
 root without `package.jet`, or an inline package naming none) is its own
-kernel, and Core is the compiler's.
+kernel, and Core is the compiler's. A type a kernel file declares keeps its
+`priv` fields to the kernel files: another file of the package that reads,
+writes or builds one is `E0605`, so no sibling file forges a kernel owner.
 
 The parser reports malformed package policy as `E1215`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected

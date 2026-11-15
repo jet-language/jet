@@ -660,6 +660,10 @@ SemaRegistrationModule: struct {
     // version; the defaults for a source without one): ProgramInfo groups
     // its modules into one PackageInfo by `package_identity`.
     package: SemaModulePackage{SemaModulePackage{}}
+    // Whether the file is one of its package's memory kernel files
+    // (`policy.memory`): its types' `priv` fields are then private to the
+    // kernel files, not the whole package (sema_expression_field_visible).
+    memory_kernel: Bool{false}
     source_file: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
@@ -3001,6 +3005,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         module_path: owned.module_path,
         declared_module: owned.declared_module,
         package: owned.meta.package.copy(),
+        memory_kernel: owned.meta.memory_kernel,
         source_file: owned.source_file,
         source_segments: owned.source_segments,
         source_origin: owned.source_origin,

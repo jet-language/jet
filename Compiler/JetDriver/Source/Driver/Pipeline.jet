@@ -110,6 +110,7 @@ use {
         sema_registration_original_error_module,
         sema_registration_prepare_graph,
         sema_registration_settle_modules,
+        sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         sema_cli_command_record,
         sema_marker_is_guest_export,
@@ -4560,13 +4561,15 @@ jet_driver_registration_module_inputs: fn(
     Val(inputs)
 }
 
-// A module's file from its package root and its package's manifest facts,
-// which its Module record names.
+// A module's file from its package root, its package's manifest facts, which
+// its Module record names, and whether `policy.memory` names the file as one
+// of the package's kernel files.
 jet_driver_module_meta_source: fn(unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) -> SemaModuleMetaSource Never! {
     meta := SemaModuleMetaSource{file: unit.relative_path.copy()}
     loop package in packages {
         if package.root_index != unit.root_index -> next
         meta.package = SemaModulePackage{name: package.name.copy(), version: package.version ?? "0.0.0", edition: if package.edition == "" -> None else -> Val(package.edition.copy()), log: if package.log_filter == "" -> None else -> Val(package.log_filter.copy())}
+        if package.policy_memory_kernel == .Val(kernel) -> meta.memory_kernel = sema_unsafe_path_within(meta.file, kernel)
         break
     }
     meta
