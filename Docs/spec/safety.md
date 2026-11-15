@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1385,
+  "total": 1386,
   "counts": {
     "Compiler": 638,
     "Core": 174,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
-    "Tools": 8,
+    "Tools": 9,
     "tests": 505
   },
   "regions": [
@@ -6409,6 +6409,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "reason": "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes"
     },
     {
+      "package": "Tools",
+      "file": "Tools/perf/asm-parity/rawword/run.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes"
+    },
+    {
       "package": "tests",
       "file": "tests/cases/backend_ice/fixtures/asm_rail/rail.jet",
       "line": 10,
@@ -9956,9 +9963,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
-| Tools | 8 |
+| Tools | 9 |
 | tests | 505 |
-| **total** | **1385** |
+| **total** | **1386** |
 
 ### Regions
 
@@ -10844,6 +10851,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tools | Tools/packaging/NativeCCompiler.jet | 68:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | Tools | Tools/perf/asm-parity/memcopy/run.jet | 63:5 | "the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes" |
 | Tools | Tools/perf/asm-parity/memfill/run.jet | 54:5 | "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes" |
+| Tools | Tools/perf/asm-parity/rawword/run.jet | 47:5 | "the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
