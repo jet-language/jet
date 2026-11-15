@@ -9684,16 +9684,15 @@ sema_comptime_staged_constant_rows: fn(resolved_graph: SemaRegistrationGraph, va
 // copied here) with `values` applied, and every comptime item and function
 // check re-targets it (sema_scope_environment_enter_probe_module) instead of
 // copying the graph. The caller applies each later value to its graph in
-// place. `graph_facts` are the declaration pass's facts of `graph`
-// (SemaComptimeDeclarationStage.graph_facts), or None; they stand while no
-// value is applied, else the tables derive them again.
+// place. `graph_facts` are the boxed edges and copy facts of `graph` with
+// `values` applied, or None: the declaration pass's
+// (SemaComptimeDeclarationStage.graph_facts) come with no values, and a
+// finalization's carried ones with the values its graph already holds.
 sema_comptime_environment: fn(graph: &&SemaRegistrationGraph, values: [SemaComptimeItemValue], graph_facts: &&SemaComptimeGraphFacts?, trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
     resolved := graph.move()
     trail := sema_graph_trail_init()
     sema_comptime_graph_apply_values(resolved, values, trail)
-    reused := graph_facts.move()
-    if values.len() > 0 -> reused = None
-    tables := sema_comptime_environment_tables(resolved, reused)
+    tables := sema_comptime_environment_tables(resolved, graph_facts)
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.registration_graph = tables.registration_graph.move()
     environment.checked_types = tables.checked_types.move()

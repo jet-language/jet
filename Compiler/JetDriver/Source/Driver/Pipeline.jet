@@ -2024,6 +2024,9 @@ jet_driver_partition_checked_functions: fn(functions: &[FnBody], mask: [Bool], k
 // (sema_graph_trail_undo gives that graph back).
 // `declared` is the declaration pass's modules the run was given, handed back
 // on every exit unchanged (finalization reads their type definitions).
+// `graph_facts` holds the run's boxed edges and copy facts on every exit, the
+// ones it was given (jet_driver_run_comptime) or computed, so a caller that
+// lent them gets them back.
 JetDriverComptimeRunResult: struct {
     values: [SemaComptimeItemValue]
     functions: [SemaComptimeFunctionResult]
@@ -2038,6 +2041,7 @@ JetDriverComptimeRunResult: struct {
     graph_finished: Bool
     trail: SemaGraphTrail
     declared: [SemaGraphModuleResult]
+    graph_facts: SemaComptimeGraphFacts?
 }
 
 jet_driver_comptime_run_result: fn(
@@ -2047,7 +2051,7 @@ jet_driver_comptime_run_result: fn(
     complete: Bool,
     soft_stop: Bool,
 ) -> JetDriverComptimeRunResult Never! {
-    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, graph_finished: false, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}}
+    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, graph_finished: false, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}, graph_facts: None}
 }
 
 jet_driver_comptime_lost_graph: fn(values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult], trace: JetDriverCompileTrace) -> JetDriverComptimeRunResult Never! {
@@ -2780,8 +2784,10 @@ jet_driver_run_comptime: fn(
     staged: &&SemaRegistrationGraph,
     // The declaration pass's modules of `staged` (jet_driver_comptime_stage), or empty.
     declared: &&[SemaGraphModuleResult],
-    // The declaration pass's boxed edges and copy facts of `staged`
-    // (SemaComptimeDeclarationStage.graph_facts), or None.
+    // The boxed edges and copy facts of `staged` with `initial_values`
+    // applied, or None: the declaration pass's
+    // (SemaComptimeDeclarationStage.graph_facts), with no values, or a
+    // finalization's carried ones, whose graph already holds every value.
     graph_facts: &&SemaComptimeGraphFacts?,
     sources: [SemaComptimeItemSource],
     initial_values: [SemaComptimeItemValue],
@@ -2846,6 +2852,7 @@ jet_driver_run_comptime: fn(
         result.partial_graph = run_program.registration_graph.move()
     }
     run_program.registration_graph = None
+    result.graph_facts = Val(SemaComptimeGraphFacts{boxed_edges: run_program.boxed_edges.move(), copy_facts: run_program.copy_facts.move()})
     result.trail = trail.move()
     result
 }

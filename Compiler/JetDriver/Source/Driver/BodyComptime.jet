@@ -13,6 +13,7 @@ use {
         SemaComptimeBodySource,
         SemaComptimeDeclarationStage,
         SemaComptimeFunctionResult,
+        SemaComptimeGraphFacts,
         SemaComptimeItemKind,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
@@ -32,7 +33,6 @@ use {
         sema_graph_trail_init,
         sema_graph_trail_undo,
         sema_finalize_graph,
-        sema_function_memory_plan_new,
         sema_local_splice_demand_snapshot,
         sema_local_splice_demand_swap,
         sema_local_value_land,
@@ -632,15 +632,19 @@ jet_driver_land_local_values: fn(
         // the full recheck's do, so the graph's demand goes back to what it
         // held before the run.
         held_demand := sema_local_splice_demand_snapshot(registration)
-        // The finalization's memory plan serves the run: it reads only the
-        // function declarations, and the run's graph edits change only
-        // constant types.
-        memory_plan := jet_driver_carried_plan_take(bodies.carried)
+        // The finalization's memory plan, boxed edges and copy facts serve
+        // the run: they read only the nominal and function declarations, and
+        // the run's graph edits change only constant types.
+        lent := jet_driver_carried_lend(bodies.carried)
+        graph_facts: lent.graph_facts.move()
+        lent.graph_facts = None
         run := jet_driver_run_comptime(
-            registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
-            request, run_diagnostics, memory_plan,
+            registration, [SemaGraphModuleResult]{}, graph_facts, body_sources, values, functions,
+            request, run_diagnostics, lent.memory_plan,
         )
-        jet_driver_carried_plan_put(bodies.carried, memory_plan)
+        returned: run.graph_facts.move()
+        run.graph_facts = None
+        jet_driver_carried_return(bodies.carried, lent, returned)
         finished_registration := run.graph.move()
         run.graph = None
         partial_registration := run.partial_graph.move()
@@ -671,24 +675,35 @@ jet_driver_land_local_values: fn(
     registration
 }
 
-// Moves the memory plan out of `carried`, a finalization's pass facts (its
-// one row), into the one-row slot a comptime run takes
-// (jet_driver_run_comptime). An empty `carried` gives an empty slot.
-jet_driver_carried_plan_take: fn(carried: &[SemaPassFacts]) -> [SemaFunctionMemoryPlan] Never! {
-    plan := [SemaFunctionMemoryPlan]{}
-    facts := carried.pop() ?? return plan
-    plan.push(facts.memory_plan.move())
-    facts.memory_plan = sema_function_memory_plan_new()
-    carried.push(facts)
-    plan
+// A finalization's pass facts (its one carried row) lent to a comptime run
+// (jet_driver_run_comptime): the memory plan in the run's one-row slot, the
+// boxed edges and copy facts as its graph facts, and the fixed-length write
+// parameters, which the run does not read, held until they go back.
+JetDriverLentFacts: struct {
+    memory_plan: [SemaFunctionMemoryPlan]
+    graph_facts: SemaComptimeGraphFacts?
+    fixed_length_write_params: [String]
 }
 
-// Moves the plan jet_driver_carried_plan_take lent from `carried` back
-// there.
-jet_driver_carried_plan_put: fn(carried: &[SemaPassFacts], plan: &[SemaFunctionMemoryPlan]) Never! {
-    facts := carried.pop() ?? return
-    facts.memory_plan = plan.pop() ?? panic("a comptime run lost the finalization's memory plan")
-    carried.push(facts)
+// Moves the facts out of `carried` (sema_finalize_pass_close) for a
+// comptime run. An empty `carried` lends nothing: an empty slot and None.
+jet_driver_carried_lend: fn(carried: &[SemaPassFacts]) -> JetDriverLentFacts Never! {
+    lent := JetDriverLentFacts{memory_plan: [SemaFunctionMemoryPlan]{}, graph_facts: None, fixed_length_write_params: [String]{}}
+    facts: carried.pop() ?? return lent
+    lent.memory_plan.push(facts.memory_plan.move())
+    lent.graph_facts = Val(SemaComptimeGraphFacts{boxed_edges: facts.boxed_edges.move(), copy_facts: facts.copy_facts.move()})
+    lent.fixed_length_write_params = facts.fixed_length_write_params.move()
+    lent
+}
+
+// Moves the facts jet_driver_carried_lend lent to a comptime run back into
+// `carried`, with the graph facts the run handed back (`returned`), which a
+// run hands back on every exit.
+jet_driver_carried_return: fn(carried: &[SemaPassFacts], lent: &&JetDriverLentFacts, returned: &&SemaComptimeGraphFacts?) Never! {
+    owned := lent.move()
+    plan: owned.memory_plan.pop() ?? return
+    graph_facts: returned.move() ?? panic("a comptime run lost the finalization's boxed edges and copy facts")
+    carried.push(SemaPassFacts{memory_plan: plan.move(), fixed_length_write_params: owned.fixed_length_write_params.move(), boxed_edges: graph_facts.boxed_edges.move(), copy_facts: graph_facts.copy_facts.move()})
 }
 
 // Whether the body half of a finalization (`bodies`) over the declaration
