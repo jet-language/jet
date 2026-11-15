@@ -207,6 +207,12 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             // Matched in place: a pattern on the indexed path copies the whole item.
             nominal: graph.modules[row.module_index].nominals[row.row]
             if nominal.source == .SourceAST(field_item) {
+                // A plain alias compares as the type it names.
+                if field_item == .TypeAlias(definition) {
+                    if definition.choices.len() == 0 {
+                        return sema_comparability_auto_blocked_type(graph, resolved.target_module_identity, definition.target, trait_name, visited)
+                    }
+                }
                 if sema_comparability_generated_block(field_item, trait_name) -> return false
                 if !sema_comparability_auto_selected(sema_type_metadata_auto_derives(field_item, graph.modules[row.module_index].declared_trait_impls), trait_name) {
                     // A distinct or unit type shows by its own rule
