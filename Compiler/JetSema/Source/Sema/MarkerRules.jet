@@ -385,26 +385,31 @@ sema_marker_rules_catalog_has_menu: fn(menus: [TAppliedRuleArgumentMenu], name: 
     false
 }
 
-// The parsed embedded Prelude/Markers.jet Program is the sole applied-rule
-// row source. Menu rows are explicit carrier input because their canonical
-// source is Core.rows's specialized `types { … }` metadata, not marker sites or
-// Program policy declarations.
-sema_marker_rules_build_catalog: fn(marker_source: Program, marker_source_text: String, argument_menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleCatalog? {
+// The applied-rule rows of the marker declarations of the embedded
+// Prelude/Markers.jet, in order; None when a row does not read or a name
+// repeats. `source` is the text the declarations were parsed from.
+sema_marker_rules_catalog_rows: fn(declarations: [MarkerDecl], source: String) -> [TAppliedRule]? {
     rows := [TAppliedRule]{}
-    loop item in marker_source.items {
-        if item == .MarkerDecl(declaration) {
-            row: sema_marker_rules_applied_row(declaration, marker_source_text) ?? return None
-            loop existing in rows {
-                if existing.name == row.name {
-                    return None
-                }
+    loop declaration in declarations {
+        row: sema_marker_rules_applied_row(declaration, source) ?? return None
+        loop existing in rows {
+            if existing.name == row.name {
+                return None
             }
-            rows.push(row)
         }
+        rows.push(row)
     }
     if rows.len() == 0 {
         return None
     }
+    Val(rows)
+}
+
+// The applied-rule rows are the sole rule source (sema_marker_rules_catalog_rows).
+// Menu rows are explicit carrier input because their canonical source is
+// Core.rows's specialized `types { … }` metadata, not marker sites or Program
+// policy declarations.
+sema_marker_rules_build_catalog: fn(rows: [TAppliedRule], argument_menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleCatalog? {
     menus := [TAppliedRuleArgumentMenu]{}
     loop menu in argument_menus {
         loop existing in menus {

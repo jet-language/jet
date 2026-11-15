@@ -2075,11 +2075,15 @@ sema_author_facing_diagnostics: fn(anchor: Span, generated: [Diagnostic], diagno
 // ---------------------------------------------------------------------------
 // Built-in providers.
 
-// The Prelude derive markers that carry an `expand` template.
+// The Prelude derive markers that carry an `expand` template, parsed while
+// the compiler builds, so a compile never parses the derive text. The text
+// ships with the compiler: one that does not parse stops the build.
+SEMA_PRELUDE_DERIVE_PROVIDERS: #run sema_derive_builtin_providers()
+
 sema_derive_builtin_providers: fn() -> [MarkerDecl] {
     parsed: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("Prelude/Derives.jet does not parse: {parsed.diagnostics[0].what}")
     providers := [MarkerDecl]{}
-    if parsed.diagnostics.len() != 0 -> return providers
     loop item in parsed.program.items {
         if item == .MarkerDecl(provider) && provider.body != None -> providers.push(provider)
     }
@@ -2818,7 +2822,6 @@ sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic])
     facts: sema_derive_item_index(items)
     auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", [String:Bool]{})
     auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", [String:Bool]{})
-    providers := [MarkerDecl]?{None}
     generated := [Item]{}
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
@@ -2827,7 +2830,7 @@ sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic])
         // the marker; its derived bodies are not expanded, so no `<` error
         // follows from inside them.
         if sema_derive_unordered_comparable(items[index], diagnostics) -> next
-        blocks: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, providers, generated, diagnostics)
+        blocks: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, generated, diagnostics)
         if blocks.len() == 0 -> next
         if &items[index] == .Struct(definition) {
             loop block in blocks -> definition.trait_impls.push(block)
@@ -3226,7 +3229,7 @@ sema_computed_field_param: fn(name: String, ty: Type, span: Span) -> Param Never
 
 // The derived trait impls of a struct or enum `item`, in trait order. A
 // distinct's impls join `generated` as separate impl items instead.
-sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: [String:Bool], auto_comparable: [String:Bool], providers: &[MarkerDecl]?, generated: &[Item], diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
+sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: [String:Bool], auto_comparable: [String:Bool], generated: &[Item], diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
     blocks := [TraitImplBlock]{}
     if item == {
         .Struct(definition) -> {
@@ -3235,14 +3238,12 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
             if !equatable && !comparable -> return blocks.move()
-            if providers == None -> providers = Val(sema_derive_builtin_providers())
-            available: providers ?? [MarkerDecl]{}
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
             type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_struct_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
-                block: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
+                block: sema_derive_expand_builtin_provider(SEMA_PRELUDE_DERIVE_PROVIDERS, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
                 blocks.push(block)
             }
         }
@@ -3251,14 +3252,12 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
             if !equatable && !comparable -> return blocks.move()
-            if providers == None -> providers = Val(sema_derive_builtin_providers())
-            available: providers ?? [MarkerDecl]{}
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
             type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_enum_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
-                block: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
+                block: sema_derive_expand_builtin_provider(SEMA_PRELUDE_DERIVE_PROVIDERS, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
                 blocks.push(block)
             }
         }
@@ -3268,8 +3267,6 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             if definition.base == .Named(base) {
                 if facts.distincts.get(base) != None -> return blocks.move()
             }
-            if providers == None -> providers = Val(sema_derive_builtin_providers())
-            available: providers ?? [MarkerDecl]{}
             owner_type: Type.Named{name: definition.name}
             type_info: sema_derive_distinct_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
@@ -3280,7 +3277,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
                 // forwards none; `==` on it is refused where it is written.
                 if trait_name == "Equatable" && sema_derive_holds_function(definition.base) -> next
                 if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
-                block := sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
+                block := sema_derive_expand_builtin_provider(SEMA_PRELUDE_DERIVE_PROVIDERS, trait_name, definition.name, definition.name_span, owner_type, type_info, diagnostics) ?? next
                 generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: block.methods.move(), delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
             }
         }

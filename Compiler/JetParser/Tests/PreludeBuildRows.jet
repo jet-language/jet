@@ -1,0 +1,59 @@
+// The compiler-owned Prelude texts (markers, derives, the original errors and
+// the unit catalog) are parsed and read while the compiler builds, so a
+// compile never parses or scans them. Each build-time value must equal what
+// its reader gives for the same text when it runs now, byte for byte in CBOR.
+use {
+    cbor: core.encoding.cbor
+    jet_foundation.[MARKER_SOURCE, MARKER_SOURCE_RULES, marker_source_read]
+    jet_parser.[parser_line_starts]
+    jet_sema.[
+        SEMA_PRELUDE_DERIVE_PROVIDERS,
+        SEMA_PRELUDE_DERIVE_WORDS,
+        SEMA_PRELUDE_ERROR_LINE_STARTS,
+        SEMA_PRELUDE_ERROR_PROGRAM,
+        SEMA_PRELUDE_ERROR_SOURCE,
+        SEMA_PRELUDE_MARKER_DECLS,
+        SEMA_PRELUDE_MARKER_RULES,
+        SEMA_UNITS_CATALOG,
+        sema_derive_builtin_providers,
+        sema_marker_module_prelude_decls,
+        sema_marker_rules_catalog_rows,
+        sema_registration_derive_words,
+        sema_registration_original_error_program,
+        sema_units_catalog_read,
+    ]
+}
+
+prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
+    built_bytes: cbor.to_bytes(built) ?? panic("the build-time {what} does not encode: {err}")
+    read_bytes: cbor.to_bytes(read) ?? panic("the {what} read now does not encode: {err}")
+    if built_bytes != read_bytes -> panic("the build-time {what} ({built_bytes.len()} CBOR bytes) differs from the {what} read now ({read_bytes.len()} bytes)")
+}
+
+#Test("the build-time marker rows equal the marker source read now") {
+    declarations: sema_marker_module_prelude_decls()
+    assert(declarations.len() > 20, "Prelude/Markers.jet declares no markers")
+    prelude_build_rows_same(SEMA_PRELUDE_MARKER_DECLS, declarations, "marker declarations")
+    rules: sema_marker_rules_catalog_rows(declarations, MARKER_SOURCE) ?? panic("the marker declarations build no applied-rule rows")
+    prelude_build_rows_same(SEMA_PRELUDE_MARKER_RULES, rules, "applied-rule rows")
+    prelude_build_rows_same(MARKER_SOURCE_RULES, marker_source_read(MARKER_SOURCE), "marker source rows")
+}
+
+#Test("the build-time derive providers and words equal the derive source read now") {
+    providers: sema_derive_builtin_providers()
+    assert(providers.len() > 0, "Prelude/Derives.jet declares no provider")
+    prelude_build_rows_same(SEMA_PRELUDE_DERIVE_PROVIDERS, providers, "derive providers")
+    assert_eq(SEMA_PRELUDE_DERIVE_WORDS, sema_registration_derive_words())
+}
+
+#Test("the build-time original error module equals the error source read now") {
+    prelude_build_rows_same(SEMA_PRELUDE_ERROR_PROGRAM, sema_registration_original_error_program(), "original error program")
+    assert_eq(SEMA_PRELUDE_ERROR_PROGRAM.items.len(), 7)
+    assert_eq(SEMA_PRELUDE_ERROR_LINE_STARTS, parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes()))
+}
+
+#Test("the build-time unit catalog equals the unit source read now") {
+    catalog: sema_units_catalog_read()
+    assert_eq(catalog.len(), 32)
+    prelude_build_rows_same(SEMA_UNITS_CATALOG, catalog, "unit catalog")
+}

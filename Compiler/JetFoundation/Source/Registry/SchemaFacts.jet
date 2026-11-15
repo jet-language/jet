@@ -32,7 +32,7 @@ CORE_COMPILER_SCOPE_ID: "<corelib>/core.compiler::ScopeID"
 // each readable `$` member with its planes.
 schema_fact_rows: fn() -> [SchemaFactRow] Never! {
     rows := [SchemaFactRow]{}
-    loop rule in marker_source_read(MARKER_SOURCE) -> rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
+    loop rule in MARKER_SOURCE_RULES -> rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
     loop row in FOUNDATION_FACT_READ_ROWS {
         if row.member == .Val(member) -> rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_READ, name: member.copy(), scope: row.planes.copy()})
     }

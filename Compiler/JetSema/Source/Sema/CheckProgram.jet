@@ -83,7 +83,6 @@ use jet_foundation.[
     TFuncKind,
     TGenericParam,
     TTestFact,
-    TAppliedRule,
     TTypeDef,
     TUnsafeGate,
     TVisibility,
@@ -9030,8 +9029,6 @@ sema_comptime_checked_text_source: fn(evaluation: SemaCheckedTextEvaluation) -> 
 SemaComptimeSourceList: struct {
     items: [SemaComptimeItemSource]
     keys: [String:Bool]
-    // The prelude's applied rules, read at the module's first marker argument.
-    marker_rules: [TAppliedRule]?
 }
 
 // `key` is the value's text key; the list dedupes by module and key.
@@ -9064,13 +9061,8 @@ sema_comptime_add_marker_source: fn(sources: &SemaComptimeSourceList, graph: Sem
     if marker.ct != None || marker.args.len() == 0 || marker.name == MARKER_FX {
         return
     }
-    if sources.marker_rules == None {
-        sources.marker_rules = Val(sema_marker_module_prelude_rules())
-    }
-    if sources.marker_rules == .Val(rules) {
-        if !sema_marker_module_first_argument_evaluates(rules, marker) {
-            return
-        }
+    if !sema_marker_module_first_argument_evaluates(SEMA_PRELUDE_MARKER_RULES, marker) {
+        return
     }
     if marker.args[0] == {
         .Expr(expression) -> {
@@ -9262,7 +9254,7 @@ sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
 // The comptime sources of `source_module`, in declaration order, their
 // dependencies not yet probed.
 sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}, marker_rules: None}
+    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}}
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next

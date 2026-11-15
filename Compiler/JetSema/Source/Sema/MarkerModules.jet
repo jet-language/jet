@@ -479,10 +479,8 @@ sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TApplied
 
 // The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
 sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
-    parsed: parse_generated_source(MARKER_SOURCE.bytes())
-    if parsed.diagnostics.len() > 0 -> return None
     argument_menus: sema_marker_module_argument_menus(graph) ?? return None
-    sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus)
+    sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, argument_menus)
 }
 
 // The registry of the builtin applied rules alone, without source-declared markers.
@@ -711,27 +709,34 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
     }
 }
 
-// The prelude's applied-rule rows (Rust `Policy::applied_rule`), read from the
-// one marker vocabulary source; empty when that source does not parse.
+// The marker declarations of the one marker vocabulary source, parsed while
+// the compiler builds, so a compile never parses the marker text. The text
+// ships with the compiler: one that does not parse stops the build.
+SEMA_PRELUDE_MARKER_DECLS: #run sema_marker_module_prelude_decls()
+
+// The prelude's applied-rule rows (Rust `Policy::applied_rule`) of those
+// declarations, also read while the compiler builds.
+SEMA_PRELUDE_MARKER_RULES: #run sema_marker_module_prelude_rules()
+
 sema_marker_module_prelude_rules: fn() -> [TAppliedRule] {
-    rows := [TAppliedRule]{}
+    sema_marker_rules_catalog_rows(SEMA_PRELUDE_MARKER_DECLS, MARKER_SOURCE) ?? panic("Prelude/Markers.jet declares a marker with no applied-rule row, or one name twice")
+}
+
+sema_marker_module_prelude_decls: fn() -> [MarkerDecl] {
     parsed: parse_generated_source(MARKER_SOURCE.bytes())
-    if parsed.diagnostics.len() > 0 -> return rows
+    if parsed.diagnostics.len() > 0 -> panic("Prelude/Markers.jet does not parse: {parsed.diagnostics[0].what}")
+    declarations := [MarkerDecl]{}
     loop item in parsed.program.items {
-        if item == .MarkerDecl(declaration) {
-            if sema_marker_rules_applied_row(declaration, MARKER_SOURCE) == .Val(row) -> rows.push(row)
-        }
+        if item == .MarkerDecl(declaration) -> declarations.push(declaration)
     }
-    rows
+    declarations
 }
 
 // The Prelude marker declared as `name` in the one marker vocabulary source,
 // for a typed `marker(T)` lookup the program's own markers do not answer.
 sema_marker_module_prelude_declaration: fn(name: String) -> MarkerDecl? {
-    parsed: parse_generated_source(MARKER_SOURCE.bytes())
-    if parsed.diagnostics.len() > 0 -> return None
-    loop item in parsed.program.items {
-        if item == .MarkerDecl(declaration) && declaration.name == name -> return Val(declaration)
+    loop declaration in SEMA_PRELUDE_MARKER_DECLS {
+        if declaration.name == name -> return Val(declaration)
     }
     None
 }

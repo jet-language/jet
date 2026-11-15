@@ -1,86 +1,23 @@
 use {
-    jet_foundation.[CompilerThreads, Diagnostic, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
+    jet_foundation.[CompilerThreads, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
     jet_parser.[parse_generated_source]
 }
 
 // `inject_units_prelude`: the only catalog is the ordinary Prelude source
 // SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This stage changes
-// AST items only; it never adds a physical/loaded module. Parsing it (exact
-// scales included) is most of a small program's compile, so it runs only once
-// some source mentions a catalog unit (sema_units_mentioned); the scan for
-// mentions reads the outline.
-sema_units_catalog: fn(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
+// AST items only; it never adds a physical/loaded module. The catalog is
+// parsed (exact scales included) and its dimensions resolved while the
+// compiler builds, so a compile never parses or scans the catalog text. The
+// text ships with the compiler: one that does not parse stops the build.
+SEMA_UNITS_CATALOG: #run sema_units_catalog_read()
+
+sema_units_catalog_read: fn() -> [UnitFamilyDef] {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
-    loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
-    if sema_has_error_since(parsed.diagnostics, 0) -> return [UnitFamilyDef]{}
+    if parsed.diagnostics.len() > 0 -> panic("Prelude/Units.jet does not parse: {parsed.diagnostics[0].what}")
     families := [UnitFamilyDef]{}
     loop item in parsed.program.items { if item == .UnitFamily(family) -> families.push(family) }
     sema_units_resolve_standard(families)
     families
-}
-
-// One catalog family's name and its members' names, in catalog order.
-SemaUnitsOutlineFamily: struct {
-    family: String
-    members: [String]
-}
-
-// The catalog's family and member names, read off the lines of
-// SEMA_PRELUDE_UNITS_SOURCE without lexing or parsing it: a line
-// `#UnitFamily(Name, …) {` opens family Name, each indented line inside
-// names one member (`name` or `name(…)`), and `}` closes the family. The
-// parser test standard_units_outline_matches_the_parsed_catalog pins this to
-// the parsed catalog, family for family and member for member.
-sema_units_catalog_outline: fn() -> [SemaUnitsOutlineFamily] Never! {
-    source: SEMA_PRELUDE_UNITS_SOURCE.bytes()
-    families := [SemaUnitsOutlineFamily]{}
-    family := ""
-    members := [String]{}
-    start := 0
-    loop start < source.len() {
-        end := start
-        loop end < source.len() && source[end] != (U8{10}) -> end += 1
-        if {
-            sema_units_outline_opens(source, start, end) -> {
-                family = sema_units_outline_name(source, start + 12, end)
-                members = [String]{}
-            }
-            family == "" || start == end -> {}
-            source[start] == (U8{125}) -> {
-                families.push(SemaUnitsOutlineFamily{family: family, members: members.move()})
-                family = ""
-                members = [String]{}
-            }
-            source[start] == (U8{32}) -> {
-                at := start
-                loop at < end && source[at] == (U8{32}) -> at += 1
-                member: sema_units_outline_name(source, at, end)
-                if member != "" -> members.push(member)
-            }
-            else -> {}
-        }
-        start = end + 1
-    }
-    families
-}
-
-// Whether the line `source[start..<end]` starts with `#UnitFamily(`.
-sema_units_outline_opens: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
-    if end - start < 12 || source[start] != (U8{35}) -> return false
-    opener: "#UnitFamily(".bytes()
-    loop (index, byte) in opener {
-        if source[start + index] != byte -> return false
-    }
-    true
-}
-
-// The identifier (ASCII letters, digits, `_`) starting at `at` and ending
-// by `end`, or "".
-sema_units_outline_name: fn(bytes: [U8], at: Int, end: Int) -> String Never! {
-    last := at
-    loop last < end && (bytes[last] == (U8{95}) || (bytes[last] >= (U8{48}) && bytes[last] <= (U8{57})) || (bytes[last] >= (U8{65}) && bytes[last] <= (U8{90})) || (bytes[last] >= (U8{97}) && bytes[last] <= (U8{122}))) -> last += 1
-    if last == at || bytes[at] <= (U8{57}) -> return ""
-    String.from_bytes(bytes[at..<last]) ?? ""
 }
 
 // The names `items` declares (`occupied`) and the unit families it declares
@@ -101,8 +38,8 @@ sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_famili
     }
 }
 
-// What each module's unit scan reads, built once per graph from the catalog
-// outline: `wanted` interns the names a source mention scan looks up
+// What each module's unit scan reads, built once per graph from the catalog:
+// `wanted` interns the names a source mention scan looks up
 // (sema_units_source_mentions), every catalog family name and member type
 // name, and `type_names[family][member]` is each catalog member's type name
 // (sema_registration_unit_type_name).
@@ -111,14 +48,14 @@ SemaUnitsCatalogNames: struct {
     type_names: [[String]]
 }
 
-sema_units_catalog_names: fn(outline: [SemaUnitsOutlineFamily]) -> SemaUnitsCatalogNames Never! {
+sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
     wanted := name_table()
     type_names := [[String]]{}
-    loop family in outline {
+    loop family in catalog {
         _ := name_intern(wanted, family.family)
         members := [String]{}
         loop member in family.members {
-            type_name: sema_registration_unit_type_name(member)
+            type_name: sema_registration_unit_type_name(member.name)
             _ := name_intern(wanted, type_name)
             members.push(type_name)
         }
@@ -129,11 +66,11 @@ sema_units_catalog_names: fn(outline: [SemaUnitsOutlineFamily]) -> SemaUnitsCata
 
 // Whether `mentions` names any catalog family or member, the test
 // sema_units_inject starts its selection with: without one it adds nothing.
-sema_units_mentioned: fn(outline: [SemaUnitsOutlineFamily], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) -> Bool Never! {
-    loop (index, family) in outline {
+sema_units_mentioned: fn(catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) -> Bool Never! {
+    loop (index, family) in catalog {
         if sema_units_identifier(mentions, family.family) -> return true
         loop (member_index, member) in family.members {
-            if sema_units_member(mentions, member, names.type_names[index][member_index]) -> return true
+            if sema_units_member(mentions, member.name, names.type_names[index][member_index]) -> return true
         }
     }
     false

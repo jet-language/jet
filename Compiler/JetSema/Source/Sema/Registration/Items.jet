@@ -157,6 +157,7 @@ use {
     jet_parser.[
         jfmt_decode_shapes,
         parse_generated_source,
+        parser_line_starts,
     ]
 }
 
@@ -2149,11 +2150,19 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
     }
 }
 
-sema_registration_original_error_module: fn(module_table: &ModuleTable, diagnostics: &[Diagnostic]) -> SemaRegistrationModuleInput? {
-    // Only this exact embedded original parse can mint the DefaultErr marker.
+// The original Prelude error declarations, parsed while the compiler builds:
+// only this embedded original parse can mint the DefaultErr marker. The
+// text ships with the compiler, so one that does not parse, or that does not
+// hold seven declarations with exactly one marked default error, stops the
+// build.
+SEMA_PRELUDE_ERROR_PROGRAM: #run sema_registration_original_error_program()
+
+// The byte offset of each line of SEMA_PRELUDE_ERROR_SOURCE.
+SEMA_PRELUDE_ERROR_LINE_STARTS: #run parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes())
+
+sema_registration_original_error_program: fn() -> Program {
     parsed := parse_generated_source(SEMA_PRELUDE_ERROR_SOURCE.bytes())
-    loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
-    if sema_has_error_since(parsed.diagnostics, 0) -> return None
+    if parsed.diagnostics.len() > 0 -> panic("Prelude/Errors.jet does not parse: {parsed.diagnostics[0].what}")
     program := parsed.program.move()
     declarations := [Item]{}
     marked := 0
@@ -2168,31 +2177,27 @@ sema_registration_original_error_module: fn(module_table: &ModuleTable, diagnost
             declarations.push(Item.Struct{value: definition.move()})
         }
     }
-    if declarations.len() != 7 || marked != 1 {
-        diagnostics.push(sema_error_optional("E0003", None, "the original Prelude error source is incomplete", "the canonical supplier owns seven ordinary declarations and exactly one marked default error", "regenerate the embedded original Prelude source from its canonical authority"))
-        return None
-    }
+    if declarations.len() != 7 || marked != 1 -> panic("Prelude/Errors.jet must hold seven declarations and exactly one marked default error, `Err`")
     declarations.reverse()
     program.items = declarations.move()
+    program
+}
+
+sema_registration_original_error_module: fn(module_table: &ModuleTable) -> SemaRegistrationModuleInput {
     path: SEMA_PRELUDE_ERROR_SOURCE_PATH
-    bytes: SEMA_PRELUDE_ERROR_SOURCE.bytes()
-    line_starts := [Int]{0}
-    loop index in 0..<bytes.len() {
-        if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
-    }
-    Val(SemaRegistrationModuleInput{
+    SemaRegistrationModuleInput{
         package_identity: "jet:canonical-prelude",
         module_identity: module_intern(module_table, path),
         module_name: sema_inline_generated_path(path),
         core_source_alias: "",
         module_path: "Prelude/Errors.jet",
         source_file: path,
-        source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts.move(), origin: SemaSourceOrigin.CompilerGenerated}},
+        source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: SEMA_PRELUDE_ERROR_SOURCE.count_bytes()}, source_file: path, source_start: 0, line_starts: SEMA_PRELUDE_ERROR_LINE_STARTS, origin: SemaSourceOrigin.CompilerGenerated}},
         source_origin: SemaSourceOrigin.CompilerGenerated,
-        program: program.move(),
+        program: SEMA_PRELUDE_ERROR_PROGRAM,
         foreign_handles: [SemaRegistrationForeignHandleFacts]{},
         source: SEMA_PRELUDE_ERROR_SOURCE,
-    })
+    }
 }
 
 // Rust `Prelude::retain_error_prelude_module`: a graph whose inputs already
@@ -2227,8 +2232,7 @@ sema_registration_retain_original_error_module: fn(inputs: &[SemaRegistrationMod
             return
         }
     }
-    original: sema_registration_original_error_module(module_table, diagnostics) ?? return
-    inputs.push(original)
+    inputs.push(sema_registration_original_error_module(module_table))
 }
 
 sema_registration_error_supplier_diagnostic: fn(detail: String) -> Diagnostic {
@@ -4932,20 +4936,12 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     prepared_inputs := inputs.move()
     table := module_table.move()
     sema_registration_retain_original_error_module(prepared_inputs, table, diagnostics)
-    units_outline: sema_units_catalog_outline()
-    units_names: sema_units_catalog_names(units_outline)
+    units_names: sema_units_catalog_names(SEMA_UNITS_CATALOG)
     units_mentions: sema_units_scan_mentions(prepared_inputs, canonical_effect_module_identity, units_names.wanted, threads)
-    // The catalog is parsed at the first input that mentions a unit; an input
-    // that mentions none takes no family.
-    units_catalog := [UnitFamilyDef]{}
-    units_parsed := false
+    // An input that mentions no catalog unit takes no family.
     loop index in 0..<prepared_inputs.len() {
-        if !sema_units_scanned(prepared_inputs, index, canonical_effect_module_identity) || !sema_units_mentioned(units_outline, units_names, units_mentions[index]) -> next
-        if !units_parsed {
-            units_catalog = sema_units_catalog(diagnostics)
-            units_parsed = true
-        }
-        sema_units_inject(prepared_inputs[index], units_catalog, units_names, units_mentions[index])
+        if !sema_units_scanned(prepared_inputs, index, canonical_effect_module_identity) || !sema_units_mentioned(SEMA_UNITS_CATALOG, units_names, units_mentions[index]) -> next
+        sema_units_inject(prepared_inputs[index], SEMA_UNITS_CATALOG, units_names, units_mentions[index])
     }
     sema_units_resolve(prepared_inputs, edges, diagnostics)
     // #6176: a `Name: path` binding whose path names a type is a type
@@ -5422,20 +5418,30 @@ sema_registration_namespace_owner_at: fn(graph: SemaRegistrationGraph, module_in
     Val(SemaRegistrationRowRef{module_index: owner, row: row})
 }
 
+// The words the Prelude derive templates spell (sema_source_words of
+// SEMA_PRELUDE_DERIVE_SOURCE), read while the compiler builds, so a compile
+// never scans the derive text.
+SEMA_PRELUDE_DERIVE_WORDS: #run sema_registration_derive_words()
+
+sema_registration_derive_words: fn() -> [String] Never! {
+    seen := [String:Bool]{}
+    words := [String]{}
+    source: SEMA_PRELUDE_DERIVE_SOURCE.bytes()
+    sema_source_words(source, 0, source.len(), seen, words)
+    words
+}
+
 // The sibling declarations each package member's module
 // scope binds (`namespace_bindings`), in entry order. They are the namespace
 // names its source can reach (the loader's `namespace_refs`) and those the
-// Prelude derive templates spell, since derived items expand into the
-// module; every namespace name when its items come from a template declared
-// elsewhere (`namespace_full`, or any user template expansion: `templated`).
-// A name the module declared before its imports registered (`own_symbols`
-// rows) or imports binds there instead (sema_registration_namespace_collisions).
+// Prelude derive templates spell (SEMA_PRELUDE_DERIVE_WORDS), since derived
+// items expand into the module; every namespace name when its items come from
+// a template declared elsewhere (`namespace_full`, or any user template
+// expansion: `templated`). A name the module declared before its imports
+// registered (`own_symbols` rows) or imports binds there instead
+// (sema_registration_namespace_collisions).
 sema_registration_bind_namespaces: fn(graph: &SemaRegistrationGraph, own_symbols: [Int], templated: Bool) {
     if graph.namespace_tables.len() == 0 -> return
-    derive_seen := [String:Bool]{}
-    derive_words := [String]{}
-    source: SEMA_PRELUDE_DERIVE_SOURCE.bytes()
-    sema_source_words(source, 0, source.len(), derive_seen, derive_words)
     loop module_index in 0..<graph.modules.len() {
         slot: graph.modules[module_index].namespace_slot
         if slot < 0 -> next
@@ -5446,7 +5452,7 @@ sema_registration_bind_namespaces: fn(graph: &SemaRegistrationGraph, own_symbols
             loop name in graph.modules[module_index].namespace_refs {
                 if name_rows_get_text(graph.namespace_tables[slot], name) == .Val(entry) -> entries.push(entry)
             }
-            loop name in derive_words {
+            loop name in SEMA_PRELUDE_DERIVE_WORDS {
                 if name_rows_get_text(graph.namespace_tables[slot], name) == .Val(entry) -> entries.push(entry)
             }
             entries.sort()

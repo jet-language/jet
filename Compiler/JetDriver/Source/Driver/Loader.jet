@@ -132,7 +132,7 @@ use {
         sema_registration_unit_family_type_names,
         sema_registration_builtin_unit_facts,
         sema_registration_unit_type_name,
-        sema_units_catalog_outline,
+        SEMA_UNITS_CATALOG,
         sema_marker_rules_applied_row,
         sema_core_error_family_member,
         sema_eval_entry_show,
@@ -3676,9 +3676,9 @@ jet_driver_unit_conversion: fn(receivers: [String], catalog: &NameTable) -> Bool
     // A fresh table holds only the empty spelling.
     if name_count(catalog) == 1 {
         loop fact in sema_registration_builtin_unit_facts() -> _ := name_intern(catalog, fact.name)
-        loop family in sema_units_catalog_outline() {
+        loop family in SEMA_UNITS_CATALOG {
             loop member in family.members {
-                type_name: sema_registration_unit_type_name(member)
+                type_name: sema_registration_unit_type_name(member.name)
                 _ := name_intern(catalog, "{type_name}Point")
                 _ := name_intern(catalog, "{type_name}Delta")
                 _ := name_intern(catalog, type_name)
