@@ -107,6 +107,8 @@ use {
         x64_load_indexed,
         x64_load_rip,
         x64_load_u8,
+        x64_lock_cmpxchg,
+        x64_lock_xadd,
         x64_log,
         x64_log_stop,
         x64_count_step,
@@ -142,6 +144,7 @@ use {
         x64_vector_store,
         x64_vfmadd213sd,
         x64_vfmadd213sd_mem,
+        x64_xchg_mem,
         x64_xgetbv,
     ]
 }
@@ -1505,6 +1508,63 @@ ir_x64_block_retain: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     overflow: x64_jcc_rel32(e.code, X64Cond.O)
     ir_x64_land(e, immortal)
     ir_x64_overflow_trap(e, overflow)
+}
+
+// A 64-bit atomic of jet_rt_atomic_i64_* or jet_rt_atomic_u64_* (JetRuntime
+// Atomic.jet) inline (X64Alloc.jet ir_x64_inline_atomic), with the x86-64
+// sequentially consistent mapping the routine makes, on the word in place:
+// init and load a mov, store an xchg, add a lock xadd (its old value, in the
+// result's own register unless that is the base) or, unread, a lock inc or
+// dec by a constant 1, compare_exchange a lock cmpxchg whose ZF is the Bool,
+// left in the flags for a branch right after it (ir_x64_fusable). A frame
+// address is the operand's own rbp displacement.
+ir_x64_atomic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, operation: String) Never! {
+    start: f.b[at]
+    place: f.args[start]
+    dst: f.dst[at]
+    framed: al.frames[place] != 0
+    base: if framed -> X64_RBP else -> ir_x64_use(e, m, f, al, place, X64_R10)
+    disp: if framed -> al.frames[place] else -> 0
+    if operation == {
+        "init" -> {
+            value: ir_x64_use(e, m, f, al, f.args[start + 1], X64_RAX)
+            x64_store(e.code, base, disp, value)
+        }
+        "load" -> {
+            reg: ir_x64_home_reg(m, f, al, dst, X64_RAX)
+            x64_load(e.code, reg, base, disp)
+            ir_x64_store(e, m, f, al, dst, reg)
+        }
+        "store" -> {
+            ir_x64_load(e, m, f, al, f.args[start + 1], X64_RAX)
+            x64_xchg_mem(e.code, base, disp, X64_RAX)
+        }
+        "add" -> {
+            delta: f.args[start + 1]
+            step: ir_x64_imm(al, delta) ?? 0
+            if dst < 0 && (step == 1 || step == -1) -> return x64_count_step(e.code, base, disp, step == 1, true)
+            held: if dst >= 0 -> ir_x64_home_reg(m, f, al, dst, X64_RAX) else -> X64_RAX
+            reg: if held == base -> X64_RAX else -> held
+            ir_x64_load(e, m, f, al, delta, reg)
+            x64_lock_xadd(e.code, base, disp, reg)
+            if dst >= 0 -> ir_x64_store(e, m, f, al, dst, reg)
+        }
+        else -> {
+            ir_x64_load(e, m, f, al, f.args[start + 1], X64_RAX)
+            replacement: ir_x64_use(e, m, f, al, f.args[start + 2], X64_RCX)
+            x64_lock_cmpxchg(e.code, base, disp, replacement)
+            if dst < 0 -> return
+            if ir_x64_fusable(e, f, al, at) {
+                e.fused = dst
+                e.fused_cond = X64Cond.E
+                return
+            }
+            reg: ir_x64_home_reg(m, f, al, dst, X64_RAX)
+            x64_setcc(e.code, X64Cond.E, reg)
+            x64_movzx_r8(e.code, reg, reg)
+            ir_x64_store(e, m, f, al, dst, reg)
+        }
+    }
 }
 
 // The runtime's align-8 entry (JetRuntime Alloc.jet jet_rt_alloc_8,
@@ -3350,7 +3410,9 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             // One-argument runtime leaves with a result inline on their fast path.
             leaf: f.c[at] == 1 && dst >= 0
             entry: ir_x64_alloc_entry(f, al, at, symbol)
+            atomic: ir_x64_inline_atomic(m, f, at)
             if {
+                atomic != "" -> ir_x64_atomic(e, m, f, al, at, atomic)
                 leaf && (symbol == "jet_int_owned_to_i64" || symbol == "jet_rt_int_clone") -> ir_x64_inline_route(e, m, f, al, symbol, f.args[f.b[at]], dst)
                 leaf && symbol == "jet_int_owned_from_i64" -> ir_x64_word_int(e, m, f, al, f.args[f.b[at]], dst)
                 leaf && symbol == "jet_rt_block_unique" -> ir_x64_block_unique(e, m, f, al, at, f.args[f.b[at]])
@@ -5428,6 +5490,98 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         if reg == X64_R8 -> held = true
     }
     assert(held)
+}
+
+// A 64-bit atomic is its one locked instruction on the word in place, with
+// no call: an unread add of 1 is a lock inc, a read add a lock xadd, a store
+// an xchg, a load a mov and a compare_exchange a lock cmpxchg whose ZF is
+// the Bool. So a function of them stays a leaf, whose values take r8 first.
+#Test("A 64-bit atomic is its locked instruction on the word in place") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("atomics", "test:atomics.jet::atomics", "", "atomics.jet", 1)
+    place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
+    delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
+    f.result = flag
+    one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    old: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    seen: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    won: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 2)
+    step: ir_args(f, [Int]{place, one})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_rt_atomic_i64_add"), step, 2, 2)
+    add: ir_args(f, [Int]{place, delta})
+    _ := ir_emit(f, IROp.CallRuntime, old, ir_intern_name(m, "jet_rt_atomic_i64_add"), add, 2, 3)
+    store: ir_args(f, [Int]{place, old})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_rt_atomic_u64_store"), store, 2, 4)
+    load: ir_args(f, [Int]{place})
+    _ := ir_emit(f, IROp.CallRuntime, seen, ir_intern_name(m, "jet_rt_atomic_i64_load"), load, 1, 5)
+    exchange_args: ir_args(f, [Int]{place, seen, delta})
+    _ := ir_emit(f, IROp.CallRuntime, won, ir_intern_name(m, "jet_rt_atomic_i64_compare_exchange"), exchange_args, 3, 6)
+    _ := ir_emit(f, IROp.Return, -1, won, -1, -1, 7)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    held := false
+    loop reg in al.regs {
+        if reg == X64_R8 -> held = true
+    }
+    assert(held)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0).function
+    assert(compiled.relocs.is_empty())
+    code: compiled.code
+    base: if al.regs[place] >= 0 -> al.regs[place] else -> X64_R10
+    inc := x64_code()
+    x64_count_step(inc, base, 0, true, true)
+    at_inc: ir_x64_code_find(code, inc.bytes, 0)
+    assert(at_inc >= 0)
+    xadd := x64_code()
+    x64_lock_xadd(xadd, base, 0, if al.regs[old] >= 0 && al.regs[old] != base -> al.regs[old] else -> X64_RAX)
+    at_xadd: ir_x64_code_find(code, xadd.bytes, at_inc)
+    assert(at_xadd > at_inc)
+    swap := x64_code()
+    x64_xchg_mem(swap, base, 0, X64_RAX)
+    at_swap: ir_x64_code_find(code, swap.bytes, at_xadd)
+    assert(at_swap > at_xadd)
+    exchange := x64_code()
+    x64_lock_cmpxchg(exchange, base, 0, if al.regs[delta] >= 0 -> al.regs[delta] else -> X64_RCX)
+    at_exchange: ir_x64_code_find(code, exchange.bytes, at_swap)
+    assert(at_exchange > at_swap)
+    sete := x64_code()
+    x64_setcc(sete, X64Cond.E, if al.regs[won] >= 0 -> al.regs[won] else -> X64_RAX)
+    assert(ir_x64_code_find(code, sete.bytes, at_exchange) > at_exchange)
+}
+
+// A compare_exchange whose Bool only the If right after it reads leaves its
+// ZF for that branch: the lock cmpxchg is followed by the jne past the arm,
+// with no sete.
+#Test("A compare_exchange read only by an If branches on its ZF") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("claim", "test:atomics.jet::claim", "", "atomics.jet", 1)
+    place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
+    seen: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "seen"), 1)
+    next: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "next"), 1)
+    f.result = word
+    won: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+    exchange_args: ir_args(f, [Int]{place, seen, next})
+    _ := ir_emit(f, IROp.CallRuntime, won, ir_intern_name(m, "jet_rt_atomic_i64_compare_exchange"), exchange_args, 3, 2)
+    _ := ir_open_if(f, won, 3)
+    store_args: ir_args(f, [Int]{place, seen})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_rt_atomic_i64_store"), store_args, 2, 4)
+    ir_end(f, 5)
+    _ := ir_emit(f, IROp.Return, -1, seen, -1, -1, 6)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    code: ir_x64_compile_function(m, ir_x64_tables(m), 0).function.code
+    exchange := x64_code()
+    x64_lock_cmpxchg(exchange, if al.regs[place] >= 0 -> al.regs[place] else -> X64_R10, 0, if al.regs[next] >= 0 -> al.regs[next] else -> X64_RCX)
+    at: ir_x64_code_find(code, exchange.bytes, 0)
+    assert(at >= 0)
+    after: at + exchange.bytes.len()
+    assert(code[after] == 0x75 || (code[after] == 0x0f && code[after + 1] == 0x85))
+    assert(ir_x64_code_find(code, [U8]{0x0f, 0x94}, 0) < 0)
 }
 
 // release(pointer) reads the TCB base, loads the word at base + pointer

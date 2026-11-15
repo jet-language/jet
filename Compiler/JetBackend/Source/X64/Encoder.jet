@@ -438,6 +438,47 @@ x64_count_step: fn(code: &X64Code, base: Int, disp: Int, increment: Bool, locked
     x64_modrm_mem(code, if increment -> 0 else -> 1, base, disp)
 }
 
+// xchg qword [base + disp], src (REX.W 87 /r): the word and `src` swap, a
+// locked operation without the prefix, so a sequentially consistent store.
+x64_xchg_mem: fn(code: &X64Code, base: Int, disp: Int, src: Int) Never! {
+    x64_rex(code.bytes, true, src, base)
+    x64_byte(code.bytes, 0x87)
+    x64_modrm_mem(code, src, base, disp)
+}
+
+// lock xadd qword [base + disp], src (F0 REX.W 0F C1 /r): the word gains
+// `src`, and `src` takes the word's old value.
+x64_lock_xadd: fn(code: &X64Code, base: Int, disp: Int, src: Int) Never! {
+    x64_byte(code.bytes, 0xf0)
+    x64_rex(code.bytes, true, src, base)
+    x64_byte(code.bytes, 0x0f)
+    x64_byte(code.bytes, 0xc1)
+    x64_modrm_mem(code, src, base, disp)
+}
+
+// lock cmpxchg qword [base + disp], src (F0 REX.W 0F B1 /r): when the word
+// equals rax it becomes `src` and ZF is set; otherwise rax takes the word.
+x64_lock_cmpxchg: fn(code: &X64Code, base: Int, disp: Int, src: Int) Never! {
+    x64_byte(code.bytes, 0xf0)
+    x64_rex(code.bytes, true, src, base)
+    x64_byte(code.bytes, 0x0f)
+    x64_byte(code.bytes, 0xb1)
+    x64_modrm_mem(code, src, base, disp)
+}
+
+#Test("The atomic word ops encode xchg [rdi], rax, lock xadd [rbp - 16], rcx and lock cmpxchg [r12 + 8], r9") {
+    store := x64_code()
+    x64_xchg_mem(store, X64_RDI, 0, X64_RAX)
+    assert_eq(store.bytes, [U8]{0x48, 0x87, 0x07})
+    add := x64_code()
+    x64_lock_xadd(add, X64_RBP, -16, X64_RCX)
+    assert_eq(add.bytes, [U8]{0xf0, 0x48, 0x0f, 0xc1, 0x4d, 0xf0})
+    swap := x64_code()
+    r12: 12
+    x64_lock_cmpxchg(swap, r12, 8, X64_R9)
+    assert_eq(swap.bytes, [U8]{0xf0, 0x4d, 0x0f, 0xb1, 0x4c, 0x24, 0x08})
+}
+
 // Loads zero-extend into the full register: movzx (REX.W 0F B6/B7 /r) for
 // one and two bytes, mov r32 (8B /r) for four, mov r64 (REX.W 8B /r) for eight.
 x64_load_indexed: fn(code: &X64Code, dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {

@@ -206,14 +206,15 @@ ir_x64_write: fn(f: IRFunction, at: Int) -> Int Never! {
 // word's (or a wrapping Int's) comparison, bitwise operation, wrapping Add,
 // Sub, Mul or negation, `not`, or shift by a wrapping or constant in-range
 // count; a Float's + - * /, comparison or negation; a Bool's `not`; an
-// address; or the inline jet_rt_block_unique (X64Select.jet
-// ir_x64_block_unique). Division, a checked shift and Int arithmetic may
-// stop; a Float `%` or floor division calls. `consts` and `values` are the
-// allocation's (IRX64Allocation).
+// address; the inline jet_rt_block_unique (X64Select.jet
+// ir_x64_block_unique); or an inline 64-bit atomic (ir_x64_inline_atomic).
+// Division, a checked shift and Int arithmetic may stop; a Float `%` or
+// floor division calls. `consts` and `values` are the allocation's
+// (IRX64Allocation).
 ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
     op: f.op[at]
     if op == .ConstText || op == .DataAddress || op == .FunctionAddress -> return true
-    if op == .CallRuntime -> return ir_x64_inline_unique(m, f, at)
+    if op == .CallRuntime -> return ir_x64_inline_unique(m, f, at) || ir_x64_inline_atomic(m, f, at) != ""
     // The rest read slot `a`; any other instruction is no quiet value.
     reads_slot: if op == {
         .Copy | .Move | .Add | .Sub | .Mul | .Div | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not -> true
@@ -248,6 +249,25 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
 // (X64Select.jet ir_x64_block_unique).
 ir_x64_inline_unique: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     f.op[at] == .CallRuntime && f.c[at] == 1 && f.dst[at] >= 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_rt_block_unique"
+}
+
+// The operation ("init", "load", "store", "add" or "compare_exchange") when
+// `at` calls one of jet_rt_atomic_i64_* and jet_rt_atomic_u64_* (JetRuntime
+// Atomic.jet) with its arguments, which X64Select.jet ir_x64_atomic selects
+// inline; else "".
+ir_x64_inline_atomic: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
+    if f.op[at] != .CallRuntime || f.a[at] < 0 || f.a[at] >= m.names.len() -> return ""
+    operation: if m.names[f.a[at]] == {
+        "jet_rt_atomic_i64_init" | "jet_rt_atomic_u64_init" -> "init"
+        "jet_rt_atomic_i64_load" | "jet_rt_atomic_u64_load" -> "load"
+        "jet_rt_atomic_i64_store" | "jet_rt_atomic_u64_store" -> "store"
+        "jet_rt_atomic_i64_add" | "jet_rt_atomic_u64_add" -> "add"
+        "jet_rt_atomic_i64_compare_exchange" | "jet_rt_atomic_u64_compare_exchange" -> "compare_exchange"
+        else -> return ""
+    }
+    arity: if operation == "load" -> 1 else if operation == "compare_exchange" -> 3 else -> 2
+    if f.c[at] != arity -> return ""
+    operation
 }
 
 // Whether selecting instruction `at` makes no call, in its body or in a

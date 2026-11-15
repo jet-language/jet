@@ -2806,6 +2806,8 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
     if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") {
         return false
     }
+    // A word lane's atomic (Runtime Atomic.jet) only reads and writes its word.
+    if symbol.starts_with("jet_rt_atomic_") && !symbol.starts_with("jet_rt_atomic_int_") -> return false
     if symbol == {
         "jet_rt_alloc" | "jet_rt_alloc_8" | "jet_rt_alloc_value" | "jet_rt_alloc_value_grow" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_rt_mem_fill_bytes" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_mem_region_reserve" | "jet_rt_mem_region_release" -> false
@@ -2832,6 +2834,13 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
         "jet_rt_transaction_hook_enter" | "jet_rt_transaction_hook_leave" -> false
         else -> true
     }
+}
+
+#Test("A word lane's atomic delivers no stop, so no poll follows it") {
+    assert(!ir_route_can_stop("jet_rt_atomic_i64_add"))
+    assert(!ir_route_can_stop("jet_rt_atomic_bool_compare_exchange"))
+    assert(!ir_route_can_stop("jet_rt_atomic_u32_store"))
+    assert(ir_route_can_stop("jet_rt_atomic_int_add"))
 }
 
 // After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns
