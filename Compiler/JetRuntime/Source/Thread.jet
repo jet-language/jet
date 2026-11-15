@@ -28,7 +28,8 @@
 // [cached head block][cached count] (Alloc.jet alloc_cache_row); @448 Scheduler
 // turn request (Scheduler.jet SCHEDULER_TCB_TURN); @456 root Context record
 // (48 bytes); @504 + 16 per row, eight Alloc kept large-mapping rows
-// [mapping][bytes] (Alloc.jet ALLOC_LARGE_ROWS).
+// [mapping][bytes] (Alloc.jet ALLOC_LARGE_ROWS); @632 + 8 per class, thirteen
+// Alloc window run stacks (Alloc.jet ALLOC_WINDOW_ROWS).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
@@ -369,11 +370,12 @@ thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
     thread_tls_teardown(tcb)
     context_tcb_release(tcb)
     sentry_thread_detach()
-    // Every destructor above has run its last free: return the cache and the
-    // kept large mappings before the TCB that holds them goes away, then
-    // release the TCB on the locked path.
+    // Every destructor above has run its last free: return the cache, the
+    // kept large mappings and the window runs before the TCB that holds them
+    // goes away, then release the TCB on the locked path.
     alloc_cache_flush()
     alloc_large_rows_flush()
+    alloc_window_rows_flush()
     thread_unregister_tcb(tcb)
     thread_set_base(thread_detached_base())
     jet_rt_free(tcb, context_tcb_bytes(), I64{64})

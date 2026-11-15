@@ -530,6 +530,62 @@ alloc_test_window: fn() {
     alloc_cache_flush()
 }
 
+// The window unit of `address`, inside the window at `window`.
+alloc_test_unit: fn(window: I64, address: I64) -> I64 { wrapping(address - window) >> I64{16} }
+
+// A thread's ended runs go on its own stack, up to ALLOC_WINDOW_ROW_LIMIT a
+// class, and its next region of that class takes the latest back; the rest
+// go on the shared stack. A fiber's switch moves the rows, a class the
+// target already keeps runs of shelves the moved ones, and thread exit
+// shelves them all.
+alloc_test_window_rows: fn() {
+    alloc_window_rows_flush()
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    stack: wrapping(alloc_root + ALLOC_WINDOW_STACKS)
+    row: alloc_window_row(I64{0})
+    alloc_test_require(window != I64{0} && row != I64{0} && sync_load(row) == I64{0})
+    count: wrapping(ALLOC_WINDOW_ROW_LIMIT + I64{1})
+    runs: jet_rt_alloc(wrapping(count * I64{8}), I64{8})
+    #Unsafe("runs holds count words this test owns, and the window's link words stay mapped") {
+        at := I64{0}
+        loop at < count {
+            run: jet_rt_mem_region_reserve(I64{65536})
+            alloc_test_require(run != I64{0} && run >= window && run < wrapping(window + ALLOC_WINDOW_BYTES))
+            os_store_i64(wrapping(runs + wrapping(at * I64{8})), run)
+            at += I64{1}
+        }
+        at = I64{0}
+        loop at < count {
+            jet_rt_mem_region_release(os_load_i64(wrapping(runs + wrapping(at * I64{8}))), I64{65536})
+            at += I64{1}
+        }
+        last_kept: os_load_i64(wrapping(runs + wrapping(wrapping(ALLOC_WINDOW_ROW_LIMIT - I64{1}) * I64{8})))
+        spilled: os_load_i64(wrapping(runs + wrapping(ALLOC_WINDOW_ROW_LIMIT * I64{8})))
+        kept: sync_load(row)
+        alloc_test_require(kept >> I64{20} == ALLOC_WINDOW_ROW_LIMIT && kept.bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, last_kept))
+        alloc_test_require(sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, spilled))
+        again: jet_rt_mem_region_reserve(I64{65536})
+        alloc_test_require(again == last_kept && sync_load(row) >> I64{20} == wrapping(ALLOC_WINDOW_ROW_LIMIT - I64{1}))
+        jet_rt_mem_region_release(again, I64{65536})
+        // A fiber takes the rows and gives them back.
+        tcb: thread_base()
+        fiber_tcb: jet_rt_alloc(context_tcb_bytes(), I64{64})
+        thread_zero(fiber_tcb, context_tcb_bytes())
+        alloc_window_rows_move(tcb, fiber_tcb)
+        alloc_test_require(sync_load(row) == I64{0} && sync_load(wrapping(fiber_tcb + ALLOC_WINDOW_ROWS)) == kept)
+        held: jet_rt_mem_region_reserve(I64{65536})
+        jet_rt_mem_region_release(held, I64{65536})
+        alloc_window_rows_move(fiber_tcb, tcb)
+        first: os_load_i64(runs)
+        alloc_test_require(sync_load(wrapping(fiber_tcb + ALLOC_WINDOW_ROWS)) == I64{0} && sync_load(row).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, held))
+        alloc_test_require(sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, first))
+        jet_rt_free(fiber_tcb, context_tcb_bytes(), I64{64})
+        alloc_window_rows_flush()
+        alloc_test_require(sync_load(row) == I64{0} && sync_load(stack).bit_and(ALLOC_WINDOW_INDEX) == alloc_test_unit(window, held))
+        jet_rt_free(runs, wrapping(count * I64{8}), I64{8})
+    }
+}
+
 // Probes for AllocCacheWitness.c, the multi-thread cache witness.
 #Export(c) alloc_test_live_blocks: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
@@ -565,6 +621,7 @@ alloc_tests: fn() {
     alloc_test_cache()
     alloc_test_rows()
     alloc_test_window()
+    alloc_test_window_rows()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {
         _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
         _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})

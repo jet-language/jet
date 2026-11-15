@@ -335,6 +335,16 @@ alloc_page_write: fn(base: I64, bytes: I64, record: I64) {
 // registers its units with no lock either (alloc_page_set). A larger region,
 // and any region once the window is refused or spent, maps on its own
 // (alloc_reservation_direct).
+// Each attached TCB also keeps a stack per class at ALLOC_WINDOW_ROWS
+// (Thread.jet): [count << 20 | the top run's first unit], linked through the
+// same link words. A region ends onto its thread's own stack, and the next
+// region of that class on that thread takes it back, with plain loads and
+// stores: only the thread running on a TCB touches its rows and the links of
+// the runs on them. A thread keeps at most ALLOC_WINDOW_ROW_LIMIT runs a
+// class; the next goes on the shared stack, as every run does from a thread
+// without a TCB. A fiber takes its carrier's rows while it runs
+// (alloc_cache_lend, alloc_cache_reclaim), and thread exit puts its runs on
+// the shared stacks (alloc_window_rows_flush).
 ALLOC_WINDOW: I64{776}
 ALLOC_WINDOW_NEXT: I64{784}
 ALLOC_WINDOW_STACKS: I64{800}
@@ -344,6 +354,8 @@ ALLOC_WINDOW_BYTES: I64{17179869184}
 ALLOC_WINDOW_LINK_UNITS: I64{32}
 ALLOC_WINDOW_INDEX: I64{1048575}
 ALLOC_WINDOW_TAG: I64{1048576}
+ALLOC_WINDOW_ROWS: I64{632}
+ALLOC_WINDOW_ROW_LIMIT: I64{8}
 
 // The window's base, mapped on the first call; 0 when the system refuses.
 alloc_window: fn() -> I64 {
@@ -396,6 +408,17 @@ alloc_window_take: fn(bytes: I64) -> I64 {
     if (class >= ALLOC_WINDOW_CLASSES) -> return I64{0}
     window: alloc_window()
     if (window == I64{0}) -> return I64{0}
+    row: alloc_window_row(class)
+    if (row != I64{0}) {
+        #Unsafe("row is the running TCB's own run stack of this class, and the link word of a run on it is this thread's alone") {
+            kept: os_load_i64(row)
+            own: kept.bit_and(ALLOC_WINDOW_INDEX)
+            if (own != I64{0}) {
+                os_store_i64(row, wrapping(wrapping(wrapping(kept - own) - ALLOC_WINDOW_TAG) + os_load_i64(wrapping(window + wrapping(own * I64{8})))))
+                return wrapping(window + wrapping(own * ALLOC_PAGE_UNIT))
+            }
+        }
+    }
     stack: alloc_window_stack(class)
     unit := I64{0}
     top := sync_load(stack)
@@ -442,6 +465,75 @@ alloc_window_push: fn(window: I64, unit: I64, class: I64) {
     }
 }
 
+// The calling thread's own run stack word of window class `class`, or 0
+// without a TCB.
+alloc_window_row: fn(class: I64) -> I64 {
+    base: thread_base()
+    if (base == I64{0}) -> return I64{0}
+    wrapping(base + wrapping(ALLOC_WINDOW_ROWS + wrapping(class * I64{8})))
+}
+
+// Keeps the run at window unit `unit` on the calling thread's own stack of
+// class `class`; false when the thread has no TCB or already keeps
+// ALLOC_WINDOW_ROW_LIMIT runs of that class.
+alloc_window_keep: fn(window: I64, unit: I64, class: I64) -> Bool {
+    row: alloc_window_row(class)
+    if (row == I64{0}) -> return false
+    #Unsafe("row is the running TCB's own run stack of this class, and the ended run's link word is no other thread's") {
+        kept: os_load_i64(row)
+        if (kept >= wrapping(ALLOC_WINDOW_ROW_LIMIT * ALLOC_WINDOW_TAG)) -> return false
+        os_store_i64(wrapping(window + wrapping(unit * I64{8})), kept.bit_and(ALLOC_WINDOW_INDEX))
+        os_store_i64(row, wrapping(wrapping(wrapping(kept - kept.bit_and(ALLOC_WINDOW_INDEX)) + ALLOC_WINDOW_TAG) + unit))
+    }
+    true
+}
+
+// Puts every run of the run stack word `kept` of class `class` on the
+// shared stack.
+alloc_window_shelve: fn(kept: I64, class: I64) {
+    window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
+    unit := kept.bit_and(ALLOC_WINDOW_INDEX)
+    loop unit != (I64{0}) {
+        below: sync_load(wrapping(window + wrapping(unit * I64{8})))
+        alloc_window_push(window, unit, class)
+        unit = below
+    }
+}
+
+// Moves the run stacks of TCB `from` to TCB `to`, emptying `from`; a class
+// `to` already keeps runs of goes on the shared stack instead.
+alloc_window_rows_move: fn(from: I64, to: I64) {
+    class := I64{0}
+    loop class < ALLOC_WINDOW_CLASSES {
+        at: wrapping(ALLOC_WINDOW_ROWS + wrapping(class * I64{8}))
+        kept: sync_load(wrapping(from + at))
+        if (kept != I64{0}) {
+            if {
+                sync_load(wrapping(to + at)) == (I64{0}) -> sync_store(wrapping(to + at), kept)
+                else -> alloc_window_shelve(kept, class)
+            }
+            sync_store(wrapping(from + at), I64{0})
+        }
+        class += I64{1}
+    }
+}
+
+// Puts every run the calling thread keeps on the shared stacks: thread
+// exit, before its TCB goes away. A thread without a TCB keeps none.
+alloc_window_rows_flush: fn() {
+    class := I64{0}
+    loop class < ALLOC_WINDOW_CLASSES {
+        row: alloc_window_row(class)
+        if (row == I64{0}) -> return
+        kept: sync_load(row)
+        if (kept != I64{0}) {
+            alloc_window_shelve(kept, class)
+            sync_store(row, I64{0})
+        }
+        class += I64{1}
+    }
+}
+
 // `bytes` (whole units) mapped on their own at a unit boundary: the slack
 // mapped for the alignment is unmapped again, `head` bytes before the base
 // and the rest after its units. 0 when the system refuses.
@@ -456,9 +548,9 @@ alloc_reservation_direct: fn(bytes: I64) -> I64 {
 }
 
 // Ends the `bytes` (whole units) of a region at `base`: a window run's pages
-// are dropped and the run goes back on its class's stack; a region mapped on
-// its own is unmapped. A run whose pages the system would not drop stays
-// out of the stacks.
+// are dropped and the run goes on its thread's own stack of its class, or
+// the shared one; a region mapped on its own is unmapped. A run whose pages
+// the system would not drop stays out of the stacks.
 alloc_reservation_unmap: fn(base: I64, bytes: I64) {
     if !alloc_window_holds(base) {
         alloc_unmap(base, bytes)
@@ -468,7 +560,9 @@ alloc_reservation_unmap: fn(base: I64, bytes: I64) {
     #Unsafe("the region has ended, so nothing reads or writes its pages; MADV_DONTNEED drops only its own units inside the window, which read as zero again") {
         if (os_syscall_i64(I64{28}, base, bytes, I64{4}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return
     }
-    alloc_window_push(window, wrapping(base - window) >> I64{16}, alloc_window_class(bytes))
+    unit: wrapping(base - window) >> I64{16}
+    class: alloc_window_class(bytes)
+    if !alloc_window_keep(window, unit, class) -> alloc_window_push(window, unit, class)
 }
 
 // The `core.mem.__region_reserve` route behind core.mem.Region.reserve:
@@ -1080,10 +1174,11 @@ alloc_cache_sync: fn(tcb: I64) {
 // fiber_run) takes the thread's cached blocks, as only the running TCB
 // touches them, unless the thread's rows are blocked: those stay, and the
 // fiber starts empty. Then the fiber's rows follow its own record. The
-// thread's kept large mappings go to the fiber either way (they are no
-// payload a user allocator could own).
+// thread's kept large mappings and window runs go to the fiber either way
+// (they are no payload a user allocator could own).
 alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
     alloc_large_rows_move(tcb, fiber_tcb)
+    alloc_window_rows_move(tcb, fiber_tcb)
     if alloc_cache_blocked(tcb) {
         alloc_cache_set(fiber_tcb, I64{0}, I64{0})
     } else {
@@ -1095,10 +1190,11 @@ alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
 // The fiber on `fiber_tcb` switched out to the thread on `tcb`: its cached
 // blocks go back to the thread, or to their slabs when the thread's rows
 // are blocked. A blocked fiber holds none, and the thread's rows are then as
-// alloc_cache_lend left them. Its kept large mappings always go back, so a
-// fiber that is not running holds none.
+// alloc_cache_lend left them. Its kept large mappings and window runs always
+// go back, so a fiber that is not running holds none.
 alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
     alloc_large_rows_move(fiber_tcb, tcb)
+    alloc_window_rows_move(fiber_tcb, tcb)
     if alloc_cache_blocked(fiber_tcb) -> return
     if !alloc_cache_blocked(tcb) {
         alloc_cache_move(fiber_tcb, tcb)
