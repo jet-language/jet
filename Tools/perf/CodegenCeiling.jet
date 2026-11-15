@@ -35,9 +35,13 @@
 // Compiler/JetRuntime lists `jet Tools/perf/CodegenCeiling.jet --check` in
 // its tests, and a gain lands with its `--update` (the orchestration skill's
 // intake reference).
+// `--zero-cost` checks the zero-cost pair instead (ZERO_COST below): the
+// kernel program's machine code against the direct program's at -O1 and
+// -O2.
 // Usage (from the repository root; needs objdump and nm):
 //   jet Tools/perf/CodegenCeiling.jet --check [--jet PATH]
 //   jet Tools/perf/CodegenCeiling.jet --update [--jet PATH]
+//   jet Tools/perf/CodegenCeiling.jet --zero-cost [--jet PATH]
 // The default compiler is Tools/agent/JetEnv.jet's `jet`.
 use {
     files: core.files
@@ -48,7 +52,7 @@ use {
 DIR: "Tools/perf/codegen-ceiling"
 GOLDEN: "Tools/perf/codegen-ceiling/golden.tsv"
 JET_ENV: "Tools/agent/JetEnv.jet"
-USAGE: "usage: jet Tools/perf/CodegenCeiling.jet --check|--update [--jet PATH]"
+USAGE: "usage: jet Tools/perf/CodegenCeiling.jet --check|--update|--zero-cost [--jet PATH]"
 HEADER: "symbol\tinsns\tpushes\tpops\tframe_slots\tloops\tloop_insns\tceiling_loop_insns"
 FIELDS: 8
 // The catalog's argument: big enough to run every loop, small enough to
@@ -564,13 +568,176 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
     0
 }
 
+// A function's name without the hashes the compiler adds to a specialized
+// one (`main_scan__value_3a05…` reads `main_scan__value`): two builds of the
+// same function hash differently when their programs differ.
+stem: fn(name: String) -> String Never! {
+    kept := [String]{}
+    loop segment in name.split("_") {
+        if segment.len() == 16 && hex(segment) >= 0 -> next
+        kept.push(segment.copy())
+    }
+    kept.join("_")
+}
+
+// A listing's instructions without what differs between two builds of the
+// same code: addresses, rip-relative displacements, comments and the hashes
+// in the names of jump and call targets.
+normal_listing: fn(listing: String) -> [String] Never! {
+    found := [String]{}
+    loop line in listing.split("\n") {
+        parts: line.split("\t").to_list()
+        if parts.len() < 2 || !parts[0].trim().ends_with(":") -> next
+        text: parts[1].split("#").to_list()
+        words: words_of(text[0])
+        kept := [String]{}
+        loop index in 0..<words.len() {
+            word: words[index]
+            if index + 1 < words.len() && words[index + 1].starts_with("<") -> next
+            if word.starts_with("<") {
+                // `<name+0x8>`: the hashes go, the offset stays.
+                pieces: word.removeprefix("<").removesuffix(">").split("+").to_list()
+                offset: if pieces.len() > 1 -> "+{pieces[1]}" else -> ""
+                kept.push("<{stem(pieces[0])}{offset}>")
+            } else if word.contains("(%rip)") {
+                kept.push("(%rip){word.split("(%rip)").to_list()[1]}")
+            } else {
+                kept.push(word.copy())
+            }
+        }
+        found.push(kept.join(" "))
+    }
+    found
+}
+
+// How many functions of each stem `nm` output holds.
+function_stems: fn(symbols: String) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop line in symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() != 3 || (words[1] != "t" && words[1] != "T") -> next
+        name: stem(words[2])
+        counts[name] = (counts.get(name) ?? 0) + 1
+    }
+    counts
+}
+
+// Each stem the kernel build keeps more functions of than the direct one:
+// a kernel method or a core.mem primitive that stayed a function of its own
+// (or code only the kernel's spelling brought in).
+kept_functions: fn(kernel: String, direct: String) -> [String] Never! {
+    theirs: function_stems(direct)
+    found := [String]{}
+    loop (name, count) in function_stems(kernel) {
+        extra: count - (theirs.get(name) ?? 0)
+        if extra > 0 -> found.push("{name} x{extra}")
+    }
+    found.sort()
+    found
+}
+
+// The zero-cost pair (`--zero-cost`): two programs that do the same memory
+// work: alloc, free, resize, raw reads and writes, copy, fill, compare,
+// atomics and mapping. zero-cost/kernel goes through a kernel package whose
+// owner types wrap the core.mem primitives in `#Inline(Always)` methods;
+// zero-cost/direct spells every operation in place, with the same checks.
+// At -O1 and at -O2 the gate builds both, runs each against
+// zero-cost/expected.out, and holds the kernel to the direct program:
+// - every function the kernel build keeps, the direct build keeps too. A
+//   kernel method or a core.mem primitive left as a function of its own did
+//   not inline (KEPT);
+// - each hot function's machine code is the direct one's (identical, once
+//   addresses and name hashes are set aside), or none of its counts is
+//   above the direct one's (LARGER otherwise).
+// Tools/perf/ZeroCostPair.jet runs this check, then times the pair.
+ZERO_COST: "Tools/perf/codegen-ceiling/zero-cost"
+ZERO_COST_ARMS: [String]{"kernel", "direct"}
+ZERO_COST_FILES: [[String]]{[String]{"package.jet", "kernel.jet", "main.jet"}, [String]{"main.jet"}}
+ZERO_COST_LEVELS: [String]{"-O1", "-O2"}
+ZERO_COST_HOT: [String]{"main_churn", "main_grow", "main_scan", "main_tally", "main_pages", "main_run"}
+
+// One arm built at one level: its binary and its `nm` output.
+ZeroCostBuild: struct {
+    binary: String
+    symbols: String
+}
+
+zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expected: String, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> ZeroCostBuild Err! {
+    name: ZERO_COST_ARMS[arm]
+    dir: "{run_dir}/{name}{level}"
+    files.create_dir_all(dir) ?? return Err("cannot create {dir}: {err}")
+    loop file in ZERO_COST_FILES[arm] {
+        source: files.read("{root}/{ZERO_COST}/{name}/{file}") ?? return Err("missing {ZERO_COST}/{name}/{file}: {err}")
+        files.write("{dir}/{file}", source) ?? return Err("cannot copy {name}/{file}: {err}")
+    }
+    build := jet.copy()
+    build.extend([String]{"build", "--release", level, "--debug-info=true", "main.jet"})
+    run_command(build, dir, scratch) ?? return Err("{name} {level} does not build: {err}")
+    binary: "{dir}/.jet/build/main"
+    output: run_command([String]{binary, "--n", CATALOG_N}, dir, scratch) ?? return Err("{name} {level} does not run: {err}")
+    if output != expected -> return Err("{name} {level} prints other output than {ZERO_COST}/expected.out:\n{output}")
+    symbols: run_command([String]{"nm", binary}, dir, scratch)
+    Ok(ZeroCostBuild{binary, symbols})
+}
+
+// A hot function of one build: its counts and its normalized instructions.
+ZeroCostFunction: struct {
+    counts: Counts
+    text: [String]
+}
+
+// A hot function of one build, as one: the function and every function
+// named after it (`main_scan__value_<hash>`, its parts), in `nm` order. A
+// build may keep a function both as itself and as the value the program
+// reads it as; the pair holds the two builds to the same sum.
+zero_cost_function: fn(build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
+    counts := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+    text := [String]{}
+    found := 0
+    loop line in build.symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() != 3 || (words[2] != symbol && !words[2].starts_with("{symbol}__")) -> next
+        listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={words[2]}", build.binary}, run_dir, scratch)
+        counts = add_counts(counts, count_listing(listing))
+        text.extend(normal_listing(listing))
+        found += 1
+    }
+    if found == 0 -> return Err("no function {symbol}")
+    Ok(ZeroCostFunction{counts, text})
+}
+
+zero_cost: fn(root: String, jet: [String], run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    expected: files.read("{root}/{ZERO_COST}/expected.out") ?? return fail("missing {ZERO_COST}/expected.out: {err}")
+    failures := 0
+    loop level in ZERO_COST_LEVELS {
+        kernel: zero_cost_build(root, jet, 0, level, expected, run_dir, scratch) ?? return fail("{err}")
+        direct: zero_cost_build(root, jet, 1, level, expected, run_dir, scratch) ?? return fail("{err}")
+        loop item in kept_functions(kernel.symbols, direct.symbols) {
+            term.eprint("KEPT {level} {item}")
+            failures += 1
+        }
+        loop symbol in ZERO_COST_HOT {
+            ours: zero_cost_function(kernel, symbol, run_dir, scratch) ?? return fail("kernel {level}: {err}")
+            theirs: zero_cost_function(direct, symbol, run_dir, scratch) ?? return fail("direct {level}: {err}")
+            worse: regressions(theirs.counts, ours.counts)
+            verdict: if ours.text == theirs.text -> "identical" else if worse.is_empty() -> "no larger" else -> "LARGER"
+            print("{level}\t{symbol}\tkernel {counts_line(ours.counts)}\tdirect {counts_line(theirs.counts)}\t{verdict}")
+            loop item in worse -> term.eprint("LARGER {level} {symbol}: {item}")
+            failures += worse.len()
+        }
+    }
+    if failures != 0 -> return fail("zero-cost: {failures} loss(es) of the kernel against the direct program")
+    print("codegen gate: zero-cost pass levels={ZERO_COST_LEVELS.len()} functions={ZERO_COST_HOT.len()}")
+    0
+}
+
 codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
     jet := [String]{}
     mode := ""
     index := 0
     loop index < args.len() {
-        if (args[index] == "--check" || args[index] == "--update") && mode == "" {
+        if (args[index] == "--check" || args[index] == "--update" || args[index] == "--zero-cost") && mode == "" {
             mode = args[index].copy()
             index += 1
             next
@@ -594,7 +761,7 @@ codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     files.create_dir_all(scratch) ?? return fail("cannot create {scratch}: {err}")
     made: run_command([String]{"mktemp", "-d", "{scratch}/codegen-ceiling.XXXXXX"}, root, scratch) ?? return fail("{err}")
     run_dir: made.trim()
-    code: gate(root, jet, update, run_dir, scratch)
+    code: if mode == "--zero-cost" -> zero_cost(root, jet, run_dir, scratch) else -> gate(root, jet, update, run_dir, scratch)
     files.rmtree(run_dir).drop("codegen gate run directory")
     code
 }
@@ -602,6 +769,25 @@ codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
 run: fn() {
     code: codegen_gate()
     if code != 0 -> process.exit(code)
+}
+
+#Test("a stem drops the hashes of a specialized name") {
+    assert_eq(stem("main_scan__value_3a05f1c2d4e5b6a7"), "main_scan__value")
+    assert_eq(stem("core_mem_from_addr__4802937694827900"), "core_mem_from_addr_")
+    assert_eq(stem("kernel_claim"), "kernel_claim")
+}
+
+#Test("two builds of the same code read the same once addresses and hashes are set aside") {
+    ours: "  401000:\tcall   40b630 <jet_ir_drop_9afa72ef4523a3b8>\n  401005:\tmov    0x256a0(%rip),%rax        # 426aa5 <x>\n  40100c:\tjne    401000 <main_k__value_3a05f1c2d4e5b6a7>\n"
+    theirs: "  402000:\tcall   40c000 <jet_ir_drop_0d69d289780faae2>\n  402005:\tmov    0x1000(%rip),%rax        # 403005 <y>\n  40200c:\tjne    402000 <main_k__value_4d91aa00bb11cc22>\n"
+    assert_eq(normal_listing(ours), normal_listing(theirs))
+    assert_eq(normal_listing(ours)[1], "mov (%rip),%rax")
+}
+
+#Test("a function only the kernel build keeps is reported with how many more it keeps") {
+    kernel: "000000000040b630 T kernel_claim\n000000000040b700 t jet_ir_drop_9afa72ef4523a3b8\n000000000040b800 t jet_ir_drop_0d69d289780faae2\n0000000000433980 D data_row\n"
+    direct: "000000000040c000 t jet_ir_drop_0d69d289780faae2\n"
+    assert_eq(kept_functions(kernel, direct), [String]{"jet_ir_drop x1", "kernel_claim x1"})
 }
 
 #Test("a listing counts saves, frame slots and its innermost loop") {
