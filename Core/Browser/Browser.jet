@@ -152,7 +152,7 @@ BrowserReceipt: struct {
 
 // The session's one WebSocket and its protocol state, shared by every copy of
 // a handle; the last copy closes the socket.
-__BrowserState: struct {
+priv BrowserState: struct {
     conn: WsConn
     next_id: Int
     closed: Bool
@@ -163,7 +163,7 @@ __BrowserState: struct {
     trace: [String]
     trace_bytes: Int
     events: [BrowserEvent]
-    engine: __BrowserEngine?
+    engine: BrowserEngine?
 
     // The last copy of a Browser that was never closed ends its session as
     // `close` does, best effort: it sends `session.end` and waits for its
@@ -193,7 +193,7 @@ __BrowserState: struct {
 // chromedriver and `session_url` is its WebDriver session; Chromium outlives
 // a killed chromedriver, so close deletes that session (which quits the
 // browser) before stopping the driver.
-__BrowserEngine: struct {
+priv BrowserEngine: struct {
     child: ProcessChild
     profile: String
     session_url: String
@@ -218,7 +218,7 @@ __BrowserScope: struct {
 }
 
 Browser: struct {
-    __state: Shared<__BrowserState>
+    __state: Shared<BrowserState>
 
     abilities: fn(self) -> BrowserAbilities Never! {
         guard: self.__state.guard_read()
@@ -803,7 +803,7 @@ BrowserTestFixture: struct {
     __page: BrowserPage
 }
 
-__BrowserServerState: struct {
+priv BrowserServerState: struct {
     child: ProcessChild?
     logs: String
 }
@@ -812,7 +812,7 @@ __BrowserServerState: struct {
 // listening at the configured URL.
 BrowserTestServer: struct {
     __url: String
-    __state: Shared<__BrowserServerState>
+    __state: Shared<BrowserServerState>
 
     url: fn(self) -> String Never! { self.__url }
 
@@ -902,7 +902,7 @@ launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser Browse
         files.remove_all(dir.path).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := __BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
+    held := BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
     port: launched_bidi_port(held, "{dir.path}/WebDriverBiDiServer.json", 60000)
     browser: connect_profile("ws://127.0.0.1:{port}/session", p, BrowserTimeout{milliseconds: 30000})
     browser_own_engine(browser, held)
@@ -922,7 +922,7 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
         files.remove_all(dir.path).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := __BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
+    held := BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
     port := 0
     loop line in held.child.stdout.lines() {
         pair: parse.split_once(line, "started successfully on port ")
@@ -958,7 +958,7 @@ priv connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout)
         .Ok(value) -> value
         .Err(error) -> return Err(browser_ws_error(error))
     }
-    Ok(Browser{__state: Shared{__BrowserState{
+    Ok(Browser{__state: Shared{BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: true, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
     }}})
@@ -967,7 +967,7 @@ priv connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout)
 // The BiDi port the engine records in its profile. A read can race the
 // engine's write, so an incomplete file retries; an engine that exits first
 // fails the launch.
-priv launched_bidi_port: fn(engine: __BrowserEngine, path: String, timeout_ms: Int) -[Exec, FS, Time, Time.Wait]> Int BrowserError! {
+priv launched_bidi_port: fn(engine: BrowserEngine, path: String, timeout_ms: Int) -[Exec, FS, Time, Time.Wait]> Int BrowserError! {
     started: time.instant()
     loop {
         if files.read(path) == .Ok(raw) {
@@ -993,7 +993,7 @@ connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Ne
         .Ok(value) -> value
         .Err(error) -> return Err(browser_ws_error(error))
     }
-    browser: Browser{__state: Shared{__BrowserState{
+    browser: Browser{__state: Shared{BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
     }}}
@@ -1086,7 +1086,7 @@ browser_mark_closed: fn(browser: Browser) Never! {
     guard.value.engine = None
 }
 
-priv browser_own_engine: fn(browser: Browser, engine: &&__BrowserEngine) Never! {
+priv browser_own_engine: fn(browser: Browser, engine: &&BrowserEngine) Never! {
     guard := browser.__state.guard_edit()
     guard.value.engine = Val(engine)
 }
@@ -1920,7 +1920,7 @@ server_start: fn(config: BrowserTestConfig) -[Exec, Net, Time, Time.Wait]> Brows
     if config.server_url.len() == 0 -> return Err(BrowserError{kind: "transport"})
     reusable := false
     if config.server_reuse && server_wait_ready(config.server_url, 100) == .Ok(_) -> reusable = true
-    server: BrowserTestServer{__url: config.server_url, __state: Shared{__BrowserServerState{child: None, logs: ""}}}
+    server: BrowserTestServer{__url: config.server_url, __state: Shared{BrowserServerState{child: None, logs: ""}}}
     if reusable -> return Ok(server)
     if config.server_command.len() > 0 {
         spec := process.cmd(config.server_command).stdout(.Capture).stderr(.Capture)

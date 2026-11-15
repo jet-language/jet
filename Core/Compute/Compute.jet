@@ -1215,15 +1215,15 @@ quoted: fn(names: [String]) -> String Never! {
 // an outer transform is recorded in turn and a gradient of a gradient
 // differentiates it again. The outermost transform clears the tape as it
 // returns, and what it returns is untracked.
-__ADNode: struct {
+priv ADNode: struct {
     op: String
     inputs: [Tensor]
     axis: Int
 }
 
-__ADTape: struct {
+priv ADTape: struct {
     depth: Int
-    nodes: [__ADNode]
+    nodes: [ADNode]
 }
 
 __ad_enter: fn() Never! {
@@ -1247,9 +1247,9 @@ __ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
     leaf := tensor.copy()
     tape := ad_tape().guard_edit()
     if tensor.node >= 0 {
-        tape.value.nodes.push(__ADNode{op: "identity", inputs: [Tensor]{tensor.copy()}, axis: 0})
+        tape.value.nodes.push(ADNode{op: "identity", inputs: [Tensor]{tensor.copy()}, axis: 0})
     } else {
-        tape.value.nodes.push(__ADNode{op: "leaf", inputs: [Tensor]{}, axis: 0})
+        tape.value.nodes.push(ADNode{op: "leaf", inputs: [Tensor]{}, axis: 0})
     }
     leaf.node = tape.value.nodes.len() - 1
     leaf
@@ -1303,14 +1303,14 @@ __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Ne
 // `autodiff` because the compiler resolves the initializer named in
 // core.mem.__process_shared at module scope and cannot name a function inside
 // a private module there.
-priv init_ad_tape: fn() -> Shared<__ADTape> Never! {
-    Shared{__ADTape{depth: 0, nodes: [__ADNode]{}}}
+priv init_ad_tape: fn() -> Shared<ADTape> Never! {
+    Shared{ADTape{depth: 0, nodes: [ADNode]{}}}
 }
 
 // The tape and the backward pass behind the __ad_* entry points: not part of
 // the compute surface.
 priv autodiff: module {
-    ad_tape: fn() -> Shared<__ADTape> Never! {
+    ad_tape: fn() -> Shared<ADTape> Never! {
         core.mem.__process_shared(init_ad_tape)
     }
 
@@ -1323,16 +1323,16 @@ priv autodiff: module {
     ad_record: fn(op: String, inputs: [Tensor], axis: Int) -> Int Never! {
         tape := ad_tape().guard_edit()
         if tape.value.depth == 0 -> return -1
-        tape.value.nodes.push(__ADNode{op: op, inputs: inputs, axis: axis})
+        tape.value.nodes.push(ADNode{op: op, inputs: inputs, axis: axis})
         tape.value.nodes.len() - 1
     }
 
     // The recorded nodes through `last`, copied out so the backward rules can
     // record onto the tape while they run.
-    ad_nodes: fn(last: Int) -> [__ADNode] Never! {
+    ad_nodes: fn(last: Int) -> [ADNode] Never! {
         tape: ad_tape().guard_read()
         if last >= tape.value.nodes.len() -> panic("compute.gradient: a tracked Tensor outlived its transform")
-        nodes := [__ADNode]{}
+        nodes := [ADNode]{}
         loop index in 0..<(last + 1) -> nodes.push(tape.value.nodes[index].copy())
         nodes
     }
@@ -1374,7 +1374,7 @@ priv autodiff: module {
     }
 
     // What adjoint `g` of `node`'s result contributes to its input `index`.
-    ad_rule: fn(node: __ADNode, index: Int, g: Tensor) -> Tensor ComputeError! {
+    ad_rule: fn(node: ADNode, index: Int, g: Tensor) -> Tensor ComputeError! {
         op: node.op
         a: node.inputs[0]
         if op == "identity" {
