@@ -36,41 +36,45 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2804</code>: <code>tests/ui/http_route_custom_method.stderr</code>.</p>
-<pre class="diag">Error [jet.AmbiguousRoute]: Two routes both match `PURGE /cache`.
-  --&gt; http_route_custom_method.jet:28:9
+<p>First UI snapshot mentioning <code>E2804</code>: <code>tests/ui/http_route_ambiguous_overlap.stderr</code>.</p>
+<pre class="diag">Error [jet.AmbiguousRoute]: Two routes both match `GET /jokes/:slug`.
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:22:9
     |
- 28 |     mux.custom(&quot;PURGE&quot;, &quot;/cache&quot;, handle)
-    |         ^^^^^^
-  --&gt; http_route_custom_method.jet:24:9
+ 22 |     app.get(&quot;/jokes/:slug&quot;, fn(slug: String) { Ok(server.response(200, &quot;joke {slug}&quot;)) })
+    |         ^^^
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:21:9
     |
- 24 |     mux.custom(&quot;PURGE&quot;, &quot;/cache&quot;, handle)
-    |         ^^^^^^ first registered here
+ 21 |     app.get(&quot;/jokes/:id&quot;, fn(id: Int) { Ok(server.response(200, &quot;joke {id}&quot;)) })
+    |         ^^^ first registered here
  Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
  Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
 More: jet-lang.dev/e/E2804
 
-Error [jet.AmbiguousRoute]: Two routes both match `PURGE /marked`.
-  --&gt; http_route_custom_method.jet:13:5
+Error [jet.AmbiguousRoute]: Two routes both match `GET /crew/:name`.
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:14:5
     |
- 13 |     #Server.Custom(&quot;PURGE&quot;, &quot;/marked&quot;)
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  --&gt; http_route_custom_method.jet:10:5
+ 14 |     #Server.Get(&quot;/crew/:name&quot;) member: fn(self, name: String) -&gt; HTTPResponse HTTPError! {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:25:9
     |
- 10 |     #Server.Custom(&quot;PURGE&quot;, &quot;/marked&quot;)
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ first registered here
+ 25 |     app.get(&quot;/crew/:id&quot;, fn(id: Int) { Ok(server.response(200, &quot;crew {id}&quot;)) })
+    |         ^^^ first registered here
  Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
  Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
 More: jet-lang.dev/e/E2804
 
-Error [jet.RouteMethodTokenRefused]: HTTPRouter custom route method must be a static String
-  --&gt; http_route_custom_method.jet:33:19
+Error [jet.AmbiguousRoute]: Two routes both match `GET /users/:login`.
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:30:12
     |
- 33 |     router.custom(names[0], &quot;/cache&quot;, handle)
-    |                   ^^^^^
- Why: Router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers
- Fix: Use a literal or compile-time String constant, or register the route on a `web.app()`
-More: jet-lang.dev/e/E2808
+ 30 |     router.get(&quot;/users/:login&quot;, fn(login: String) { Ok(server.response(200, &quot;user {login}&quot;)) })
+    |            ^^^
+  --&gt; tests/ui/http_route_ambiguous_overlap.jet:29:12
+    |
+ 29 |     router.get(&quot;/users/:id&quot;, fn(id: Int) { Ok(server.response(200, &quot;user {id}&quot;)) })
+    |            ^^^ first registered here
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
+More: jet-lang.dev/e/E2804
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
