@@ -518,11 +518,22 @@ run: fn() {
 ```
 
 `reflect.of(value)` is legal where value interpolation is legal. Its
-`type_name`, `path`, and `display` operations are always available; `fields()`
+`type_name`, `path`, and `display` operations are always available; `path`
+is the type's identity, the same text as `T.reflect().identity`. `fields()`
 is populated for a struct and is empty for a non-struct value. A struct
 field's `value()` lists that struct's own fields, so `.fields()[i].value()`
 walks a nested value level by level. A generic reflection value retains the
 substituted field type, as the same example shows for `Box<Int>`.
+
+A `Value` keeps the captured value typed, not only its display text:
+`int()`, `float()`, `bool()`, `char()` and `string()` return `Some` with the
+value when it is exactly an `Int` (a range-checked `Int(lo..hi)` included),
+`Float`, `Bool`, `Char` or `String`, and `None` for any other type. No read
+parses `display()`. A capture is complete or refused: `reflect.of(x)` retains
+every stored field of `x`, and a stored field that can't be reflected the way
+`x` itself is (one that does not show, or one bearing a secret) refuses the
+whole call with E0112 naming the field. `jet inspect expand --facts reflect`
+lists each call with the type and field tree it retains.
 
 `info.marker(T)` on a `TypeInfo`, `FieldInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker

@@ -5930,7 +5930,7 @@ jet inspect expand --facts inline --json <file.jet>
 ```
 
 The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
-`origin`, `derive`, `templates`, and `callable-signature`.
+`origin`, `reflect`, `derive`, `templates`, and `callable-signature`.
 
 - `inline` reports `#Inline` and `#Inline(Always)` contracts and their emitted
   Rust attributes.
@@ -5946,6 +5946,10 @@ The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
   the compiler has a physical layout; absent optional facts retain their reason.
 - `origin` reports typed `#Track` provenance from the checked `OriginInfo?`
   projection; it adds no runtime metadata channel.
+- `reflect` reports, for each checked `reflect.of(x)` call, the type identity
+  it retains and every stored field captured with it (name, type name and
+  identity, nested fields included), read from the checked call's own
+  arguments.
 - `derive` reports behavior already attached to checked types and spans.
 - `templates` reports checked `@loop` marker expansions, including `impl`,
   `#Test`, and `.measure` rows.

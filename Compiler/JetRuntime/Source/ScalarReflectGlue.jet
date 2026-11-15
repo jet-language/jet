@@ -138,11 +138,51 @@ reflect_sequence_drop: fn(sequence: I64) {
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_PATH), jet_rt_string_clone(path))
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_DISPLAY), jet_rt_string_clone(display))
     scalar_reflect_store(wrapping(result + REFLECT_VALUE_FIELDS), fields) // consumes List
+    scalar_reflect_store(wrapping(result + REFLECT_VALUE_KIND), REFLECT_SCALAR_NONE)
+    scalar_reflect_store(wrapping(result + REFLECT_VALUE_SCALAR), I64{0})
     result
 }
+// The typed scalar a Value keeps beside its display text: `kind` names the
+// word's type (REFLECT_SCALAR_*) and the Value owns the word, an exact Int
+// or a String through its own reference, any other kind by value.
+reflect_scalar_clone: fn(kind: I64, word: I64) -> I64 {
+    if kind == REFLECT_SCALAR_INT -> return jet_rt_int_clone(word)
+    if kind == REFLECT_SCALAR_STRING -> return jet_rt_string_clone(word)
+    word
+}
+reflect_scalar_drop: fn(kind: I64, word: I64) {
+    if kind == REFLECT_SCALAR_INT -> jet_rt_int_drop(word)
+    if kind == REFLECT_SCALAR_STRING -> jet_rt_string_drop(word)
+}
+reflect_scalar_hold: fn(value: I64, kind: I64, word: I64) {
+    scalar_reflect_store(wrapping(value + REFLECT_VALUE_KIND), kind)
+    scalar_reflect_store(wrapping(value + REFLECT_VALUE_SCALAR), reflect_scalar_clone(kind, word))
+}
+// Each hold lends its scalar and runs once, on a Value just made that holds
+// none yet.
+#Export(c) jet_rt_reflect_value_hold_int: fn(value: I64, int: I64) { reflect_scalar_hold(value, REFLECT_SCALAR_INT, int) }
+#Export(c) jet_rt_reflect_value_hold_float: fn(value: I64, float: Float) { reflect_scalar_hold(value, REFLECT_SCALAR_FLOAT, rt_f64_bits(float)) }
+#Export(c) jet_rt_reflect_value_hold_bool: fn(value: I64, flag: Bool) { reflect_scalar_hold(value, REFLECT_SCALAR_BOOL, if flag -> I64{1} else -> I64{0}) }
+#Export(c) jet_rt_reflect_value_hold_char: fn(value: I64, code: I64) { reflect_scalar_hold(value, REFLECT_SCALAR_CHAR, code) }
+#Export(c) jet_rt_reflect_value_hold_string: fn(value: I64, text: I64) { reflect_scalar_hold(value, REFLECT_SCALAR_STRING, text) }
+// `value.int()` and its siblings as Option route results: 1 and an owned
+// copy of the scalar through `some` when the Value keeps one of that kind,
+// else 0.
+reflect_scalar_read: fn(value: I64, kind: I64, some: I64) -> I64 {
+    if scalar_reflect_word(wrapping(value + REFLECT_VALUE_KIND)) != kind -> return I64{0}
+    scalar_reflect_store(some, reflect_scalar_clone(kind, scalar_reflect_word(wrapping(value + REFLECT_VALUE_SCALAR))))
+    I64{1}
+}
+#Export(c) jet_rt_reflect_value_int: fn(value: I64, some: I64) -> I64 { reflect_scalar_read(value, REFLECT_SCALAR_INT, some) }
+#Export(c) jet_rt_reflect_value_float: fn(value: I64, some: I64) -> I64 { reflect_scalar_read(value, REFLECT_SCALAR_FLOAT, some) }
+#Export(c) jet_rt_reflect_value_bool: fn(value: I64, some: I64) -> I64 { reflect_scalar_read(value, REFLECT_SCALAR_BOOL, some) }
+#Export(c) jet_rt_reflect_value_char: fn(value: I64, some: I64) -> I64 { reflect_scalar_read(value, REFLECT_SCALAR_CHAR, some) }
+#Export(c) jet_rt_reflect_value_string: fn(value: I64, some: I64) -> I64 { reflect_scalar_read(value, REFLECT_SCALAR_STRING, some) }
 #Export(c) jet_rt_handle_clone_jet_reflect_value: fn(value: I64) -> I64 {
     fields: reflect_sequence_clone(scalar_reflect_word(wrapping(value + REFLECT_VALUE_FIELDS)))
-    jet_rt_record_new_jet_reflect_value(scalar_reflect_word(wrapping(value + REFLECT_VALUE_TYPE)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_PATH)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)), fields)
+    result: jet_rt_record_new_jet_reflect_value(scalar_reflect_word(wrapping(value + REFLECT_VALUE_TYPE)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_PATH)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)), fields)
+    reflect_scalar_hold(result, scalar_reflect_word(wrapping(value + REFLECT_VALUE_KIND)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_SCALAR)))
+    result
 }
 #Export(c) jet_rt_handle_drop_jet_reflect_value: fn(value: I64) {
     if (value == I64{0}) -> return
@@ -150,6 +190,7 @@ reflect_sequence_drop: fn(sequence: I64) {
     jet_rt_string_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_PATH)))
     jet_rt_string_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_DISPLAY)))
     reflect_sequence_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_FIELDS)))
+    reflect_scalar_drop(scalar_reflect_word(wrapping(value + REFLECT_VALUE_KIND)), scalar_reflect_word(wrapping(value + REFLECT_VALUE_SCALAR)))
     jet_rt_free(value, REFLECT_VALUE_BYTES, I64{8})
 }
 #Export(c) jet_rt_record_get_jet_reflect_value_type_name: fn(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(wrapping(value + REFLECT_VALUE_TYPE))) }

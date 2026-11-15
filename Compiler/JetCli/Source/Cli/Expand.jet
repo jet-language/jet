@@ -36,6 +36,7 @@ JET_CLI_EXPAND_LENSES: [JetCLIExpandLensSpec]{
     {name: "effects", summary: "resolved function effect rows"},
     {name: "layout", summary: "compiler-owned type layout facts"},
     {name: "origin", summary: "typed #Track provenance facts"},
+    {name: "reflect", summary: "types and stored fields each reflect.of call retains"},
     {name: "derive", summary: "derived behavior already attached to types"},
     {name: "templates", summary: "checked #loop marker in impl, test, and measurement expansions"},
     {name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
@@ -451,7 +452,7 @@ jet_cli_expand_parse: fn(args: [String], json: Bool, color: Bool) -> JetCLIExpan
             argument == "--facts" -> {
                 index += 1
                 if index == args.len() {
-                    return jet_cli_expand_usage("E2104", "`--facts` needs a lens name", "the expand command must know which registered lens to project", "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`", json, color, true)
+                    return jet_cli_expand_usage("E2104", "`--facts` needs a lens name", "the expand command must know which registered lens to project", "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts reflect`, `--facts derive`, `--facts templates`, or `--facts callable-signature`", json, color, true)
                 }
                 selection = Val(args[index])
             }
@@ -467,7 +468,7 @@ jet_cli_expand_parse: fn(args: [String], json: Bool, color: Bool) -> JetCLIExpan
             if lens.name == name -> known = true
         }
         if !known {
-            return jet_cli_expand_usage("E2941", "unknown expand lens `{name}`", "only registered lenses have checked semantic facts", "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`", json, color, true)
+            return jet_cli_expand_usage("E2941", "unknown expand lens `{name}`", "only registered lenses have checked semantic facts", "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `reflect`, `derive`, `templates`, or `callable-signature`", json, color, true)
         }
     }
     JetCLIExpandParse.Ready{file: entry, selection: selection}

@@ -11,10 +11,10 @@ typedef struct { int64_t start,end,exclusive; } Range;
 typedef struct { int64_t seed,checked,failures; } Solver;
 typedef struct Field Field;
 typedef struct { int64_t length,capacity; Field **data; } List;
-typedef struct { Text *type_name,*path,*display; List *fields; } Value;
+typedef struct { Text *type_name,*path,*display; List *fields; int64_t kind,scalar; } Value;
 struct Field { Text *name; Value *value; };
 _Static_assert(sizeof(Range)==24 && sizeof(Solver)==24,"scalar ABI");
-_Static_assert(sizeof(Value)==32 && offsetof(Value,fields)==24 && sizeof(Field)==16 && sizeof(List)==24,"reflection ABI");
+_Static_assert(sizeof(Value)==48 && offsetof(Value,fields)==24 && offsetof(Value,kind)==32 && sizeof(Field)==16 && sizeof(List)==24,"reflection ABI");
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_init(void);
 extern void *jet_std_io_stdout(void);
@@ -63,6 +63,16 @@ extern void jet_rt_handle_drop_jet_reflect_field(Field *);
 extern Text *jet_rt_record_get_jet_reflect_field_name(Field *);
 extern Value *jet_rt_record_get_jet_reflect_field_value(Field *);
 extern Text *jet_rt_handle_show_jet_reflect_field(Field *);
+extern void jet_rt_reflect_value_hold_int(Value *,int64_t);
+extern void jet_rt_reflect_value_hold_float(Value *,double);
+extern void jet_rt_reflect_value_hold_bool(Value *,bool);
+extern void jet_rt_reflect_value_hold_char(Value *,int64_t);
+extern void jet_rt_reflect_value_hold_string(Value *,Text *);
+extern int64_t jet_rt_reflect_value_int(Value *,int64_t *);
+extern int64_t jet_rt_reflect_value_float(Value *,int64_t *);
+extern int64_t jet_rt_reflect_value_bool(Value *,int64_t *);
+extern int64_t jet_rt_reflect_value_char(Value *,int64_t *);
+extern int64_t jet_rt_reflect_value_string(Value *,int64_t *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[256];
 static size_t count;
 static unsigned intercepted;
@@ -134,7 +144,8 @@ static Field *field(const char *name,Value *v) {
 static void watch_value(Value *v);
 static void watch_field(Field *f) { watch(f,16,8); watch_text(f->name); watch_value(f->value); }
 static void watch_value(Value *v) {
-    watch(v,32,8); watch_text(v->type_name); watch_text(v->path); watch_text(v->display);
+    watch(v,48,8); watch_text(v->type_name); watch_text(v->path); watch_text(v->display);
+    if(v->kind==5) watch_text((Text *)v->scalar);
     List *l=v->fields; watch(l,24,8); if(l->capacity) watch(l->data,l->capacity*8,8);
     for(int64_t i=0;i<l->length;++i) watch_field(l->data[i]);
 }
@@ -171,6 +182,36 @@ static void reflections(void) {
     jet_rt_string_drop(tn); jet_rt_string_drop(p); jet_rt_string_drop(d); jet_rt_string_drop(name); done();
     jet_rt_handle_drop_jet_reflect_value(NULL); jet_rt_handle_drop_jet_reflect_field(NULL);
 }
+// A held scalar is the Value's own owner: a read hands out one more, a clone
+// shares it, and a read of another kind (or of a Value with none) is absent.
+static void scalars(void) {
+    int64_t out=0; double real=0;
+    Value *none=value("Unit","Unit","()",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    assert(none->kind==0 && !jet_rt_reflect_value_int(none,&out) && !jet_rt_reflect_value_float(none,&out) && !jet_rt_reflect_value_bool(none,&out) && !jet_rt_reflect_value_char(none,&out) && !jet_rt_reflect_value_string(none,&out));
+    int64_t lo=jet_int_owned_from_i64(INT64_MIN);
+    Value *whole=value("Int","Int","-9223372036854775808",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_hold_int(whole,lo); jet_rt_int_drop(lo);
+    assert(whole->kind==1 && !jet_rt_reflect_value_string(whole,&out) && jet_rt_reflect_value_int(whole,&out)==1); owned_int_is(out,INT64_MIN);
+    Value *twin=jet_rt_handle_clone_jet_reflect_value(whole);
+    assert(twin->kind==1 && jet_rt_reflect_value_int(twin,&out)==1); owned_int_is(out,INT64_MIN);
+    Value *fraction=value("Float","Float","2.5",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_hold_float(fraction,2.5);
+    assert(fraction->kind==2 && !jet_rt_reflect_value_int(fraction,&out) && jet_rt_reflect_value_float(fraction,&out)==1); memcpy(&real,&out,8); assert(real==2.5);
+    Value *flag=value("Bool","Bool","true",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_hold_bool(flag,true);
+    assert(flag->kind==3 && jet_rt_reflect_value_bool(flag,&out)==1 && out==1);
+    Value *letter=value("Char","Char","z",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_hold_char(letter,'z');
+    assert(letter->kind==4 && jet_rt_reflect_value_char(letter,&out)==1 && out=='z');
+    Text *s=text("hi"); Value *words=value("String","String","hi",jet_rt_record_seq_list_rec_jet_reflect_field_new(0));
+    jet_rt_reflect_value_hold_string(words,s); assert(owners(s)==2); jet_rt_string_drop(s); assert(owners(s)==1);
+    assert(words->kind==5 && jet_rt_reflect_value_string(words,&out)==1 && (Text *)out==s && owners(s)==2);
+    jet_rt_string_drop((Text *)out); assert(owners(s)==1);
+    Value *all[]={none,whole,twin,fraction,flag,letter,words};
+    for(size_t i=0;i<7;++i) watch_value(all[i]);
+    for(size_t i=0;i<7;++i) jet_rt_handle_drop_jet_reflect_value(all[i]);
+    done();
+}
 int main(int argc,char **argv) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
@@ -190,5 +231,5 @@ int main(int argc,char **argv) {
         }
         assert(!"stop mode returned"); return 1;
     }
-    ranges(); solvers(); reflections(); puts("ScalarReflect ownership/equality/render OK"); return 0;
+    ranges(); solvers(); reflections(); scalars(); puts("ScalarReflect ownership/equality/render OK"); return 0;
 }

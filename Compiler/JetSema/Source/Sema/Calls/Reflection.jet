@@ -28,38 +28,62 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
 // `reflect.of(x)` carries its checked names to the IR as text after the
 // value: the type name and canonical path (`module.Type`, the ledger
 // `T.reflect()` reads), then the value's stored struct fields as a preorder
-// tree (sema_call_reflection_field_args).
-sema_call_reflection_name_args: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [TExpr] {
+// tree (sema_call_reflection_field_args). None, with its E0112 reported at
+// `value_span`, when a stored field can't be captured: a capture holds every
+// field or refuses the value.
+sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TExpr]? {
     names: sema_call_reflection_type_names(ty, environment, program)
     args := [TExpr]{sema_call_reflection_text(names.type_name, span), sema_call_reflection_text(names.path, span)}
-    sema_call_reflection_field_args(ty, span, environment, program, scopes, [String]{}, args)
-    args
+    if !sema_call_reflection_field_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) -> return None
+    Val(args)
 }
 
 // One level of the field tree: the count of `ty`'s stored struct fields, then
 // each field's name, type name and path followed by its own level, so a
 // nested struct field reflects its fields too. A type already open on the
-// way down lists no fields again.
-sema_call_reflection_field_args: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, open: [String], args: &[TExpr]) {
+// way down lists no fields again. False after reporting the first stored
+// field whose type is unknown or can't be reflected the way the value itself
+// is (sema_call_reflection_validate_value).
+sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, open: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
-    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return
+    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return true
     path: sema_call_reflection_type_names(ty, environment, program).path
-    if sema_call_reflection_has_name(open, path) -> return
+    if sema_call_reflection_has_name(open, path) -> return true
     inner := [String]{path}
     loop name in open -> inner.push(name.copy())
     count := 0
     loop field in definition.fields {
         if field.computed != None -> next
-        field_ty: sema_shared_access_field_type(ty, field.name, environment, program, scopes) ?? next
+        field_ty: sema_shared_access_field_type(ty, field.name, environment, program, scopes) ?? {
+            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} can't be captured", "`reflect.of` captures every stored field of the value or refuses the value, and this field's type is unknown here", "pass one of the value's other fields instead"))
+            return false
+        }
+        if sema_call_reflection_secret_bearing(field_ty) {
+            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and this field would expose a cryptographic secret", "reflect the value's public fields instead"))
+            return false
+        }
+        if !sema_call_reflection_field_capturable(field_ty, environment, program) {
+            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and each field must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the field's type, or reflect the fields that show instead"))
+            return false
+        }
         field_names: sema_call_reflection_type_names(field_ty, environment, program)
         args.push(sema_call_reflection_text(field.name, span))
         args.push(sema_call_reflection_text(field_names.type_name, span))
         args.push(sema_call_reflection_text(field_names.path, span))
-        sema_call_reflection_field_args(field_ty, span, environment, program, scopes, inner, args)
+        if !sema_call_reflection_field_args(field_ty, span, value_span, environment, program, scopes, inner, args, diagnostics) -> return false
         count += 1
     }
     args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: count, width: None}, span)
+    true
+}
+
+// A stored field reflects under the gate the value itself passes: it shows
+// like `"{x}"` interpolation, or is a Unit.
+sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if sema_expression_displayable(ty, environment, program) -> return true
+    if ty == .Named(name) -> return sema_call_reflection_leaf_name(name) == "Unit"
+    false
 }
 
 // A nominal type reflects as its declared name and `module.Name` path (the
@@ -246,6 +270,13 @@ sema_call_reflection_method_return: fn(type_name: String, method: String, args: 
         if args.len() != 0 -> return None
         if method == "type_name" || method == "path" || method == "display" -> return Val(Type.String)
         if method == "fields" -> return Val(Type.List{element: Type.Named{name: "Field"}})
+        // A typed read of the captured value: Some when it is that exact
+        // scalar, None for any other type.
+        if method == "int" -> return Val(Type.Option{inner: Type.Int})
+        if method == "float" -> return Val(Type.Option{inner: Type.Float})
+        if method == "bool" -> return Val(Type.Option{inner: Type.Bool})
+        if method == "char" -> return Val(Type.Option{inner: Type.Char})
+        if method == "string" -> return Val(Type.Option{inner: Type.String})
     }
     if type_name == "Field" && args.len() == 0 {
         if method == "name" -> return Val(Type.String)
@@ -387,10 +418,10 @@ sema_call_try_reflection_metadata_method: fn(
 
 sema_call_reflection_handle_operation: fn(owner: String, method: String) -> THandleOp? {
     if owner == "Value" {
-        if method == "type_name" -> return Val(THandleOp.ReflectValueTypeName)
-        if method == "path" -> return Val(THandleOp.ReflectValuePath)
-        if method == "display" -> return Val(THandleOp.ReflectValueDisplay)
+        // A Value read names its runtime export by the method itself
+        // (`jet_jit_reflect_{method}`); `fields` builds a list instead.
         if method == "fields" -> return Val(THandleOp.ReflectValueFields)
+        if method == "type_name" || method == "path" || method == "display" || method == "int" || method == "float" || method == "bool" || method == "char" || method == "string" -> return Val(THandleOp.ReflectValueRead{method: "{method}"})
     }
     if owner == "Field" {
         if method == "name" -> return Val(THandleOp.ReflectFieldName)

@@ -878,7 +878,7 @@ sema_call_try_reflect_core_call: fn(record: CoreCallRecord, args: [CallArg], spa
     if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), environment, program, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     result: Type.Named{name: "Value"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    names: sema_call_reflection_name_args(checked.ty, span, environment, program, scopes)
+    names: sema_call_reflection_name_args(checked.ty, span, expr_span(args[0].expr), environment, program, scopes, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     values := [TExpr]{checked}
     values.extend(names)
     widen_to_vec: loop _ in values -> false

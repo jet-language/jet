@@ -2,8 +2,11 @@
 // reflection floor. Legal wherever `"{x}"` interpolation is (the `Renderable`
 // gate a trait-bounded variadic's `...Renderable` bound also uses):
 // `.type_name()` and `.path()` and `.display()` always work — `.display()` shows exactly
-// what `"{x}"` would; `.fields()` is populated for a struct receiver and
-// empty for anything else (primitives, enums, …).
+// what `"{x}"` would, and `.path()` is the identity `T.reflect()` reads;
+// `.fields()` is populated for a struct receiver and empty for anything
+// else (primitives, enums, …). `.int()`, `.float()`, `.bool()`, `.char()`
+// and `.string()` read the captured value itself, typed: `Some` when it is
+// exactly that scalar, `None` otherwise, never parsed from the display text.
 use reflect: core.reflect
 
 #UnitFamily(Length, dimension) { meter }
@@ -11,6 +14,8 @@ use reflect: core.reflect
 ATTRIBUTION: #run report.reflect().attribution
 
 UNIT_SCALE: #run Meter.reflect().unit_scale_provenance
+
+POINT_IDENTITY: #run Point.reflect().identity
 
 Summarize: struct {
     impl Marker {
@@ -68,7 +73,15 @@ run: fn() {
     print(v.type_name())
     print(v.path())
     print(v.display())
-    loop f in v.fields() -> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
+    print("identity={v.path() == POINT_IDENTITY}")
+    total := 0
+    loop f in v.fields() {
+        print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
+        read: f.value().int() ?? 0
+        total += read
+    }
+    whole: v.int() ?? -1
+    print("typed sum={total} whole={whole}")
     boxed: Box<Int>{value: 7}
     boxed_fields: reflect.of(boxed).fields()
     print("generic {boxed_fields[0].name()}:{boxed_fields[0].value().type_name()}")
@@ -76,4 +89,12 @@ run: fn() {
     print(n.type_name())
     print(n.display())
     print(n.fields().len())
+    count: n.int() ?? -1
+    text: n.string() ?? "none"
+    print("int={count} string={text}")
+    float: reflect.of(2.5).float() ?? 0.0
+    flag: reflect.of(true).bool() ?? false
+    letter: reflect.of('z').char() ?? '?'
+    word: reflect.of("jet").string() ?? ""
+    print("float={float} bool={flag} char={letter} text={word}")
 }

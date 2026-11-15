@@ -1,7 +1,7 @@
-// memory/layout/origin lenses: render only compiler-owned facts.
+// memory/layout/origin/reflect lenses: render only compiler-owned facts.
 use {
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, type_name]
+    jet_foundation.[BodyTree, TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, type_name]
     jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
     jet_semindex.[SemIndex]
 }
@@ -186,6 +186,91 @@ jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                     jet_cli_status_field("value", jet_cli_expand_checked_json(row.value)),
                 })
                 facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.reflect().origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
+            }
+        }
+    }
+    jet_cli_expand_sort_facts(facts)
+    facts
+}
+
+// The text of a `reflect.of` name argument: a literal String node.
+jet_cli_expand_reflect_text: fn(tree: BodyTree, id: Int) -> String Never! {
+    text := ""
+    if body_node(tree, id).kind == .StrLit(parts) {
+        loop part in parts {
+            if part == .Literal(piece) -> text = "{text}{piece}"
+        }
+    }
+    text
+}
+
+// One level of the field tree a checked `reflect.of` call retains, read from
+// its arguments at `at` as sema laid it out (sema_call_reflection_field_args):
+// a field count, then each field's name, type name and path followed by its
+// own level. The level as text and JSON, and the argument index after it.
+jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> (text: String, value: JetCLIStatusValue, next: Int) Never! {
+    count := 0
+    if at < args.len() {
+        if body_node(tree, args[at]).kind == .IntLit(value, _) -> count = value
+    }
+    next := at + 1
+    texts := [String]{}
+    values := [JetCLIStatusValue]{}
+    loop _ in 0..<count {
+        if next + 2 >= args.len() -> break
+        name: jet_cli_expand_reflect_text(tree, args[next])
+        path: jet_cli_expand_reflect_text(tree, args[next + 2])
+        nested: jet_cli_expand_reflect_level(tree, args, next + 3)
+        texts.push(if nested.text == "" -> "{name}: {path}" else -> "{name}: {path} {nested.text}")
+        values.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(name)),
+            jet_cli_status_field("type_name", jet_cli_status_text(jet_cli_expand_reflect_text(tree, args[next + 1]))),
+            jet_cli_status_field("path", jet_cli_status_text(path)),
+            jet_cli_status_field("fields", nested.value),
+        }))
+        next = nested.next
+    }
+    text: if texts.len() == 0 -> "" else -> "{{{texts.join(", ")}}}"
+    (text: text, value: jet_cli_status_array(values), next: next)
+}
+
+// Each checked `reflect.of(x)` call below `id`: the type it retains and every
+// stored field it captures with that type, one fact per call site.
+jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: Int, facts: &[JetCLIExpandFact]) Never! {
+    node: body_node(tree, id)
+    if node.kind == .CoreCall(record, args, span, _, _, _) {
+        if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 4 {
+            path: jet_cli_expand_reflect_text(tree, args[2])
+            known := false
+            loop fact in facts {
+                if fact.source == unit.path && fact.offset == span.start && fact.name == path -> known = true
+            }
+            if !known {
+                level: jet_cli_expand_reflect_level(tree, args, 3)
+                line: diagnostic_line_at(unit.source, span.start)
+                column: diagnostic_column_at(unit.source, span.start)
+                retained: if level.text == "" -> path else -> "{path} {level.text}"
+                value: jet_cli_status_object([JetCLIStatusField]{
+                    jet_cli_status_field("call", jet_cli_status_text("reflect.of")),
+                    jet_cli_status_field("type_name", jet_cli_status_text(jet_cli_expand_reflect_text(tree, args[1]))),
+                    jet_cli_status_field("path", jet_cli_status_text(path)),
+                    jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+                    jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
+                    jet_cli_status_field("fields", level.value),
+                })
+                facts.push(JetCLIExpandFact{source: unit.path, offset: span.start, name: path, text: "{unit.path}:{line}:{column}   reflect.of   retains {retained}", value: value})
+            }
+        }
+    }
+    body_each_expr_child(tree, node, fn(child: Int) { jet_cli_expand_reflect_expr(unit, tree, child, facts) })
+}
+
+jet_cli_expand_reflect: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+    facts := [JetCLIExpandFact]{}
+    loop unit in modules {
+        loop function in unit.functions {
+            loop statement in function.body {
+                body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { jet_cli_expand_reflect_expr(unit, function.tree, expression, facts) })
             }
         }
     }

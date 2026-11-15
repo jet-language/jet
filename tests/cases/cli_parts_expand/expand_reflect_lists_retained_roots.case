@@ -1,0 +1,17 @@
+# `--facts reflect` lists each checked reflect.of call with the type identity
+# and stored-field tree it retains, read from the checked call itself.
+step: jet inspect expand --facts reflect {root}/Examples/Metaprogramming/Reflection/ReflectValue.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "reflect — types and stored fields each reflect.of call retains"
+stdout: ~ "reflect.of   retains ReflectValue.Point {x: Int(0..10), y: Int, level: Int(0..10)}"
+stdout: ~ "reflect.of   retains ReflectValue.Box {value: Int}"
+stdout: ~ "reflect.of   retains Int"
+step: jet inspect expand --facts reflect --json {root}/Examples/Metaprogramming/Reflection/ReflectValue.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid
+stdout: ~ "\"selection\":\"reflect\""
+stdout: ~ "\"call\":\"reflect.of\""
+stdout: ~ "\"path\":\"ReflectValue.Point\""
+stdout: ~ "\"name\":\"level\""
