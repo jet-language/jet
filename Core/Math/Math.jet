@@ -16580,6 +16580,24 @@ __unit_conversion_rounded: fn<E>(value: Float, scale: String, offset: String, mo
     assert_eq(__decimal_from_float(0.5).magnitude, 5)
 }
 
+#Test("Huge-precision rounding compares the exact rational to its Float neighbors") {
+    zeros: "0".repeat(2000)
+    denominator: "1{zeros}0"
+    just_above: "1{zeros}1"
+    halfway_above: "1{zeros}5"
+    // TowardZero, Floor, Ceiling and NearestEven at 2000 digits, with -9.0
+    // standing for the unrepresentable failure.
+    numerators: [String]{just_above, "-{just_above}", halfway_above, "-{halfway_above}"}
+    loop numerator in numerators {
+        negative: numerator.starts_with("-")
+        expected: [Float]{if negative -> -1.0 else -> 1.0, if negative -> -9.0 else -> 1.0, if negative -> -1.0 else -> -9.0, if negative -> -1.0 else -> 1.0}
+        loop mode in 0..<4 {
+            result: __unit_conversion_rounded(1.0, "{numerator}/{denominator}", "0/1", mode, 2000, "negative digits", "unrepresentable") ?? -9.0
+            assert_eq(result, expected[mode])
+        }
+    }
+}
+
 __decimal_signed: fn(value: Decimal) -> Int Never! {
     if value.negative -> -value.magnitude else -> value.magnitude.copy()
 }

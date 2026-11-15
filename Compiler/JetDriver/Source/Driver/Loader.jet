@@ -3708,6 +3708,9 @@ JetDriverCoreDemandNames: struct {
     abs_name: Int
     pow_name: Int
     regex_name: Int
+    // A `Matrix<M, N>` shape type: `Matrix * Matrix` is the core.compute
+    // `matmul` source, so that module loads.
+    matrix_name: Int
     // The CoreSource method row names and, at the same index, the module of
     // each one's source helper.
     source_method_names: [Int]
@@ -3784,7 +3787,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
     context_fields := [Int]{}
     loop field in SEMA_CONTEXT_CORE_FIELDS -> context_fields.push(jet_driver_core_demand_name(tables, field))
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), send_name: jet_driver_core_demand_name(tables, "send"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), send_name: jet_driver_core_demand_name(tables, "send"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
 }
 
 // The words besides its name that demand a bare Core type's module: `url`
@@ -3861,6 +3864,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_receiver = true
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE && !demand.source_modules.contains("core.regex") -> demand.source_modules.push("core.regex")
+            if name == names.matrix_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LT && !demand.source_modules.contains("core.compute") -> demand.source_modules.push("core.compute")
             if index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE {
                 loop at in 0..<names.typed_heads.len() {
                     if names.typed_heads[at] != name -> next

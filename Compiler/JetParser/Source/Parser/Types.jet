@@ -651,16 +651,16 @@ parser_report_fn_type_zone: fn(state: &JetParserState, span: Span) {
 parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
     parser_bump(state)
     args := [Type]{}
+    // `Vec<N>` and `Matrix<M, N>` take shape measures in the declared-measure
+    // language: `Matrix<3, 4>` holds two shape literals, as compute_shape_type
+    // builds them, not the length measures of a `<N: Int>` number argument.
+    shaped: name == "Vec" || name == "Matrix" || name.ends_with(".Vec") || name.ends_with(".Matrix")
     if !parser_type_close_here(state) {
         loop {
-            if {
-                (name == "Vec" || name == "Matrix") && parser_current_kind(state) == TOKEN_IDENT -> {
-                    measure_token: parser_bump(state)
-                    args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
-                }
-                else -> {
-                    args.push(parser_parse_type_argument(state, depth + 1))
-                }
+            if shaped {
+                args.push(Type.Measure{measure: parser_parse_measure(state, "shape", depth + 1)})
+            } else {
+                args.push(parser_parse_type_argument(state, depth + 1))
             }
             if parser_type_close_here(state) -> break
             if parser_current_kind(state) != TOKEN_COMMA {

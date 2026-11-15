@@ -82,6 +82,7 @@ use {
         ast_comptime_value_type,
         ast_empty_call_arg_flags,
         compute_shape_dimensions,
+        compute_shape_type,
         core_module_export,
         core_source_owns_type,
         core_source_receiver_method,
@@ -2290,6 +2291,25 @@ sema_expr_unit_conversion_is_finite: fn(source: SemaRegistrationUnitFact, destin
     sema_expr_unit_ratio_is_finite(scale) && sema_expr_unit_ratio_is_finite(offset)
 }
 
+// The largest finite Float, (2^53 - 1) * 2^971, as an exact Int.
+sema_expr_unit_float_max: fn() -> Int Never! {
+    limit := 9007199254740991
+    loop _ in 0..<971 -> limit = limit * 2
+    limit
+}
+
+// An explicit conversion runs on its exact "numerator/denominator" scale and
+// offset (the Core exact and rounded helpers compare the exact rational), so
+// any digit count is representable there: it overflows only when the scale or
+// offset value itself lies outside Float's finite range. An implicit
+// conversion multiplies by each part as a Float (sema_expr_unit_conversion_is_finite).
+sema_expr_unit_conversion_value_is_finite: fn(source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact) -> Bool {
+    scale: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? return false
+    offset: sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? return false
+    limit: UnitRatio{numerator: sema_expr_unit_float_max(), denominator: 1}
+    sema_expr_unit_ratio_le(scale, limit) && sema_expr_unit_ratio_le(offset, limit)
+}
+
 sema_expr_unit_quantity_base_is_float: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Quantity(base, _) -> return base == Type.Float
@@ -3799,7 +3819,7 @@ sema_expr_try_explicit_unit_method: fn(receiver: Expr, method: String, method_sp
     rounded_allowed := false
     source_value := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, program, scopes, state, tail_store, context, diagnostics, rounded_allowed) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if rounded && !rounded_allowed -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_expr_unit_conversion_is_finite(source_fact, destination_fact) {
+    if !sema_expr_unit_conversion_value_is_finite(source_fact, destination_fact) {
         diagnostics.push(sema_error("E0127", conversion_span, "this unit conversion overflows its runtime representation", "the declared exact scale or offset is outside Float's finite range", "choose units with a finite conversion boundary"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -5898,6 +5918,19 @@ sema_expr_lint_zero_divisor: fn(op: BinOp, right: Expr, dividend: Type, divisor:
     diagnostics.push(sema_lint("L0532", span, "This `{spelling}` always divides by zero", "The divisor folds to 0 at compile time, so every run of this line stops with E3010 (divided by zero)", "Divide by a value that can't be zero, or check the divisor and handle zero before dividing"))
 }
 
+// `Matrix<M, K> * Matrix<K, N>` is the fallible `Matrix<M, N>` product (the
+// Core `matmul`), or None when a side holds no known two-sided Matrix shape
+// or the inner sides differ.
+sema_expr_matrix_product_type: fn(lhs: Type, rhs: Type) -> Type? Never! {
+    if lhs == .Apply(left_head, _) && rhs == .Apply(right_head, _) && left_head == "Matrix" && right_head == "Matrix" {
+        left_shape: compute_shape_dimensions(lhs) ?? return None
+        right_shape: compute_shape_dimensions(rhs) ?? return None
+        if left_shape[1] != right_shape[0] -> return None
+        return Val(Type.Result{ok: compute_shape_type("Matrix", [Int]{left_shape[0], right_shape[1]}), err: Type.Named{name: "ComputeError"}})
+    }
+    None
+}
+
 sema_expr_check_binary: fn(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if left == .Binary(_, _, _, _, _) {
         return sema_expr_check_binary_chain(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -6103,13 +6136,18 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     // (Rust `infer_binary`, E2512): `Matrix * Matrix`
-    // matches the left column measure against the right row measure.
+    // matches the left column measure against the right row measure, and the
+    // product is the Core `matmul`, shaped by the outer measures.
     if op == BinOp.Mul && lhs.ty == .Apply(left_head, _) && rhs.ty == .Apply(right_head, _) && left_head == "Matrix" && right_head == "Matrix" {
         left_shape: compute_shape_dimensions(lhs.ty) ?? [Int]{}
         right_shape: compute_shape_dimensions(rhs.ty) ?? [Int]{}
         if left_shape.len() == 2 && right_shape.len() == 2 && left_shape[1] != right_shape[0] {
             diagnostics.push(sema_error("E2512", span, "matrix multiplication needs equal inner sides, but these are {left_shape[1]} and {right_shape[0]}", "the left column measure must match the right row measure", "use `Matrix<{left_shape[0]}, {left_shape[1]}> * Matrix<{left_shape[1]}, {right_shape[1]}>`"))
             return None
+        }
+        if sema_expr_matrix_product_type(lhs.ty, rhs.ty) == .Val(product_type) {
+            product: sema_call_core_source("core.compute", "matmul", [TExpr]{lhs, rhs}, product_type, false, span, environment, program, diagnostics) ?? return None
+            return sema_expr_expected_owned(product, expected, environment, program, diagnostics)
         }
     }
     if (sema_expr_measurement_type(lhs.ty) || sema_expr_measurement_type(rhs.ty)) && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) {

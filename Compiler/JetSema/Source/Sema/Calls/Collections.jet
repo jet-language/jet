@@ -7,8 +7,10 @@ use jet_foundation.[
     CollectionResult,
     Diagnostic,
     Expr,
+    Measure,
     ParamZone,
     SemaCollectionMethodContract,
+    SemaCollectionOperation,
     Span,
     SymbolID,
     SymbolKind,
@@ -23,6 +25,8 @@ use jet_foundation.[
     collection_row_takes_argument,
     expr_span,
     jet_layout_one_bit_shift,
+    measure_kind,
+    measure_literal_value,
     sema_collection_is_map,
     sema_collection_method_argument_type,
     sema_collection_method_contract,
@@ -37,6 +41,19 @@ sema_call_collections_arity_error: fn(method: String, expected: SemaCollectionMe
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
 
+// A fixed list joined with a fixed list is fixed too, its length the sum of
+// theirs (the additive measure rule): `[T#2].concat([T#3])` is `[T#5]`. A
+// join of lengths that are not both literal stays a plain list.
+sema_call_collections_fixed_join: fn(operation: SemaCollectionOperation, receiver: Type, typed: [TExpr]) -> Type? Never! {
+    if typed.len() != 1 || operation != (SemaCollectionOperation.Builtin{operation: TBuiltinOp.ConcatList}) -> return None
+    if receiver == .FixedList(_, left) && typed[0].ty == .FixedList(_, right) {
+        kind: measure_kind(left)
+        if kind != measure_kind(right) -> return None
+        element: sema_collection_receiver_element(receiver) ?? return None
+        if measure_literal_value(left) == .Val(left_count) && measure_literal_value(right) == .Val(right_count) -> return Val(Type.FixedList{elem: element, len: Measure.Literal{kind: kind, value: left_count + right_count}})
+    }
+    None
+}
 
 // Rust builtin-method argument inference: every argument is inferred under its contract parameter
 // type, so leading-dot variants and anonymous records (`rows.push(.Ready)`, `map.add(key, {x:
@@ -359,12 +376,13 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     if callback_return == .Val(return_type) && !(is_map && method == "flat_map") && sema_call_collections_reject_callback_shape(method, return_type, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    result_type: sema_collection_method_result_type(contract, callback_return, seed) ?? {
+    listed_type: sema_collection_method_result_type(contract, callback_return, seed) ?? {
         diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     line: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
+    result_type: sema_call_collections_fixed_join(operation, receiver_value.ty, typed) ?? listed_type
     ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     // A bare name in a slot the row stores was taken by the ownership walk
