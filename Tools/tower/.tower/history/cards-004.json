@@ -99477,6 +99477,94 @@
       "completedAt": "2026-11-12T05:10:21.364Z",
       "questions": [],
       "retiredAt": "2026-11-15T05:11:51.990Z"
+    },
+    {
+      "id": "c0afjv0e",
+      "num": 6650,
+      "title": "JetLSP does not build, and no gate builds JetLSP and JetDevserver",
+      "body": "jet check of Compiler/JetLSP reports 567 problems (first: core.files.runtime.kernel_path_components is private to Core; Navigation.jet:12 imports jet_foundation.Syntax.[JET_KEYWORDS, JET_TYPES], which don't exist). Compiler/JetDevserver reports 480 (first: an unterminated multi-line text). Their Tests packages report 186 and 521. They are tool packages outside the compiler's members, so nothing builds them, and the editor and devserver surfaces have rotted since the syntax and Core cutovers. Found by $JET_SCRATCH_ROOT/lanes/Main/pkgrerun.sh (a0_031, dev e4756389a9).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "ScriptLead-6 (inbox, queued for b7): Compiler/JetLSP is rewritten in Jet without jet_devserver, with new Tests/LSP, and the JetLSP and JetLSP/Tests known-failing rows are removed. On the b6d compiler, `jet test Compiler/JetLSP/Tests` gives 39 passed, 0 failed. The remaining #6650/#6582 rows are all JetDevserver, which waits on the owner ruling on D-EDITOR-DEV-PORT1."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "c59 (#6096) needs these package rows. LangLead estimate: JetDevserver 29.9k lines of Rust-shaped Jet (std.sync/net/io, unwrap, and all 278 retired `?` lines of #6582), 30-40 agent-hours plus the Core socket/thread gaps it will hit; JetLSP 18.7k lines, 12-20 agent-hours once it drops jet_devserver (move the 5 EDITOR_* constants). Plan: ScriptLead2 ports JetLSP after ScriptLead-4; LangLead takes JetDevserver after the core rows, the dogfood gate and #3590. A ballot (port both / port LSP and hold devserver out of the packages suite / hold both out until their commands are built) is being drafted for the owner. Nothing is excluded until the owner rules."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Back to G5. CoreCliLead-2 measured it: JetLSP and JetDevserver are about 35k lines of Rust transliterated into Jet that have never compiled. Devserver uses std.sync/std.net/std.io, unwrap, format and tuple patterns. JetLSP depends on JetDevserver: about 480 of its 565 problems are Devserver's and about 85 its own, before sema. Getting either to 0 problems is a port of several days. Until then the full profile keeps running both packages and their Tests, which report KNOWN-FAILING via known-failing.tsv lines naming this card (not excluded). Next steps: (b) port JetLSP against current Core and drop its jet_devserver dependency by moving the 5 EDITOR_* constants into JetLSP; (c) the full Devserver port."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Moved to G1: Compiler/package.jet's full profile runs the packages suite (every package's #Tests under Compiler/ and Jetpack/, tool packages included), so #6096 c65 (fresh clone, --profile full) cannot pass while JetLSP (565 problems), JetLSP/Tests (186), JetDevserver (479) and JetDevserver/Tests (520) do not compile (pkgrerun at dev afcf83c099, seed a0_032). Owner: CoreCliLead-2."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check Compiler/JetLSP reports 0 problems and jet test Compiler/JetLSP/Tests passes, with no #Unsafe block or known-failing row added to reach it. (The JetDevserver half is #5931, the row 'was #6582 c1'.)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5e on dev d0eba66902 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:5x: jet check Compiler/JetLSP printed has no problems; jet test Compiler/JetLSP/Tests gave 39 passed, 0 failed, 0 skipped; git grep for #Unsafe in Compiler/JetLSP finds nothing, and tests/known-failing.tsv has no Compiler/JetLSP row. The line exited 0.",
+          "at": "2026-11-12T04:49:54.729Z"
+        },
+        {
+          "n": 2,
+          "text": "A gate builds both packages (a guard or the full profile), so they can't rot again unnoticed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 proof on seed-b10 (jet@a0.0.45#c089d4d3), dev 76b2ff8ba2, 2026-11-12 00:3x. G5DevX-devserver-kf-owner landed as 76b2ff8ba2: it moves the three JetDevserver known-failing rows to #5931, which owns that half (c1). The gate is the packages suite of jet test Compiler --profile full, which runs jet test on every tool package in Compiler/test.jet PACKAGE_TREES. jet test Compiler --profile packages --filter Compiler/JetLSP: 39 rows, 39 passed, 0 failed (rc 0). jet test Compiler --profile packages --filter Compiler/JetDevserver: 3 rows, 1 passed, 2 failed (rc 0). The 2 failures are exactly the known-failing rows Compiler/JetDevserver and Compiler/JetDevserver/Tests, now owned by #5931, so the gate builds both packages and any new failure in either is reported.",
+          "at": "2026-11-12T05:31:37.186Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:21:20.878Z",
+      "updated": "2026-11-12T05:31:39.186Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-12T05:31:39.186Z",
+      "questions": [
+        {
+          "id": "q0q808b4",
+          "cardId": "c0afjv0e",
+          "decisionId": "D-EDITOR-DEV-PORT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Why is jet dev not already built? That should be done.",
+          "status": "answered",
+          "answer": "It should have been done, and the miss is mine: I never put a lead on it. Compiler/JetDevserver is about 30k lines of Rust rewritten line by line into Jet syntax that has never compiled, so 'jet dev' reports that it is not built. JetLSP has since been rewritten in Jet without it (ScriptLead-6, queued for the next batch). Now: LangLead builds 'jet dev' on current Core (core.net, core.tasks and the Core/Web serving path) as soon as its CFree submissions are in, deleting the Rust-shaped package rather than porting it. That is option B in substance, with nothing skipped from the full profile. Please ratify B so the ballot record matches.",
+          "created": "2026-11-09T07:44:22.220Z",
+          "answeredAt": "2026-11-09",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-15T05:31:40.838Z"
     }
   ]
 }
