@@ -2484,9 +2484,10 @@ sema_effect_record_memory_open: fn(nodes: &[SemaEffectNode], node_index: Int, sp
     nodes[node_index].memory_opens.push(SemaMemoryOpen{span: span, source: source, reason: reason})
 }
 
-// Indices store positions, not copied semantic facts. Caller buckets retain
-// source order, including equal-width interval ties; exact duplicates use the
-// first row just as the original search did. One index serves every module;
+// Indices store positions, not copied semantic facts. Caller buckets order
+// their positions by span start and then source order, and equal-width
+// interval ties and exact duplicates resolve to the first fact in source
+// order, just as the original search did. One index serves every module;
 // each walk names its module in its caller (SemaEffectCaller), so walks of
 // different modules read the one index at once.
 SemaEffectCallIndex: struct {
@@ -2568,40 +2569,52 @@ SemaEffectCaller: struct {
     slot: Int
 }
 
+// A module's call facts by caller. Caller `slot`'s facts are
+// `positions[sema_effect_caller_from(calls, slot)..<caller_ends[slot]]`,
+// ordered by span start and then source order, so its facts of one start are
+// a run found by a binary search.
 SemaEffectModuleCalls: struct {
     facts: [SemaCallSiteFact]
     caller_slots: [String:Int]
-    callers: [SemaEffectCallerFacts]
-}
-
-// One caller's facts: every position in source order, and the positions of
-// each span start (`starts` maps a start to its row in `exact`).
-SemaEffectCallerFacts: struct {
+    caller_ends: [Int]
     positions: [Int]
-    starts: [Int:Int]
-    exact: [[Int]]
 }
 
 sema_effect_module_calls: fn(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls Never! {
     // copy: the index outlives the borrowed module row it is built from.
-    calls := SemaEffectModuleCalls{facts: facts.copy(), caller_slots: [String:Int]{}, callers: [SemaEffectCallerFacts]{}}
+    calls := SemaEffectModuleCalls{facts: facts.copy(), caller_slots: [String:Int]{}, caller_ends: [Int]{}, positions: [Int]{}}
+    slots := [Int]{}
     loop (position, fact) in facts {
         slot := calls.caller_slots.get(fact.caller_key) ?? -1
         if slot < 0 {
-            slot = calls.callers.len()
+            slot = calls.caller_ends.len()
             calls.caller_slots[fact.caller_key] = slot
-            calls.callers.push(SemaEffectCallerFacts{positions: [Int]{}, starts: [Int:Int]{}, exact: [[Int]]{}})
+            calls.caller_ends.push(0)
         }
-        calls.callers[slot].positions.push(position)
-        row := calls.callers[slot].starts.get(fact.span.start) ?? -1
-        if row < 0 {
-            row = calls.callers[slot].exact.len()
-            calls.callers[slot].starts[fact.span.start] = row
-            calls.callers[slot].exact.push([Int]{})
-        }
-        calls.callers[slot].exact[row].push(position)
+        calls.caller_ends[slot] = calls.caller_ends[slot] + 1
+        slots.push(slot)
+        calls.positions.push(position)
     }
+    loop slot in 1..<calls.caller_ends.len() -> calls.caller_ends[slot] = calls.caller_ends[slot] + calls.caller_ends[slot - 1]
+    calls.positions.sort_by(fn(left: Int, right: Int) { (slots[left] <=> slots[right]).then(facts[left].span.start <=> facts[right].span.start).then(left <=> right) })
     calls
+}
+
+// Where caller `slot`'s facts start in `positions`.
+sema_effect_caller_from: fn(calls: SemaEffectModuleCalls, slot: Int) -> Int Never! {
+    if slot == 0 -> 0 else -> calls.caller_ends[slot - 1]
+}
+
+// Where caller `slot`'s first fact starting at or after `start` is in
+// `positions`.
+sema_effect_caller_start_at: fn(calls: SemaEffectModuleCalls, slot: Int, start: Int) -> Int Never! {
+    low := sema_effect_caller_from(calls, slot)
+    high := calls.caller_ends[slot]
+    loop low < high {
+        middle: (low + high) /% 2
+        if calls.facts[calls.positions[middle]].span.start < start -> low = middle + 1 else -> high = middle
+    }
+    low
 }
 
 // The caller `key` of module `module`; its slot is -1 when it owns no facts
@@ -2614,39 +2627,41 @@ sema_effect_caller_slot: fn(index: SemaEffectCallIndex, module_index: Int, key: 
 }
 
 // The position, in the caller's module facts, of the narrowest fact of the
-// caller whose span contains or is contained by `span`; the caller reads the
-// fact in place (sema_effect_fact_at).
+// caller whose span contains or is contained by `span` (the first in source
+// order of equal widths); the caller reads the fact in place
+// (sema_effect_fact_at).
 sema_effect_find_fact: fn(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
     if caller.slot < 0 -> return None
     calls: index.modules[caller.module_index]
-    exact: sema_effect_exact_position(calls.callers[caller.slot], calls.facts, span)
+    exact: sema_effect_exact_position(calls, caller.slot, span)
     if exact != None -> return exact
-    best := Int?{None}
+    best := -1
     best_width := 2147483647
-    loop position in calls.callers[caller.slot].positions {
+    loop at in sema_effect_caller_from(calls, caller.slot)..<calls.caller_ends[caller.slot] {
+        position: calls.positions[at]
         fact_span: calls.facts[position].span
         if sema_effect_span_contains(fact_span, span) || sema_effect_span_contains(span, fact_span) {
             width: fact_span.end - fact_span.start
-            if width < best_width {
+            if width < best_width || (width == best_width && position < best) {
                 best_width = width
-                best = Val(position)
+                best = position
             }
         }
     }
-    best
+    if best < 0 -> None else -> Val(best)
 }
 
 sema_effect_find_exact_fact: fn(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
     if caller.slot < 0 -> return None
-    calls: index.modules[caller.module_index]
-    sema_effect_exact_position(calls.callers[caller.slot], calls.facts, span)
+    sema_effect_exact_position(index.modules[caller.module_index], caller.slot, span)
 }
 
-// The first of the caller's facts whose span is exactly `span`.
-sema_effect_exact_position: fn(caller: SemaEffectCallerFacts, facts: [SemaCallSiteFact], span: Span) -> Int? Never! {
-    row: caller.starts.get(span.start) ?? return None
-    loop position in caller.exact[row] {
-        if facts[position].span.end == span.end -> return Val(position)
+// The first of caller `slot`'s facts whose span is exactly `span`.
+sema_effect_exact_position: fn(calls: SemaEffectModuleCalls, slot: Int, span: Span) -> Int? Never! {
+    at := sema_effect_caller_start_at(calls, slot, span.start)
+    loop at < calls.caller_ends[slot] && calls.facts[calls.positions[at]].span.start == span.start {
+        if calls.facts[calls.positions[at]].span.end == span.end -> return Val(calls.positions[at])
+        at += 1
     }
     None
 }
@@ -2657,8 +2672,10 @@ sema_effect_exact_position: fn(caller: SemaEffectCallerFacts, facts: [SemaCallSi
 sema_effect_clock_intrinsic_position: fn(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
     if caller.slot < 0 -> return None
     calls: index.modules[caller.module_index]
-    row: calls.callers[caller.slot].starts.get(span.start) ?? return None
-    loop position in calls.callers[caller.slot].exact[row] {
+    at := sema_effect_caller_start_at(calls, caller.slot, span.start)
+    loop at < calls.caller_ends[caller.slot] && calls.facts[calls.positions[at]].span.start == span.start {
+        position: calls.positions[at]
+        at += 1
         fact: calls.facts[position]
         if fact.span.end != span.end || fact.callee != None -> next
         if fact.intrinsic_api == .Val(api) && api.starts_with("Clock.") -> return Val(position)
