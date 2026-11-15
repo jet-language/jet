@@ -2087,22 +2087,18 @@ jet_driver_comptime_lost_graph: fn(values: [SemaComptimeItemValue], functions: [
 }
 
 // The check sema_comptime_precheck_items made of an item ahead of its pass,
-// while `values` held `from` values and `typed_from` constants had their
-// types ahead of their values, if it is the check the run would make now: no
-// value has landed since whose key is one of its dependencies (a check reads
-// only the constants it references, and each referenced constant without a
-// value then is a dependency), and no dependency's type has landed since,
-// which leaves it one the batch computes (jet_driver_comptime_type_land).
-// Taken once: the caller moves its precheck in and leaves it None, so a
-// retried item checks again.
-jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int, batch: JetDriverComptimeBatch, typed_from: Int, typed: Int) -> SemaComptimeItemCheck? {
+// while `typed_from` constants had their types ahead of their values, if it
+// is the check the run would make now: none of its dependencies has a value
+// in `available`, which counts every value landed so far (a check reads only
+// the constants it references, and each referenced constant without a value
+// then is a dependency, so one with a value now landed since), and no
+// dependency's type has landed since, which leaves it one the batch computes
+// (jet_driver_comptime_type_land). Taken once: the caller moves its precheck
+// in and leaves it None, so a retried item checks again.
+jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, available: SemaComptimeAvailableConstants, batch: JetDriverComptimeBatch, typed_from: Int) -> SemaComptimeItemCheck? {
     check := precheck.move() ?? return None
-    loop index in from..<values.len() {
-        loop dependency in check.dependencies {
-            if values[index].key == dependency -> return None
-        }
-    }
-    if typed > typed_from {
+    if jet_driver_comptime_any_available(available, check.dependencies) -> return None
+    if available.typed > typed_from {
         loop dependency in check.dependencies {
             if batch.keys.get(dependency) ?? false -> return None
         }
@@ -3144,7 +3140,6 @@ jet_driver_comptime_run: fn(
         prefetched: jet_driver_comptime_prefetch(environments, programs, available, run_index, memory_plan, values, prechecks, request.compiler_threads)
         jet_driver_trace_step_end(request.trace_sink, "comptime.prefetch", prefetched)
         prechecks.reverse()
-        prechecked_values: values.len()
         prechecked_typed: available.typed
         loop source in pending {
             precheck := prechecks.pop() ?? SemaComptimeItemCheck?{None}
@@ -3179,7 +3174,7 @@ jet_driver_comptime_run: fn(
                 if request.trace_sink == .Val(sink) {
                     sink.begin_item("comptime.check", source.source_file, source.name)
                 }
-                checked_item := jet_driver_comptime_prechecked(precheck, values, prechecked_values, batch, prechecked_typed, available.typed) ?? sema_check_comptime_item(environments[0], programs[0], probe, available, source)
+                checked_item := jet_driver_comptime_prechecked(precheck, available, batch, prechecked_typed) ?? sema_check_comptime_item(environments[0], programs[0], probe, available, source)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
