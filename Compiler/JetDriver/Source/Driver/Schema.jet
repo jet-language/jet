@@ -24,12 +24,8 @@ JetDriverSchemaIngress: enum {
     Supplied(snapshots: [String:SchemaSnapshot])
     Cache(root: String, reads: [JetDriverSchemaRead])
 }
-// `registration` is an Option so its caller can move the graph out and leave
-// None behind. `x.f.move()` of a struct member that holds a Map, as the graph
-// does, copies a share of it, and that share would keep the graph's old
-// version alive until the result drops.
 JetDriverSchemaCheckResult: struct {
-    registration: SemaRegistrationGraph?
+    registration: SemaRegistrationGraph
     diagnostics: [Diagnostic]
     ingress: JetDriverSchemaIngress?
 }
@@ -136,7 +132,7 @@ jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registr
     if request.schema_snapshots == .Val(snapshots) {
         ingress: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
         checked_schema := sema_check_schema_migration_graph(registration, checked, snapshots)
-        return JetDriverSchemaCheckResult{registration: Val(checked_schema.registration.move()), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
+        return JetDriverSchemaCheckResult{registration: checked_schema.registration.move(), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
     }
     root: jet_driver_entry_root_path(request.authorized_sources)
     snapshots := [String:SchemaSnapshot]{}
@@ -155,5 +151,5 @@ jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registr
     }
     ingress: if retain_inputs -> Val(JetDriverSchemaIngress.Cache{root: root, reads: reads}) else -> None
     checked_schema := sema_check_schema_migration_graph(registration, checked, snapshots)
-    JetDriverSchemaCheckResult{registration: Val(checked_schema.registration.move()), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
+    JetDriverSchemaCheckResult{registration: checked_schema.registration.move(), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
 }

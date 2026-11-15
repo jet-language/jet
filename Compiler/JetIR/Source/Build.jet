@@ -2337,14 +2337,17 @@ ir_owned_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, nam
 }
 
 // Whether a value of type row `row` zeroed in place holds nothing its drop
-// ends: a null handle, box, trait value, Shared or String, an inline Int, a
-// counted buffer of capacity 0, or a tuple or struct of those. A Shared's drop
-// (jet_rt_native_shared_drop) skips a null cell.
+// ends: a null handle, box, trait value, Shared, function value or String, an
+// inline Int or a word that drops as one (an `Int?`), a counted buffer of
+// capacity 0, or a tuple or struct of those. A Shared's drop
+// (jet_rt_native_shared_drop) skips a null cell, and a function value's
+// (jet_ir_closure_drop) a null box.
 ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     kind: m.types[row].kind
-    if m.types[row].drop == "" || kind == .Int || kind == .String -> return true
+    if m.types[row].drop == "" || kind == .Int || kind == .String || m.types[row].drop == "jet_rt_int_drop" -> return true
     if kind == .Pointer {
         return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop"
+            || m.types[row].clone == ir_closure_share()
     }
     if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
     if ir_counted_entry(m, p, row) != None -> return true
