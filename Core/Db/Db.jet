@@ -136,17 +136,20 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 }
 
 // A database operation's failure. `Failed` carries the engine's or the API's
-// message; `Exists` is `Table.add` finding a row that holds the key already.
+// message; `Exists` is `Table.add` finding a row that holds the key already;
+// `Denied` is a table's row policy refusing a write.
 #[Error, Equatable]
 DBError: enum {
     Failed(String)
     Exists
+    Denied
 
     // The failure in one line.
     message: fn(self) -> String {
         if self == {
             .Failed(text) -> text.copy()
             .Exists -> "a row with that key exists"
+            .Denied -> "the table's row policy refused this write"
         }
     }
 
@@ -747,9 +750,10 @@ Store: struct {
     begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
     // The typed table `name`: rows of type `T`, each found by the key that
-    // the pure function `key` computes from it.
+    // the pure function `key` computes from it. It has no row policy and
+    // acts for `Who.System` until `guard` and `acting` say otherwise.
     table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move()}
+        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), policy: None, who: Who.System}
     }
 
     // One line: where the database lives and whether it is still open.
@@ -825,34 +829,105 @@ DBTransaction: struct {
 TABLE_ROW_COLUMN: "jet_row"
 TABLE_KEY_COLUMN: "key"
 
+// The operation a table's row policy judges.
+#Equatable
+Op: enum {
+    Read
+    Insert
+    Update
+    Delete
+}
+
+// Whom a table acts for: an account, by its id, or the system, whose rights
+// are the server's own (jobs, schedules, and a row policy's own reads). No
+// row policy limits `System`; a table acting for it skips its policy.
+#Equatable
+Who: enum {
+    Account(String)
+    System
+}
+
 // A typed table, from `store.table(name, key:)`. Each field of the key is a
 // key column (a key that is not a record is the one column `key`) and those
 // columns are the primary key; the column `jet_row` holds the encoded row.
 // The first write creates the table, and until then it reads as empty. Reads
 // carry DB.Read and join a running live binding's read set; writes carry
 // DB.Write and re-run the bindings that read the table (DBState.wrote).
+//
+// A table with a row policy (`guard`) asks it about every read and write, as
+// the caller `who` (`acting`), unless it acts for the system: a read on the
+// stored row, an add on the new row, a delete on the stored row, and a put
+// that replaces a row on the stored row and on the new one, both of which
+// must pass (a put of a new key is an insert). A row the policy refuses to
+// read is never returned, and a refused write is `Denied`. The policy reads
+// through a store on the same connection that acts for the system, so it
+// sees the transaction's earlier writes; it runs before the write it judges,
+// which it therefore cannot see.
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv state: Shared<DBState>
     priv name: String
     priv key_of: fn(T) -[]> K
+    priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?
+    priv who: Who
 
-    // The row whose key is `key`, or None.
+    // This table judged by the row policy `policy`, in place of any it had.
+    guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move()), who: self.who.copy()}
+    }
+    // This table acting for `who`: its row policy judges each call as `who`'s.
+    acting: fn(self, who: Who) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: self.policy, who: who.copy()}
+    }
+    // The row whose key is `key`, or None, also when the policy refuses to
+    // let the caller read it.
     get: fn(self, key: K) -[DB.Read]> T? DBError! {
         cells: table_cells(self.name, key.encode()) ?? return Err(err)
-        guard := self.state.guard_edit()
-        if driver_closed(guard.value.driver) -> return Err(db_closed())
-        rows: table_read(guard.value.driver, self.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
-        if rows.len() == 0 -> return Ok(None)
-        row: table_decode<T>(rows[0]) ?? return Err(err)
-        Ok(Val(row))
+        if table_stored<K, T>(self, cells) == {
+            .Val(row) -> {
+                allowed: table_allows<K, T>(self, row.copy(), Op.Read) ?? return Err(err)
+                if allowed -> return Ok(Val(row))
+            }
+            .None -> {}
+            .Err(failure) -> return Err(failure)
+        }
+        Ok(None)
     }
     // Adds `row`, whose key no row may hold yet (else `Exists`).
-    add: fn(self, row: T) -[DB.Write]> T DBError! { table_write<K, T>(self, row, false) }
+    add: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
+        allowed: table_allows<K, T>(self, row.copy(), Op.Insert) ?? return Err(err)
+        if !allowed -> return Err(DBError.Denied)
+        table_write<K, T>(self, row, false)
+    }
     // Adds `row`, or replaces the row that holds its key.
-    put: fn(self, row: T) -[DB.Write]> T DBError! { table_write<K, T>(self, row, true) }
+    put: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
+        if self.policy == .Val(_) {
+            cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
+            allowed := false
+            if table_stored<K, T>(self, cells) == {
+                .Val(stored) -> {
+                    allowed = table_allows<K, T>(self, stored, Op.Update) ?? return Err(err)
+                    if allowed -> allowed = table_allows<K, T>(self, row.copy(), Op.Update) ?? return Err(err)
+                }
+                .None -> allowed = table_allows<K, T>(self, row.copy(), Op.Insert) ?? return Err(err)
+                .Err(failure) -> return Err(failure)
+            }
+            if !allowed -> return Err(DBError.Denied)
+        }
+        table_write<K, T>(self, row, true)
+    }
     // Removes the row whose key is `key`, if there is one.
-    delete: fn(self, key: K) DBError! -[DB.Write]> {
+    delete: fn(self, key: K) DBError! -[DB.Read, DB.Write]> {
         cells: table_cells(self.name, key.encode()) ?? return Err(err)
+        if self.policy == .Val(_) {
+            if table_stored<K, T>(self, cells) == {
+                .Val(stored) -> {
+                    allowed: table_allows<K, T>(self, stored, Op.Delete) ?? return Err(err)
+                    if !allowed -> return Err(DBError.Denied)
+                }
+                .None -> return Ok()
+                .Err(failure) -> return Err(failure)
+            }
+        }
         guard := self.state.guard_edit()
         if driver_closed(guard.value.driver) -> return Err(db_closed())
         if !table_exists(guard.value.driver, self.name) -> return Ok()
@@ -860,12 +935,10 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         if changed > 0 -> guard.value.wrote(self.name)
         Ok()
     }
-    // Every row, in key order, as a data query.
+    // Every row the caller may read, in key order, as a data query. The
+    // policy judges the rows in key order too.
     query: fn(self) -[DB.Read]> Query<T> DBError! {
-        if !sql_identifier(self.name.bytes()) -> return Err(table_name_error(self.name))
-        guard := self.state.guard_edit()
-        if driver_closed(guard.value.driver) -> return Err(db_closed())
-        rows: table_read(guard.value.driver, self.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\"", [DBValue]{}) ?? return Err(err)
+        rows: table_rows<K, T>(self, "", [DBValue]{}) ?? return Err(err)
         keyed := [(key: K, row: T)]{}
         loop stored in rows {
             row: table_decode<T>(stored) ?? return Err(err)
@@ -873,9 +946,40 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         }
         keyed.sort_by(fn(left: (key: K, row: T), right: (key: K, row: T)) { left.key <=> right.key })
         out := [T]{}
-        loop entry in keyed -> out.push(entry.row.copy())
+        loop entry in keyed {
+            allowed: table_allows<K, T>(self, entry.row.copy(), Op.Read) ?? return Err(err)
+            if allowed -> out.push(entry.row.copy())
+        }
         Ok(data.query(out))
     }
+}
+
+// The stored rows `filter` (a WHERE clause, empty for every row) selects,
+// read without the row policy. The connection is held only for the read, so
+// a policy that reads through the same store can run after it.
+priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue]) -[DB.Read]> [[String: DBValue]] DBError! {
+    if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
+    guard := table.state.guard_edit()
+    if driver_closed(guard.value.driver) -> return Err(db_closed())
+    clause: if filter.len() == 0 -> "" else -> " WHERE {filter}"
+    table_read(guard.value.driver, table.name, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\"{clause}", values)
+}
+
+// The stored row under the key `cells`, read without the row policy.
+priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [(column: String, value: DBValue)]) -[DB.Read]> T? DBError! {
+    rows: table_rows<K, T>(table, table_match(cells), table_values(cells)) ?? return Err(err)
+    if rows.len() == 0 -> return Ok(None)
+    row: table_decode<T>(rows[0]) ?? return Err(err)
+    Ok(Val(row))
+}
+
+// Whether the table's row policy lets its caller do `op` to `row`. A table
+// with no policy, or acting for the system, allows every operation. The
+// policy gets a store on the same connection, which acts for the system.
+priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op) -[DB.Read]> Bool DBError! {
+    judge: table.policy ?? return Ok(true)
+    if table.who == Who.System -> return Ok(true)
+    judge(row, op, table.who.copy(), Store{state: table.state.copy()})
 }
 
 // `add` (replace false) and `put` (replace true): creates the table on its

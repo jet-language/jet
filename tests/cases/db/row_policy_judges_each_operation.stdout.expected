@@ -1,0 +1,32 @@
+mia creates project 1 and becomes its first owner in one transaction: ok, ok
+  judged insert project 1 (jet) by mia as mia
+  judged insert member mia of 1 (owner) as mia
+ben adds himself as an owner of project 1: the table's row policy refused this write
+  judged insert member ben of 1 (owner) as ben
+mia adds ben as a member: ok
+  judged insert member ben of 1 as mia
+ben makes himself an owner: the table's row policy refused this write
+  judged update member ben of 1 as ben
+mia blanks the project's name: the table's row policy refused this write
+  judged update project 1 (jet) by mia as mia
+  judged update project 1 () by mia as mia
+mia renames the project: ok
+  judged update project 1 (jet) by mia as mia
+  judged update project 1 (jet2) by mia as mia
+carol puts a project under a new key: ok
+  judged insert project 2 (solo) by carol as carol
+carol reads project 1: none
+  judged read project 1 (jet2) by mia as carol
+ben reads project 1: jet2
+  judged read project 1 (jet2) by mia as ben
+carol reads the members: []
+  judged read member ben of 1 as carol
+  judged read member mia of 1 (owner) as carol
+ben reads the members: [member ben of 1, member mia of 1 (owner)]
+  judged read member ben of 1 as ben
+  judged read member mia of 1 (owner) as ben
+carol removes mia: the table's row policy refused this write
+  judged delete member mia of 1 (owner) as carol
+ben leaves the project: ok
+  judged delete member ben of 1 as ben
+the system reads the members: [member mia of 1 (owner)]

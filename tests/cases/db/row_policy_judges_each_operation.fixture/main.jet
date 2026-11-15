@@ -1,0 +1,203 @@
+// Two guarded tables, projects and their members, read and written by three
+// accounts. Each policy notes the row and the operation it judged, and the
+// program prints those notes after each step.
+use db: core.db
+
+#Codable
+Project: struct {
+    id: Int
+    name: String
+    created_by: String
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int
+    account: String
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: String
+    owner: Bool
+}
+
+// Every judgement since the last step, in order.
+JUDGED: Shared{[String]{}}
+
+projects_in: fn(store: db.Store) -> db.Table<Int, Project> {
+    store.table("projects", key: fn(row: Project) { row.id })
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+op_name: fn(op: db.Op) -> String {
+    if op == {
+        .Read -> "read"
+        .Insert -> "insert"
+        .Update -> "update"
+        .Delete -> "delete"
+    }
+}
+
+account_of: fn(who: db.Who) -> String? {
+    if who == {
+        .Account(account) -> Val(account)
+        .System -> None
+    }
+}
+
+note: fn(op: db.Op, who: db.Who, row: String) {
+    caller: account_of(who) ?? "system"
+    judged := JUDGED.guard_edit()
+    judged.value.push("{op_name(op)} {row} as {caller}")
+}
+
+member_text: fn(row: Member) -> String {
+    mark: if row.owner -> " (owner)" else -> ""
+    "member {row.account} of {row.project}{mark}"
+}
+
+// The account's member row in `project`, read with the system's rights.
+member_of: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Member? db.DBError! {
+    members_in(store).get(MemberKey{project: project, account: account})
+}
+
+// The creator may insert a project. Its members read it, and an owner
+// changes or deletes it, but no change leaves it without a name.
+project_policy: fn(row: Project, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    note(op, who, "project {row.id} ({row.name}) by {row.created_by}")
+    account: account_of(who) ?? return Ok(true)
+    if op == db.Op.Insert -> return Ok(row.created_by == account)
+    if member_of(store, row.id, account) == {
+        .Val(member) -> Ok(op == db.Op.Read || (member.owner && row.name.len() > 0))
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// The creator rule: `account` created `project`, which has no members yet.
+// The project row may be a write earlier in the same transaction; the member
+// row being judged is not written yet, so it is not counted.
+first_owner: fn(store: db.Store, project: Int, account: String) -[DB.Read]> Bool db.DBError! {
+    if projects_in(store).get(project) == {
+        .Val(found) -> {
+            if found.created_by != account -> return Ok(false)
+        }
+        .None -> return Ok(false)
+        .Err(failure) -> return Err(failure)
+    }
+    rows: (members_in(store).query() ?? return Err(err)).collect() ?? return Err(db.DBError.Failed("the members do not collect"))
+    loop member in rows {
+        if member.project == project -> return Ok(false)
+    }
+    Ok(true)
+}
+
+// Members see each other. An owner adds, changes and removes members, an
+// account may remove its own row, and a project's creator may add itself as
+// its first owner.
+member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    note(op, who, member_text(row.copy()))
+    account: account_of(who) ?? return Ok(true)
+    member := false
+    owner := false
+    if member_of(store, row.project, account) == {
+        .Val(mine) -> {
+            member = true
+            owner = mine.owner
+        }
+        .None -> {}
+        .Err(failure) -> return Err(failure)
+    }
+    own_row: row.account == account
+    if op == db.Op.Insert {
+        if owner -> return Ok(true)
+        if !own_row || !row.owner -> return Ok(false)
+        return first_owner(store, row.project, account)
+    }
+    Ok(owner || (op == db.Op.Read && member) || (op == db.Op.Delete && own_row))
+}
+
+step: fn(label: String, outcome: String) {
+    print("{label}: {outcome}")
+    judged := JUDGED.guard_edit()
+    loop line in judged.value -> print("  judged {line}")
+    judged.value = [String]{}
+}
+
+project_wrote: fn(result: Project db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+member_wrote: fn(result: Member db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+project_read: fn(table: db.Table<Int, Project>, id: Int) -[DB.Read]> String {
+    if table.get(id) == {
+        .Val(project) -> project.name
+        .None -> "none"
+        .Err(failure) -> failure.message()
+    }
+}
+
+members_read: fn(table: db.Table<MemberKey, Member>) -[DB.Read]> String {
+    rows: (table.query() ?? return "unreadable").collect() ?? return "uncollected"
+    names := [String]{}
+    loop row in rows -> names.push(member_text(row))
+    "[{names.join(", ")}]"
+}
+
+run: fn() {
+    store: db.open_memory()
+    projects: projects_in(store).guard(project_policy)
+    members: members_in(store).guard(member_policy)
+    mia_projects: projects.acting(.Account("mia"))
+    mia_members: members.acting(.Account("mia"))
+    ben_projects: projects.acting(.Account("ben"))
+    ben_members: members.acting(.Account("ben"))
+    carol_projects: projects.acting(.Account("carol"))
+    carol_members: members.acting(.Account("carol"))
+
+    transaction: store.begin() ?? panic("begin")
+    created: project_wrote(mia_projects.add(Project{id: 1, name: "jet", created_by: "mia"}))
+    owned: member_wrote(mia_members.add(Member{project: 1, account: "mia", owner: true}))
+    transaction.commit() ?? panic("commit")
+    step("mia creates project 1 and becomes its first owner in one transaction", "{created}, {owned}")
+
+    step("ben adds himself as an owner of project 1", member_wrote(ben_members.add(Member{project: 1, account: "ben", owner: true})))
+    step("mia adds ben as a member", member_wrote(mia_members.add(Member{project: 1, account: "ben", owner: false})))
+    step("ben makes himself an owner", member_wrote(ben_members.put(Member{project: 1, account: "ben", owner: true})))
+    step("mia blanks the project's name", project_wrote(mia_projects.put(Project{id: 1, name: "", created_by: "mia"})))
+    step("mia renames the project", project_wrote(mia_projects.put(Project{id: 1, name: "jet2", created_by: "mia"})))
+    step("carol puts a project under a new key", project_wrote(carol_projects.put(Project{id: 2, name: "solo", created_by: "carol"})))
+
+    step("carol reads project 1", project_read(carol_projects, 1))
+    step("ben reads project 1", project_read(ben_projects, 1))
+    step("carol reads the members", members_read(carol_members))
+    step("ben reads the members", members_read(ben_members))
+
+    carol_delete := "ok"
+    if carol_members.delete(MemberKey{project: 1, account: "mia"}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> carol_delete = failure.message()
+    }
+    step("carol removes mia", carol_delete)
+    ben_delete := "ok"
+    if ben_members.delete(MemberKey{project: 1, account: "ben"}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> ben_delete = failure.message()
+    }
+    step("ben leaves the project", ben_delete)
+    step("the system reads the members", members_read(members))
+}

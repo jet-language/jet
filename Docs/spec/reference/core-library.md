@@ -6339,9 +6339,11 @@ subquery from another table) is refused.
 | `open_memory() -[DB]> Store` | store | Open an in-memory database. |
 | `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
-| `table.add(row: T) -[DB.Write]> T DBError!` / `table.put(row: T) -[DB.Write]> T DBError!` | row | Insert a new row (`DBError.Exists` when its key is held) or insert-or-replace one. |
-| `table.delete(key: K) DBError! -[DB.Write]>` | — | Remove the row with that key, if any. |
-| `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row, in key order, as a `core.data` query. |
+| `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row (`DBError.Exists` when its key is held) or insert-or-replace one. |
+| `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
+| `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row the caller may read, in key order, as a `core.data` query. |
+| `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
+| `table.acting(who: Who) -> Table<K, T>` | table | The table acting for `Who.Account(id)` or `Who.System`, as its policy sees the caller. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
 | `policy_audit(scope: DBScope) -[DB]> String` | text | Inspect policy decisions for a scope. |
@@ -6384,14 +6386,30 @@ is pure, so a row's key is a function of the row alone. The table's columns
 are one per field of the encoded key (one `key` column when `K` is a scalar),
 which together form the primary key, and a `jet_row` column holding the row's
 JSON encoding. The first write creates the table; reading a table that was
-never written finds no rows. `get` and `query` carry `DB.Read` and `add`,
-`put` and `delete` carry `DB.Write`, so a function that writes a table must
+never written finds no rows. `get` and `query` carry `DB.Read`, and `add`,
+`put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
+table's row policy, which reads), so a function that writes a table must
 allow `DB.Write` (E0740 otherwise). A `get` or `query` made while an
 `app.live` binding's query function runs adds the table to that binding's
 read set, even before the table exists. An `add` or `put`, or a `delete`
 that removes a row, re-runs every binding that reads the table once the write
 is committed: immediately outside a transaction, and at the commit (or
 rollback) inside one, as for a scope's `execute`.
+
+A row policy, attached with `table.guard(policy)`, is a function from a row,
+the operation (`Op`: `Read`, `Insert`, `Update` or `Delete`), the caller
+(`Who`: `Account(id)` or `System`) and a store to a `Bool`. The table asks
+it about every call, as the caller that `table.acting(who)` names. A table
+from `store.table` acts for `System` until then, and no policy limits
+`System`: a table acting for it never asks its policy. A read is judged on the
+stored row, an `add` on the new row, a `delete` on the stored row, and a
+`put` over a stored row twice, on the stored row and on the new one; both
+must pass. A `put` under a new key is an insert. A row the policy refuses
+to read is never returned: `get` gives `None` and `query` leaves the row
+out. A refused write is `DBError.Denied`, and it writes nothing. The policy
+reads through a store on the same connection, with the system's rights, so
+it sees the transaction's earlier writes. It runs before the write it
+judges, so a write cannot vouch for itself.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query
@@ -6427,8 +6445,9 @@ Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
 is an enum: `Failed(String)` retains the driver's message rather than exposing
-a raw engine pointer, and `Exists` is a typed table's `add` meeting a held
-key. `message()` is the text that `Display` and `Debug` show.
+a raw engine pointer, `Exists` is a typed table's `add` meeting a held key,
+and `Denied` is a table's row policy refusing a write. `message()` is the
+text that `Display` and `Debug` show.
 
 Pool receipts remain opaque values produced by a pool. Their equality and
 Show/Display/Debug projection are source-owned: each projection preserves the

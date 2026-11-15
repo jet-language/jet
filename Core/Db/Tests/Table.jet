@@ -47,3 +47,47 @@ TableCard: struct {
     assert(store.close())
     assert(tasks.get(2) == .Err(_))
 }
+
+#Codable
+TableNote: struct {
+    id: Int
+    owner: String
+    text: String
+}
+
+// An account reads and writes its own notes, and no write moves a note to
+// another owner. The system never reaches the policy.
+priv table_note_policy: fn(row: TableNote, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    if who == {
+        .System -> Ok(true)
+        .Account(account) -> Ok(row.owner == account)
+    }
+}
+
+priv table_note_refused: fn(result: TableNote db.DBError!) -> Bool {
+    if result == {
+        .Ok(_) -> false
+        .Err(failure) -> failure == db.DBError.Denied
+    }
+}
+
+#Test("a guarded table asks its row policy about each read and write") {
+    store: db.open_memory()
+    notes: store.table("notes", key: fn(row: TableNote) { row.id }).guard(table_note_policy)
+    mia: notes.acting(.Account("mia"))
+    ben: notes.acting(.Account("ben"))
+    _: mia.add(TableNote{id: 1, owner: "mia", text: "mine"}) ?? panic("mia adds her note")
+    assert(table_note_refused(ben.add(TableNote{id: 2, owner: "mia", text: "forged"})))
+    _: ben.add(TableNote{id: 2, owner: "ben", text: "his"}) ?? panic("ben adds his note")
+    assert(ben.get(1) == .None)
+    assert_eq((mia.get(1) ?? panic("mia reads her note")).text, "mine")
+    assert_eq(((ben.query() ?? panic("ben reads")).collect() ?? panic("ben's rows collect")).len(), 1)
+    assert_eq(((notes.query() ?? panic("the system reads")).collect() ?? panic("every row collects")).len(), 2)
+    // A put over a row is judged on the stored row and on the new one.
+    assert(table_note_refused(ben.put(TableNote{id: 1, owner: "ben", text: "taken"})))
+    assert(table_note_refused(mia.put(TableNote{id: 1, owner: "ben", text: "given"})))
+    _: mia.put(TableNote{id: 1, owner: "mia", text: "edited"}) ?? panic("mia edits her note")
+    assert(ben.delete(1) == .Err(_))
+    mia.delete(1) ?? panic("mia deletes her note")
+    assert(notes.get(1) == .None)
+}
