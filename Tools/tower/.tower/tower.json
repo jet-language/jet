@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106403,
+    "rev": 106407,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41204,11 +41204,11 @@
         {
           "n": 2,
           "text": "Query, mutation and action are effect-row classes the compiler checks: a query that writes and a mutation that reaches Net are each refused with a registered code and what/why/fix text. Proof: `jet test Compiler --profile ui --filter sync_` matches the snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:12.908Z"
+          "evidence": "Landed 755c998a40 (GoalsB-5-3709-c2). Proof on batch compiler p179 (dev 5cc6567e75): jet test Compiler --profile ui --filter sync_ -> PASS tests/ui/sync_query_writes.jet and tests/ui/sync_mutation_calls_net.jet (core_async_loadable_retired, which the filter also matches, is an unrelated module-list snapshot refreshed separately).",
+          "at": "2026-11-15T12:26:49.698Z"
         },
         {
           "n": 5,
@@ -41458,7 +41458,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-15T06:37:17.602Z",
+      "updated": "2026-11-15T12:26:49.698Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -102509,6 +102509,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c1 on dev 5cc6567e75: one hit remains, Calls/Methods.jet:1906 (protected: ... type_name_value.starts_with(\"<corelib>/\")). Sent to MemKernel-6."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Finding (MemKernel-6, 2026-11-15): jet inspect codemod cannot index or edit Core sources. It compiles every root as a user unit, so a Core file fails with E0067 on its own __ helpers and the plan stops before renaming. A symbol_rename also cannot add priv, and it refuses a destination name that resolves anywhere in the unit (locals included). The D-CORE-HELPERS1 renames of the large Core files (Math, Web, Server, Tls, Image, Db, Client; about 3000 sites) therefore use a throwaway lexer-token rename script, reviewed by diff and jet check Core. A Core-unit mode for codemod belongs on the codemod card when one is opened."
         },
         {
@@ -102584,11 +102589,11 @@
         {
           "n": 8,
           "text": "No construct is legal only in Core: the record-literal, IOOperation/IOContext owner-annotation, private native type, protected type name and core_private_seam branches (Sema/Expressions/Constructors.jet:402, Sema/FailureLaw.jet:549-555, Registration/Items.jet:3509-3510, Calls/Methods.jet:1345, TypeRelations.jet:888, Calls/Core.jet:271 at 25f9dee58f) are gone. Proof: `git grep -n 'corelib>/' Compiler/JetSema/Source/Sema/Expressions Compiler/JetSema/Source/Sema/Registration Compiler/JetSema/Source/Sema/TypeRelations.jet` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:07.534Z"
+          "evidence": "Dev 5cc6567e75 (after bd306d1241, sema identity helpers): git grep -n 'corelib>/' Compiler/JetSema/Source/Sema/Expressions Compiler/JetSema/Source/Sema/Registration Compiler/JetSema/Source/Sema/TypeRelations.jet prints nothing.",
+          "at": "2026-11-15T12:26:51.745Z"
         },
         {
           "n": 9,
@@ -102620,11 +102625,11 @@
         {
           "n": 12,
           "text": "A package-private `__` helper behaves the same in a user package and in Core: an outside use is refused with the same diagnostic. It depends on the same ballot (Main's ballot list, 2026-11-15). Proof: `jet test Compiler --profile ui --filter private_helper_outside_use`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:07.491Z"
+          "evidence": "Landed 942c2c9a3d (core priv helper parity). Proof on batch compiler p179 (dev 5cc6567e75): jet test Compiler --profile ui --filter private_helper_outside_use -> PASS tests/ui/private_helper_outside_use/run.jet.",
+          "at": "2026-11-15T12:26:50.683Z"
         },
         {
           "n": 13,
@@ -102656,7 +102661,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-15T12:12:45.660Z",
+      "updated": "2026-11-15T12:26:52.688Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217933,6 +217938,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T12:26:52.689Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T12:26:51.745Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T12:26:50.683Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T12:26:49.698Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ttcd0k",
+      "note": "#2"
+    },
     {
       "at": "2026-11-15T12:19:37.857Z",
       "by": "Main",
