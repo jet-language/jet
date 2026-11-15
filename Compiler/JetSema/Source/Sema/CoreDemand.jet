@@ -7,7 +7,10 @@
 // top-level function body only once a checked body names it
 // (sema_core_demand_body_keys, or a call-site fact). sema_core_demand_waves
 // checks the named bodies after the body pass, in waves until no checked
-// body names a new one.
+// body names a new one. A body that joins a wave brings along the deferred
+// bodies its syntax calls by name (sema_core_demand_callees), since its
+// check would name them for the next wave anyway; so a chain of such calls
+// is checked in one wave, not one wave per link.
 //
 // Some bodies stay checked up front, because a caller reaches them by owner
 // type, not by a key: trait-impl methods (generic dispatch reaches every
@@ -44,7 +47,11 @@ use jet_foundation.[
     DeclID,
     DeclTable,
     Diagnostic,
+    Expr,
     FnBody,
+    Func,
+    NamedSpan,
+    Stmt,
     SymbolID,
     SymbolKind,
     TTryConvert,
@@ -893,7 +900,8 @@ sema_core_demand_defers: fn(graph: SemaRegistrationGraph, keys: [String]) -> Boo
 }
 
 // A deferred body not yet checked joins the wave, or waits as a stand-in
-// (sema_core_stand_in_wait).
+// (sema_core_stand_in_wait). One that joins names its syntax's calls
+// (sema_core_demand_callees).
 sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
     if graph.core_checked.get(key) != None -> return
     module_index: graph.core_demand_rows.get(key) ?? return
@@ -901,6 +909,241 @@ sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &Sem
     if sema_core_stand_in_wait(graph, key, names) -> return
     wave[key] = true
     if !affected.contains(module_index) -> affected.push(module_index)
+    sema_core_demand_callees(graph, key, module_index, names)
+}
+
+// The calls a function's syntax makes by name, read before its check
+// (sema_core_demand_calls_func): `plain` holds each `name(…)` call's name,
+// `qualified` each `alias.name(…)` call, and `locals` every parameter and
+// binding name in the function, which may shadow a module name.
+SemaCoreDemandCalls: struct {
+    plain: [String]
+    qualified: [SemaCoreDemandQualified]
+    locals: [NamedSpan]
+}
+
+// An `alias.name(…)` call.
+SemaCoreDemandQualified: struct {
+    alias: String
+    name: String
+}
+
+// Names, into `names.keys`, the deferred bodies not yet checked that
+// function `key` (a deferred body of module `module_index` joining a wave)
+// calls by name: a call its module scope resolves to a function
+// (sema_registration_lookup_name_at), or an `alias.name(…)` call of a module
+// it imports (sema_registration_lookup_qualified). Its own check would name
+// each of them (sema_core_demand_body_keys) and the next wave would check
+// them; named here, they join this wave, and their calls in turn. A name a
+// local of the function shadows is left to the check, and so are method
+// calls, function values, and what a compile-time branch or block, an
+// `#Impure` or `#AssumeDet` body or a switched statement calls
+// (sema_core_demand_calls_stmt): the check decides which of those it
+// reaches.
+sema_core_demand_callees: fn(graph: SemaRegistrationGraph, key: String, module_index: Int, names: &SemaCoreDemandNames) Never! {
+    row: sema_registration_callable_row(graph, key) ?? return
+    calls := SemaCoreDemandCalls{plain: [String]{}, qualified: [SemaCoreDemandQualified]{}, locals: [NamedSpan]{}}
+    if row == {
+        .Function(owner_module, index) -> sema_core_demand_calls_func(graph.modules[owner_module].functions[index].declaration, calls)
+        .NominalMethod(owner_module, owner, index) -> sema_core_demand_calls_func(graph.modules[owner_module].nominals[owner].methods[index].declaration, calls)
+        .ImplMethod(owner_module, owner, index) -> sema_core_demand_calls_func(graph.modules[owner_module].impls[owner].methods[index].declaration, calls)
+        .Foreign(_, _) -> {}
+    }
+    identity: graph.modules[module_index].module_identity
+    loop name in calls.plain {
+        resolved: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? next
+        sema_core_demand_callee(graph, resolved, name, calls.locals, names)
+    }
+    loop call in calls.qualified {
+        resolved: sema_registration_lookup_qualified(graph, identity, call.alias, call.name) ?? next
+        sema_core_demand_callee(graph, resolved, call.alias, calls.locals, names)
+    }
+}
+
+// Names the deferred body `resolved` is, if it is one not yet checked and
+// `written`, the name the call wrote, is no local of the calling function.
+sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, written: String, locals: [NamedSpan], names: &SemaCoreDemandNames) Never! {
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return
+    callee: sema_resolved_key(graph, resolved)
+    if graph.core_checked.get(callee) != None || graph.core_demand_rows.get(callee) == None -> return
+    loop local in locals {
+        if local.name == written -> return
+    }
+    names.keys.push(callee)
+}
+
+// The calls of function `declaration` (SemaCoreDemandCalls): none for a
+// compiler-generated function or one a template of another module wrote,
+// whose names resolve elsewhere.
+sema_core_demand_calls_func: fn(declaration: Func, calls: &SemaCoreDemandCalls) Never! {
+    if declaration.compiler_generated || declaration.definition_module != "" -> return
+    loop parameter in declaration.params -> calls.locals.push(NamedSpan{name: parameter.name, span: parameter.name_span})
+    sema_core_demand_calls_stmts(declaration.body, calls)
+}
+
+sema_core_demand_calls_stmts: fn(body: [Stmt], calls: &SemaCoreDemandCalls) Never! {
+    loop statement in body -> sema_core_demand_calls_stmt(statement, calls)
+}
+
+// A compile-time branch, switch or block, an `#Impure` or `#AssumeDet`
+// body, and a switched statement are not read: a check may skip them, and
+// what it reaches there it names for a later wave.
+sema_core_demand_calls_stmt: fn(statement: Stmt, calls: &SemaCoreDemandCalls) Never! {
+    if statement == {
+        .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_core_demand_calls_expr(value, calls)
+        .Val(binding) -> {
+            calls.locals.push(NamedSpan{name: binding.name, span: binding.name_span})
+            sema_core_demand_calls_expr(binding.init, calls)
+        }
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Index(base, index, _, _) -> {
+                    sema_core_demand_calls_expr(base, calls)
+                    sema_core_demand_calls_expr(index, calls)
+                }
+                .Field(base, _, _) -> sema_core_demand_calls_expr(base, calls)
+                .Local(_, _) -> {}
+            }
+            sema_core_demand_calls_expr(value, calls)
+        }
+        .Return(returned, _) -> {
+            if returned == .Val(value) -> sema_core_demand_calls_expr(value, calls)
+        }
+        .While(cond, body, _, _, _) -> {
+            sema_core_demand_calls_expr(cond, calls)
+            sema_core_demand_calls_stmts(body, calls)
+        }
+        .For(name, name_span, second, kind, body, _, _, _, _) -> {
+            calls.locals.push(NamedSpan{name: name, span: name_span})
+            if second == .Val(other) -> calls.locals.push(NamedSpan{name: other.name, span: other.span})
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    sema_core_demand_calls_expr(start, calls)
+                    sema_core_demand_calls_expr(end, calls)
+                    if step == .Val(value) -> sema_core_demand_calls_expr(value, calls)
+                }
+                .In(collection, step) -> {
+                    sema_core_demand_calls_expr(collection, calls)
+                    if step == .Val(value) -> sema_core_demand_calls_expr(value, calls)
+                }
+            }
+            sema_core_demand_calls_stmts(body, calls)
+        }
+        .Switch(subject, arms, else_body, _) -> {
+            sema_core_demand_calls_expr(subject, calls)
+            loop arm in arms -> sema_core_demand_calls_stmts(arm.body, calls)
+            if else_body == .Val(body) -> sema_core_demand_calls_stmts(body, calls)
+        }
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            calls.locals.push(NamedSpan{name: init.name, span: init.name_span})
+            sema_core_demand_calls_expr(init.init, calls)
+            sema_core_demand_calls_expr(cond, calls)
+            if step == .Val(value) -> sema_core_demand_calls_stmt(value, calls)
+            sema_core_demand_calls_stmts(body, calls)
+        }
+        .Unsafe(_, audit, body, _) -> {
+            if audit == .Val(value) -> sema_core_demand_calls_expr(value, calls)
+            sema_core_demand_calls_stmts(body, calls)
+        }
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> sema_core_demand_calls_stmts(body, calls)
+        .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Impure(_, _, _, _) | .AssumeDet(_, _, _, _) | .Switched(_, _, _) | .ContextBlock(_, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+    }
+}
+
+// A lambda's body is read with the function's: its check is the function's.
+sema_core_demand_calls_expr: fn(expr: Expr, calls: &SemaCoreDemandCalls) Never! {
+    if expr == {
+        .Call(call, _) -> {
+            calls.plain.push(call.name)
+            loop arg in call.args -> sema_core_demand_calls_expr(arg.expr, calls)
+        }
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if receiver == .Ident(alias, _, _) -> calls.qualified.push(SemaCoreDemandQualified{alias: alias, name: method})
+            sema_core_demand_calls_expr(receiver, calls)
+            loop arg in args -> sema_core_demand_calls_expr(arg.expr, calls)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
+            sema_core_demand_calls_expr(receiver, calls)
+            loop arg in args -> sema_core_demand_calls_expr(arg.expr, calls)
+        }
+        .Str(parts, _, _) -> loop part in parts {
+            if part == .Interp(inner, _) -> sema_core_demand_calls_expr(inner, calls)
+        }
+        .ListLit(items, _, _) | .CompareChain(items, _, _, _, _) -> loop item in items -> sema_core_demand_calls_expr(item, calls)
+        .MemberSpread(inner, _, _, _) | .Spread(inner, _, _) | .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .PatternTest(inner, _, _, _) | .PtrFromAddr(_, _, _, inner, _, _) -> sema_core_demand_calls_expr(inner, calls)
+        .Try(inner, _, _, context, _) -> {
+            sema_core_demand_calls_expr(inner, calls)
+            if context == .Val(value) -> sema_core_demand_calls_expr(value, calls)
+        }
+        .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) -> {
+            sema_core_demand_calls_expr(left, calls)
+            sema_core_demand_calls_expr(right, calls)
+        }
+        .Slice(base, start, end, range, _, _) -> {
+            sema_core_demand_calls_expr(base, calls)
+            sema_core_demand_calls_expr(start, calls)
+            sema_core_demand_calls_expr(end, calls)
+            if range == .Val(whole) -> sema_core_demand_calls_expr(whole, calls)
+        }
+        .MapLit(entries, _, _) -> loop entry in entries {
+            sema_core_demand_calls_expr(entry.key, calls)
+            sema_core_demand_calls_expr(entry.value, calls)
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_core_demand_calls_expr(field.value, calls)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_core_demand_calls_expr(field.value, calls)
+        .EnumLit(_, _, _, args, _, _, _) -> loop arg in args {
+            if arg == {
+                .Positional(value) -> sema_core_demand_calls_expr(value, calls)
+                .Named(_, value) -> sema_core_demand_calls_expr(value, calls)
+            }
+        }
+        .OrFallback(value, fallback, _, _, _) -> {
+            sema_core_demand_calls_expr(value, calls)
+            if fallback == {
+                .Value(inner) -> sema_core_demand_calls_expr(inner, calls)
+                .Return(returned, _) -> {
+                    if returned == .Val(inner) -> sema_core_demand_calls_expr(inner, calls)
+                }
+                .Block(body, tail, _) -> {
+                    sema_core_demand_calls_stmts(body, calls)
+                    if tail == .Val(inner) -> sema_core_demand_calls_expr(inner, calls)
+                }
+                .Panic(_, args) -> loop arg in args -> sema_core_demand_calls_expr(arg.expr, calls)
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+            }
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
+            sema_core_demand_calls_expr(cond, calls)
+            sema_core_demand_calls_stmts(then_body, calls)
+            sema_core_demand_calls_expr(then_value, calls)
+            sema_core_demand_calls_stmts(else_body, calls)
+            sema_core_demand_calls_expr(else_value, calls)
+        }
+        .Lambda(lambda, _) -> {
+            loop parameter in lambda.params -> calls.locals.push(NamedSpan{name: parameter.name, span: parameter.name_span})
+            if lambda.body == {
+                .Expr(value) -> sema_core_demand_calls_expr(value, calls)
+                .Block(body) -> sema_core_demand_calls_stmts(body, calls)
+            }
+        }
+        .Pipe(head, steps, _, _) -> {
+            sema_core_demand_calls_expr(head, calls)
+            loop step in steps -> sema_core_demand_calls_expr(step.value, calls)
+        }
+        .TypedLit(_, body, _, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> sema_core_demand_calls_expr(field.value, calls)
+                .Elements(elements) -> loop element in elements -> sema_core_demand_calls_expr(element, calls)
+                .Entries(entries) -> loop entry in entries {
+                    sema_core_demand_calls_expr(entry.key, calls)
+                    sema_core_demand_calls_expr(entry.value, calls)
+                }
+                .Value(value) -> sema_core_demand_calls_expr(value, calls)
+                .ByteText(_) | .Empty -> {}
+            }
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
 }
 
 // Marks `key`, which a body names where a stand-in will not do (`value`:
