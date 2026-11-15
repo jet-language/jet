@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104425,
+    "rev": 104445,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29784,13 +29784,18 @@
       "milestoneId": "e3-m23-core-cli-text",
       "phase": "ready",
       "priority": "P2",
-      "plan": "**Goal**\nDeliver the four ratified ArgsSpec reference projections from one checked command model: `to_markdown` (D-CORE-CLI-MARKDOWN1=A), `to_man` (D-CORE-CLI-MAN1=A), `to_rest` (D-CORE-CLI-REST1=A), and `to_yaml` (D-CORE-CLI-YAML1=A, exact version1 fields). #3291, #3292, and #3293 are historical redirects, and their criteria map to 9-30 here.\n\n**Current state**\n- `crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs:85` `JetArgsSpec::help` is the only renderer.\n- No `to_markdown`, `to_man`, `to_rest`, or `to_yaml` exists in Compiler/, crates/, or Core/.\n- ArgsSpec methods are routed through:\n  - `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:55-145` (op, arity, return type, and parameter tables);\n  - `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1175-1185`;\n  - the Rust mirror in `crates/jet-codegen/src/Codegen/TIR/mod.rs:13101`, `routes.rs:2927`, `TIR/subset/handles.rs:354`, and `crates/jet-comptime/src/Comptime/ArgsLite.rs`.\n\n**Changes**\n1. Jet compiler first. In `ProcessHandles.jet`, add ops `ArgsSpecToMarkdown`, `ToMan`, `ToRest`, and `ToYaml`:\n   - arity 0, except `to_man(date: String)` (explicit date, never ambient);\n   - return `String`;\n   - receiver access `Read`.\n   Add the `HandleMethods.jet` routes to `jet_args_to_*`.\n2. Rust mirror (needed so the shipped binary proves it): the same four ops in TIR `mod.rs`, `routes.rs`, `subset/handles.rs`, and ArgsLite.\n3. `Args.rs`: add one `jet_args_command_doc(&JetArgsSpec) -> CommandDoc` projection (command path, inherited options, defaults, visibility, examples, with hidden/secret entries omitted) and four small leaves:\n   - Markdown fences and anchors;\n   - roff escaping with an explicit `.TH` date;\n   - ReST sections and links;\n   - YAML through the existing Core YAML writer's escaping rules.\n   Output is capped with a structured error on overflow. There is no parsing of help text.\n4. Malformed metadata returns the fallible error path, never a panic or exit.\n\n**Proof**\n- New golden `Examples/features/cli/args_reference.jet`, one shared fixture with nested, inherited, hidden, and secret options, multiline punctuation, and fences: `jet test Compiler --profile golden cli/args_reference` matches `args_reference.out` on O0, O1 and O2.\n- New `cargo test --test cli_surface -- args_reference_consumers`:\n  - `man -l` / `groff -man -Tutf8` renders the man output without warnings;\n  - `python3 -c 'import yaml'` round-trips the YAML with exact version1 keys;\n  - `rst2html --halt=warning` accepts the ReST;\n  - `pandoc -f gfm` accepts the Markdown.\n  A missing consumer is reported as a skip, not a pass.\n\n**Batch**\n`batch-host-runtime`: the Prelude renderers with tier parity. The sema and codegen rows ride along.\n\n**Dependencies**\nNone. All four decisions are ratified. Completion (#3241) and menus (#3294) stay separate.",
+      "plan": "**Goal**\nDeliver the four ratified ArgsSpec reference projections from one checked command model: `to_markdown` (D-CORE-CLI-MARKDOWN1=A), `to_man` (D-CORE-CLI-MAN1=A), `to_rest` (D-CORE-CLI-REST1=A) and `to_yaml` (D-CORE-CLI-YAML1=A, exact version1 fields).\n\n**Current state (dev 9a82866572)**\n- No `to_markdown`, `to_man`, `to_rest` or `to_yaml` exists for ArgsSpec.\n- ArgsSpec methods are typed in `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet` (the op, arity, return and parameter tables), and `Compiler/JetIR/Source/BuildExpr.jet` routes each one to its Core/Args/Args.jet function.\n\n**Changes**\n1. Add the ops `ArgsSpecToMarkdown`, `ToMan`, `ToRest` and `ToYaml` in ProcessHandles.jet. Each takes no arguments except `to_man(date: String)`, whose date is explicit, never ambient. Each returns `String` and has receiver access `Read`. Route them in BuildExpr.jet.\n2. In Core/Args/Args.jet, add one command-doc projection (command path, inherited options, defaults, visibility and examples, with hidden and secret entries omitted) and four small renderers:\n   - Markdown fences and anchors;\n   - roff escaping with an explicit `.TH` date;\n   - ReST sections and links;\n   - YAML, through the Core YAML writer's escaping.\n   Help text is never parsed.\n3. Output is capped. Overflow and malformed metadata return the fallible error path, never a panic or exit.\n\n**Proof**\nThe golden Examples/features/cli/args_reference.jet uses one fixture with nested, inherited, hidden and secret options, multiline punctuation and fences. It matches args_reference.out on O0, O1 and O2. A Jet consumer test runs `man -l` or `groff -man -Tutf8`, a YAML reader, `rst2html --halt=warning` and `pandoc -f gfm` on the output, and a missing consumer is SKIP-HOST.\n\n**Dependencies**\nNone; all four decisions are ratified. Completion (#3241) and menus (#3294) stay separate.",
       "checkSteps": "1. Command names/options/examples/defaults agree with parsing and help.\n2. deterministic output and escaping.\n3. malformed/foreign embedded metadata fails safely.\n4. source program is not executed to extract docs.\n5. Compare the complete shared command fixture with parse/help and generated Markdown.\n6. Exercise punctuation/fences/multiline text, descendant anchors and hidden/secret omission.\n7. Verify real Markdown rendering plus bounded deterministic output.\n8. Keep one schema/formatter owner and no target or filesystem side effects.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-core-f015. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. c31 split into the golden and consumer check, #3242 c46 and #3242 c47. The plan was rewritten without the retired Rust mirror."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -29849,12 +29854,12 @@
       "criteria": [
         {
           "n": 31,
-          "text": "`jet test Compiler --profile golden cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an independent YAML reader). The same test compares each format's names, defaults, inherited options, visibility and examples with the parse/help fixture; covers punctuation, fences, multiline text, descendant anchors and adversarial escaping; omits hidden and secret options; gets byte-identical output on two runs with explicit headers and date; enforces an output size cap; reports malformed metadata as a structured error, not an exit or panic; and shows the generator runs no target code and writes no file outside its output.",
+          "text": "`jet test Compiler --profile golden --filter cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an independent YAML reader), reporting a missing consumer as SKIP-HOST. Proof: those two commands.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:28:08.121Z"
+          "at": "2026-11-15T04:19:06.877Z"
         },
         {
           "n": 32,
@@ -29885,39 +29890,39 @@
         },
         {
           "n": 36,
-          "text": "(was #3290) Nested/inherited/repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. (was #4275 c108)",
+          "text": "Nested, inherited and repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. Proof: `jet test Compiler --profile golden --filter cli/conformance_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:36:30.135Z"
+          "at": "2026-11-15T04:19:07.824Z"
         },
         {
           "n": 37,
-          "text": "(was #3290) Run/build/dev/test overrides and argument forwarding in the CLI host preserve distinct launcher and application namespaces and stock absent-override behaviour. (was #4275 c109)",
+          "text": "Run, build, dev and test overrides and argument forwarding keep the launcher's and the application's namespaces apart, and an absent override behaves as stock. Proof: `jet test Compiler --profile cases --filter cli_parts_commands/override_namespaces`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:36:33.269Z"
+          "at": "2026-11-15T04:19:08.774Z"
         },
         {
           "n": 38,
-          "text": "(was #3290) Builders still support runtime-defined schemas; no second semantic parser or compiler-CLI DSL migration is introduced. (was #4275 c110)",
+          "text": "Builders still support runtime-defined schemas through the same Core parser, with no second semantic parser and no compiler-CLI DSL migration. Proof: `jet test Compiler --profile golden --filter cli/runtime_schema_builder`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:36:35.860Z"
+          "at": "2026-11-15T04:19:10.111Z"
         },
         {
           "n": 40,
-          "text": "(was #3290) `jet test Compiler --profile golden cli/marker_builder_pair` shows equivalent #CLI and builder grammars producing identical values, help, errors and completion on O0, O1 and O2. (was #4275 c112)",
+          "text": "Equivalent #CLI and builder grammars produce identical values, help, errors and completion on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter cli/marker_builder_pair`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:36:40.508Z"
+          "at": "2026-11-15T04:19:11.111Z"
         },
         {
           "n": 41,
@@ -30014,7 +30019,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-15T04:18:34.602Z",
+      "updated": "2026-11-15T04:19:31.271Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 141,
       "goals": [
@@ -44456,6 +44461,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. c5 split by decision: D-REPORT-HOME1 stays in c5, plus #4260 c32 and #4260 c33, and D-1912-NAME1 went to #6632 c107. c6 and c10 went to #6915 (#6915 c8, #6915 c9), and c25 merged into #6425 c12."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Main 2026-11-13: the http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient KF row (was c19, now #4635 c10) is removed by dev d9f6a4b839: a printed HTTPError reads as its registered message per D-DISPLAYDBG1=A."
@@ -44620,11 +44630,12 @@
         {
           "n": 6,
           "text": "(was #4577) E3001 panic report: source excerpt and 1-based column: a UI test for E3001 expects the excerpt and 1-based column.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:01:08.078Z"
+          "evidence": "Moved to #6915 c8: runtime stop reports live on #6915 (STOPTRACE); quoting the excerpt follows its c6 owner gate",
+          "at": "2026-11-15T04:19:22.660Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
@@ -44647,11 +44658,12 @@
         {
           "n": 10,
           "text": "(was #5946) Runtime stops lose their contract details: Core-raised stops drop the caller's file:line, #Pre fails as E3001",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:04:03.073Z"
+          "evidence": "Moved to #6915 c9: runtime stop locations live on #6915 (STOPTRACE)",
+          "at": "2026-11-15T04:19:23.606Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
@@ -44683,11 +44695,12 @@
         {
           "n": 25,
           "text": "(was #3910) Parity: Module-graph diagnostics differ or are missing in JetDriver [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:44:09.326Z"
+          "evidence": "Merged into #6425 c12: the module-graph error parity is #3910's paired fixtures, named in #6425 c12",
+          "at": "2026-11-15T04:19:24.583Z",
+          "closure": "obsolete"
         },
         {
           "n": 28,
@@ -44754,7 +44767,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-15T04:19:01.080Z",
+      "updated": "2026-11-15T04:19:30.362Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -51988,6 +52001,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. Added the owner rule itself as #4913 c8. c4 now states frozen #4573 c2's outcome."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 2 criteria from archived #3993: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -52108,7 +52126,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T15:49:16.817Z",
-      "updated": "2026-11-15T04:18:58.149Z",
+      "updated": "2026-11-15T04:19:29.488Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -52133,6 +52151,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15. Added the D-COLLECT-ALL-DEFAULT1=A destination as #4914 c12. c5 is met: project_check/keep_going_registration_error_keeps_dependency_facts_known passes at dev 9a82866572."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -52215,11 +52238,11 @@
         {
           "n": 5,
           "text": "A keep-going check of a package with errors reports no diagnostics in its clean dependencies. Proof: `jet test Compiler --profile cases --filter project_check/keep_going_registration_error_keeps_dependency_facts_known`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:18:39.251Z"
+          "evidence": "dev 9a82866572, gate-p141: `jet test Compiler --profile cases --filter project_check/keep_going_registration_error` PASS 1/1. The case checks a package with a registration error under JET_KEEP_GOING=1 and asserts that no E0121 or E0626 appears from the clean dependency.",
+          "at": "2026-11-15T04:19:12.128Z"
         },
         {
           "n": 6,
@@ -52286,7 +52309,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-15T04:18:42.128Z",
+      "updated": "2026-11-15T04:19:28.554Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
@@ -88188,8 +88211,8 @@
     {
       "id": "c0ycgz3f",
       "num": 6629,
-      "title": "One receipt kind for results, goldens, budgets and API snapshots",
-      "body": "A design card: decide whether test results, goldens, budgets and API snapshots share one receipt format, then build it. Starts with a design and an adversarial review.",
+      "title": "One receipt kind: test results, goldens, budgets and API snapshots are receipts with one shape, written by shared Prelude code",
+      "body": "Destination: every development act (a test run, a golden, a budget or an API snapshot) writes a receipt of one kind: act, locked closure, content-addressed inputs, witness and outcome. Shared Prelude code writes it on every tier.\n\nDecisions: D-ECO-RECEIPT2=A (one connected receipt) and D-FOUND-RECEIPT1=A (typed sections on the one receipt). Start with a design note and an adversarial review of how the existing stores (the #6035 test store, golden files, budget history, API snapshots) map onto the one shape.\n\nSource: #2110, #2112 and #5069, through #6035.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -88206,48 +88229,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #2112 c1) Test results, goldens, budgets and API snapshots are all stored as receipts of one kind (moved from #6035 c25)",
+          "text": "Test results, goldens, budgets and API snapshots are all stored as receipts of one kind. Proof: `jet test Compiler --profile cases --filter receipts/one_kind_for_results_goldens_budgets_api`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T01:04:03.651Z"
+          "at": "2026-11-15T04:19:02.158Z"
         },
         {
           "n": 3,
-          "text": "(was #2110 c1) One receipt record shape exists with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c4)",
+          "text": "One receipt record shape exists, with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree. Proof: `jet test tests/guards --filter one_receipt_shape`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:44.869Z"
+          "at": "2026-11-15T04:19:03.044Z"
         },
         {
           "n": 4,
-          "text": "(was #2110 c2) A development act writes a receipt without the caller asking for one [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c5)",
+          "text": "A development act writes a receipt without the caller asking for one. Proof: `jet test Compiler --profile cases --filter receipts/act_writes_receipt_unasked`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:47.450Z"
+          "at": "2026-11-15T04:19:04.063Z"
         },
         {
           "n": 5,
-          "text": "(was #2110 c3) A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c6)",
+          "text": "A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act. Proof: `jet test Compiler --profile cases --filter receipts/same_act_same_inputs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:49.820Z"
+          "at": "2026-11-15T04:19:05.038Z"
         },
         {
           "n": 6,
-          "text": "(was #2110 c4) Tier parity (I9): the receipt is written by shared Prelude code, not re-encoded per engine [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c7)",
+          "text": "Shared Prelude code writes the receipt on every tier (I9), with no per-engine re-encoding. Proof: `jet test Compiler --profile cases --filter receipts/` on O0, O1 and O2 gives identical receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:27:52.240Z"
+          "at": "2026-11-15T04:19:05.972Z"
         }
       ],
       "refs": [],
@@ -88258,8 +88281,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T01:04:02.406Z",
-      "updated": "2026-11-09T19:51:18.155Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:19:26.108Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
     {
@@ -213943,6 +213966,146 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T04:19:31.271Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ym70o1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:19:30.362Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0xnvmrf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:19:29.488Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0dp5efn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:19:28.555Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c08i9ox6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:19:27.617Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ym70o1",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-15T04:19:26.109Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ycgz3f",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:19:24.583Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xnvmrf",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T04:19:23.606Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xnvmrf",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T04:19:22.660Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0xnvmrf",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T04:19:12.128Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c08i9ox6",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T04:19:11.111Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#40: strip debris; was: (was #3290) `jet test Compiler --profile golden cli/marker_builder_pair` shows equivalent #CLI and builder grammars producing identical values, help, errors and completion on O0, O1 and O2. (was #4275"
+    },
+    {
+      "at": "2026-11-15T04:19:10.111Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#38: strip debris; proof; was: (was #3290) Builders still support runtime-defined schemas; no second semantic parser or compiler-CLI DSL migration is introduced. (was #4275 c110)"
+    },
+    {
+      "at": "2026-11-15T04:19:08.774Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#37: strip debris; proof; was: (was #3290) Run/build/dev/test overrides and argument forwarding in the CLI host preserve distinct launcher and application namespaces and stock absent-override behaviour. (was #4275 c109)"
+    },
+    {
+      "at": "2026-11-15T04:19:07.824Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#36: strip debris; proof; was: (was #3290) Nested/inherited/repeated flags, aliases, grouping, cardinality, double-dash, dynamic completion, hooks and lifecycle errors have conformance goldens. (was #4275 c108)"
+    },
+    {
+      "at": "2026-11-15T04:19:06.878Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#31: split: content fidelity and generator hygiene are their own criteria; was: `jet test Compiler --profile golden cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an i"
+    },
+    {
+      "at": "2026-11-15T04:19:05.972Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ycgz3f",
+      "note": "#6: strip debris; proof; was: (was #2110 c4) Tier parity (I9): the receipt is written by shared Prelude code, not re-encoded per engine [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c7)"
+    },
+    {
+      "at": "2026-11-15T04:19:05.038Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ycgz3f",
+      "note": "#5: strip debris; proof; was: (was #2110 c3) A receipt names its inputs by content address, so an identical act over identical inputs is recognisable as the same act [precut audit: no dev test, golden, case or snapshot proves this"
+    },
+    {
+      "at": "2026-11-15T04:19:04.063Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ycgz3f",
+      "note": "#4: strip debris; proof; was: (was #2110 c2) A development act writes a receipt without the caller asking for one [precut audit: no dev test, golden, case or snapshot proves this today] (was #5069 c5)"
+    },
+    {
+      "at": "2026-11-15T04:19:03.044Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ycgz3f",
+      "note": "#3: strip debris; proof; was: (was #2110 c1) One receipt record shape exists with act, locked closure, content-addressed inputs, witness and outcome, and it is the only such shape in the tree [precut audit: no dev test, golden, ca"
+    },
+    {
+      "at": "2026-11-15T04:19:02.158Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ycgz3f",
+      "note": "#1: strip debris; proof; was: (was #2112 c1) Test results, goldens, budgets and API snapshots are all stored as receipts of one kind (moved from #6035 c25)"
+    },
+    {
       "at": "2026-11-15T04:19:01.080Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -217385,713 +217548,6 @@
       "action": "card.criteria-edit",
       "ref": "c0x9xmde",
       "note": "#3: split: decimal-with-complex to its own criterion; was: F16{1.5} constructs and prints 1.5; 2.0 + 3.0i prints a Complex"
-    },
-    {
-      "at": "2026-11-15T03:46:28.556Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0x9xmde",
-      "note": "#2: proof; was: Quaternion.from_axis_angle and rotate(Vec3) match a reference rotation within 1e-12"
-    },
-    {
-      "at": "2026-11-15T03:46:27.672Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0x9xmde",
-      "note": "#1: proof; was: `q: 1 + 2i + 3j + 4k` is a Quaternion and q * q prints the Hamilton product on every tier"
-    },
-    {
-      "at": "2026-11-15T03:46:26.783Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p6h37r",
-      "note": "#5: strip debris; proof; was: [#4516] D-LANG-IN-LIBS=A: admitted Target and SQL-rules libraries via authority.trust.compiler, with direct-dependency hash admission, data-only providers, duplicate refusal and offline execution."
-    },
-    {
-      "at": "2026-11-15T03:46:25.848Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p6h37r",
-      "note": "#4: strip debris; proof; was: [#4523] D-SQL-SAFETY=A: a schema map with per-table ownership, offline jet db pull/diff/migrate, and jet-db.lock."
-    },
-    {
-      "at": "2026-11-15T03:46:24.958Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p6h37r",
-      "note": "#3: strip debris; proof; was: [#4522] D-SQL-RAW1=A: one reason-carrying audited SQL.raw gate whose facts survive transport (needs #4524)."
-    },
-    {
-      "at": "2026-11-15T03:46:23.694Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p6h37r",
-      "note": "#2: strip debris; proof; was: [#4521] D-SQL-GUARD1=A: a missing-WHERE reminder, marked purge intent, and transport of exact omission grants."
-    },
-    {
-      "at": "2026-11-15T03:46:22.805Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0p6h37r",
-      "note": "#1: strip debris; proof; was: [#4519] D-SQL-AUTHORITY1=A: DB.Schema is inferred and enforced at migration and table-change routes."
-    },
-    {
-      "at": "2026-11-15T03:46:21.920Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ct4a0i",
-      "note": "#8: proof; was: D-ALLOC-FAIL1=C is built. A refused allocation is recoverable by default, through one name and one stable error route, core.mem.AllocError, carried on the ordinary failure rail. The same code works wh"
-    },
-    {
-      "at": "2026-11-15T03:46:20.880Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0ct4a0i",
-      "note": "#3: split: Columns<T> to its own criterion; was: Every ratified allocator and SoA surface is implemented natively in Core and the compiler: a user-written allocator backs List, Map and String, and Columns<T> (D-SOA-SITE1 A, which retires #Layout(col"
-    },
-    {
-      "at": "2026-11-15T03:46:19.990Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jd9jl3",
-      "note": "#7: strip debris; proof; was: [#4448] Scoped requested-capacity accounting enforces the encoding max_bytes law exactly on all tiers, including error and Int-growth paths."
-    },
-    {
-      "at": "2026-11-15T03:46:19.075Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0jd9jl3",
-      "note": "#1: strip debris; proof; was: [#4440] D-BINARY-SIGNEXT1=A: sign_extend takes bits: Int(1..64) and stays infallible. Every caller migrates in the same change, with no teaching diagnostic or jet fix rule (owner 2026-11-06)."
-    },
-    {
-      "at": "2026-11-15T03:46:18.126Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l0ygs4",
-      "note": "#15: strip debris; proof; was: [#3281] golden `collections/collection_contracts` shows each shipped family's order, equality, invalidation and ownership contract."
-    },
-    {
-      "at": "2026-11-15T03:46:17.130Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l0ygs4",
-      "note": "#13: absorbs c11; proof; was: The four method tables in Compiler/JetFoundation/Source/Collections.jet are replaced by one authored row set, the generated operation views come from it, and jet check Compiler is clean."
-    },
-    {
-      "at": "2026-11-15T03:46:16.111Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l0ygs4",
-      "note": "#9: strip debris; proof; was: [retarget] Current, proposed and source-only behaviour are distinguishable; LAST ties stay pinned by #2298 and eager defaults stay D-CORE-EAGER1/2=A."
-    },
-    {
-      "at": "2026-11-15T03:46:15.152Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l0ygs4",
-      "note": "#8: strip debris; proof; was: [retarget] Examples cover empty all/any, zero, first failure, strict/short/pad zip and remainder continuation; source errors are not advertised as successes."
-    },
-    {
-      "at": "2026-11-15T03:46:14.234Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0l0ygs4",
-      "note": "#7: strip debris; proof; was: [retarget] Every operation row states receiver/result ownership, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result and required buffering."
-    },
-    {
-      "at": "2026-11-15T03:46:13.243Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#12 The inputs where musl 1.2.5 differs from the correctly round"
-    },
-    {
-      "at": "2026-11-15T03:46:12.246Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#11 Every C23 math.h function (float and double forms, frexp, ld"
-    },
-    {
-      "at": "2026-11-15T03:46:11.288Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0x9xmde",
-      "note": "#5 A decimal literal next to a Complex adopts Float the way an "
-    },
-    {
-      "at": "2026-11-15T03:46:10.418Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0p6h37r",
-      "note": "#6 D-SQL-CLASS1=A is built: ordinary SQL{...} literals carry an"
-    },
-    {
-      "at": "2026-11-15T03:46:09.534Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ct4a0i",
-      "note": "#12 Columns<T> (D-SOA-SITE1=A, which retires #Layout(columnar)) "
-    },
-    {
-      "at": "2026-11-15T03:46:08.634Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0pdkpef",
-      "note": "#12 Core parses HTML by the pinned WHATWG algorithm, with parse_"
-    },
-    {
-      "at": "2026-11-15T03:46:07.685Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0pdkpef",
-      "note": "#11 Deeply nested XML parses and drops without hitting the typed"
-    },
-    {
-      "at": "2026-11-15T03:46:06.777Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0pdkpef",
-      "note": "#10 cbor.to_bytes and cbor.decode<[U8]> round-trip typed records"
-    },
-    {
-      "at": "2026-11-15T03:46:05.869Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c00zrgpr",
-      "note": "#11 A lazy map whose callback fails propagates the failure: the "
-    },
-    {
-      "at": "2026-11-15T03:44:55.682Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0miof6j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:44:54.721Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c04pj0wn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:44:53.825Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0s9rdnu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:44:52.952Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T03:44:51.469Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c04pj0wn",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-15T03:44:49.977Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0s9rdnu",
-      "note": "title,body"
-    },
-    {
-      "at": "2026-11-15T03:44:44.098Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0miof6j",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:44:43.083Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0mhdm27",
-      "note": "#2: proof; was: D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1 and D-SERVICE-BATCH1 (all A) are built in core.service: a worker is its function, run once per message in order, and tree.send takes only its messa"
-    },
-    {
-      "at": "2026-11-15T03:44:41.909Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0axja0l",
-      "note": "#1: strip debris; proof; was: (moved from #4717 c20) (was #3690) (was #3667) [#999] Real WASI preview1 and preview2 `random_get` runs under a WASI runtime, with a bounded retry and trap lifecycle matrix and typed outcomes."
-    },
-    {
-      "at": "2026-11-15T03:44:41.017Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0in2dft",
-      "note": "#2: strip debris; proof; was: (was #5923) Authority testkit: 24 cases still fail after #5070's follow-ups (grants/providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr): each failing case "
-    },
-    {
-      "at": "2026-11-15T03:44:40.131Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0in2dft",
-      "note": "#1: strip debris; proof; was: (was #5694) pure: store record generations and nested pretty rendering of compile-time values differ (moved from #5454 c3)"
-    },
-    {
-      "at": "2026-11-15T03:44:39.214Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0miof6j",
-      "note": "#6: strip debris; owner gate row added; was: (was #1473 c6) No new external dependency is added (I6), and the New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt rows stay an unimplemented owner gate rather tha"
-    },
-    {
-      "at": "2026-11-15T03:44:38.349Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0miof6j",
-      "note": "#4: strip debris; proof; was: [#4289] D-CRYPTO-SALTROW1: password_hash_with_salt leaves the public core.crypto surface and all public compiler rows. Fixed-salt tests migrate to expert.argon2id. (was #4268 c15)"
-    },
-    {
-      "at": "2026-11-15T03:44:37.445Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#8: proof; was: D-GPU-HELPER-SCOPE1=A (ratified 2026-09-12) is built. A #Kernel that calls a pure helper (for example a helper fn returning `x * 3`) checks and runs on every applicable tier instead of failing with E1"
-    },
-    {
-      "at": "2026-11-15T03:44:36.558Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#7: strip debris; proof; was: (moved from #4599 c107) (was #1143 c7) Runtime dispatch is proven across AVX2 and SSE2 paths via jet_compute_simd_backend [precut audit: failing on 9c7ddf1359: X:features/tooling/compute_autodiff KNOW"
-    },
-    {
-      "at": "2026-11-15T03:44:35.691Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#6: strip debris; proof; was: (moved from #4599 c106) (was #1143 c6) The ufunc/kernel set that must lower to SIMD is named on the card; a scalar-vs-SIMD differential test proves byte-equal results for each [precut audit: failing o"
-    },
-    {
-      "at": "2026-11-15T03:44:34.791Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#4: strip debris; the concrete failing proof the old audit named; was: (was #1147 c4) Focused algebraic, edge, hostile, and CPU-differential checks exercise the real implementation, include negative proof for safety claims, and prove default `jet run` plus AOT parity (mo"
-    },
-    {
-      "at": "2026-11-15T03:44:33.908Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#3: strip debris; proof; was: (was #1147 c3) Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fa"
-    },
-    {
-      "at": "2026-11-15T03:44:33.027Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#2: strip debris; proof; was: (was #1147 c2) Storage, views, operations, precision, placement, streams, kernels, derivatives, serialization, and backend receipts preserve the declared tensor meaning and CPU-oracle result for the n"
-    },
-    {
-      "at": "2026-11-15T03:44:32.138Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s9rdnu",
-      "note": "#4: strip debris; one outcome with proof; was: (was #785 c4) Task and service order, process-tree cleanup, cancellation, D-JPK-SERVICEAUTH1 failure, plans, logs, and receipts use existing mechanisms [precut audit: no dev test, golden, case or snap"
-    },
-    {
-      "at": "2026-11-15T03:44:31.313Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:44:30.470Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s9rdnu",
-      "note": "#3: strip debris; proof; was: (was #785 c3) Restart budgets, backoff, watch debounce, readiness transitions, generation identity, and failure states are bounded and tested [precut audit: no dev test, golden, case or snapshot prove"
-    },
-    {
-      "at": "2026-11-15T03:44:29.589Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s9rdnu",
-      "note": "#2: strip debris; proof; was: (was #785 c2) The supervisor separates process start from readiness, reserves resources before release, reports port and socket conflicts, and rejects dependency cycles [precut audit: no dev test, gol"
-    },
-    {
-      "at": "2026-11-15T03:44:28.708Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0s9rdnu",
-      "note": "#1: strip debris; proof; was: (was #785 c1) One Service record supports a run-only beginner form and expert probes, restart, watch, ports, sockets, dependencies, shutdown, logs, and limits [precut audit: no dev test, golden, case "
-    },
-    {
-      "at": "2026-11-15T03:44:27.841Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0du93i4",
-      "note": "#13 The `auth` package verifies tokens per D-AUTH-TOKENPOLICY1=A"
-    },
-    {
-      "at": "2026-11-15T03:44:26.967Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0s9rdnu",
-      "note": "#7 Restart policy is declared, not set: `restart: .OneForOne(ma"
-    },
-    {
-      "at": "2026-11-15T03:44:26.096Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0s9rdnu",
-      "note": "#6 A pipeline value: `tasks.pipeline(source).map(f).filter(p).s"
-    },
-    {
-      "at": "2026-11-15T03:43:12.449Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c086hhzb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:43:10.988Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c086hhzb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T03:43:10.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-reopen",
-      "ref": "c086hhzb",
-      "note": "#2: legacy evidence names no dev commit; re-proving on dev"
-    },
-    {
-      "at": "2026-11-15T03:42:45.507Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c02t52c5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:42:43.925Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0tr523z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:42:42.530Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pwde2g",
-      "note": "#2 When a marker's arguments don't match its signature (`#App.P"
-    },
-    {
-      "at": "2026-11-15T03:42:40.866Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c086hhzb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:42:39.444Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j8ez91",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:42:37.735Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c086hhzb",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:42:36.098Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c086hhzb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:42:34.523Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c086hhzb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:42:32.845Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c086hhzb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:42:31.254Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02t52c5",
-      "note": "#5: strip debris; proof; was: (was #2792 c3) Service capability metadata and registered denial source remain canonical, proven by missing-capability snapshot execution tests on every applicable tier."
-    },
-    {
-      "at": "2026-11-15T03:42:29.652Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02t52c5",
-      "note": "#4: strip debris; proof; was: (was #2792 c2) The font-shaping source and GUI example cover Arabic/emoji positioned runs through the shared shaping path, proven by cross-tier glyph-output tests on every applicable tier."
-    },
-    {
-      "at": "2026-11-15T03:42:28.198Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02t52c5",
-      "note": "#3: strip debris; absorbs #4954 c3; was: (was #2792 c1) Canonical host-service and UI source implements dialogs, clipboard, IME, drag/drop, shortcuts and accessibility, with deterministic headless adapters, proven by executable and screensho"
-    },
-    {
-      "at": "2026-11-15T03:42:26.692Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c02t52c5",
-      "note": "#1: add proof; was: core.ui (other than core.ui.host) is gone from Core; ui examples and tests import the `ui` package and their goldens pass on O0/O1/O2; `use core.ui` fails as an ordinary unknown module, with no teachi"
-    },
-    {
-      "at": "2026-11-15T03:42:25.140Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c081c9o8",
-      "note": "#9: strip debris; proof; was: (was #6412) On a Linux host with a Vulkan loader and device, on_device(F32, Vulkan) uploads and runs through a Jet-runtime Vulkan provider, and tooling/compute_vulkan_webgpu matches its golden. On a h"
-    },
-    {
-      "at": "2026-11-15T03:42:23.614Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c081c9o8",
-      "note": "#7: strip debris; proof; was: (was #6095) The chosen reader loads a Parquet file and an Arrow IPC file into a typed frame, with an example and golden output on O0, O1 and O2, and beats pyarrow and polars on the read cell."
-    },
-    {
-      "at": "2026-11-15T03:42:22.138Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0vhdiiv",
-      "note": "#5: strip debris; checked() and the rounding stops are c7's; was: D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float, and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even. A literal body is chec"
-    },
-    {
-      "at": "2026-11-15T03:42:20.670Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0vhdiiv",
-      "note": "#4: ballot is ratified; proof; was: impl Celsius -> Float no longer gives the self-contradicting E0113 naming the internal errconv_Celsius_to_Float; after ratification the declaration follows the D-CONVERT-TRAIT1 outcome with a user-fac"
-    },
-    {
-      "at": "2026-11-15T03:42:19.157Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0mhdm27",
-      "note": "#3: strip debris; proof; was: [#4183] A counter actor and a supervised worker are built as a Core library over tasks and channels (D-ACTOR1=A) with no new syntax. They run identically on every level. (was #2279 c10)"
-    },
-    {
-      "at": "2026-11-15T03:42:17.581Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0tr523z",
-      "note": "#2: strip debris; proof; was: (was #2966 c1) Scoped deterministic worlds, inherited task/timer lifetimes, clock/RNG providers, bounded virtual advancement and unsupported-effect refusal are implemented across native and Web consum"
-    },
-    {
-      "at": "2026-11-15T03:42:16.109Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0tr523z",
-      "note": "#1: split the multi-outcome criterion: reload and state ownership to new criteria; was: Admit a module `STORE: Shared{…}` holder construction (a `name: value` declaration, so the handle cannot be reassigned; `#Persist` added only for hot-reload retention) with closed pure non-suspending "
-    },
-    {
-      "at": "2026-11-15T03:42:14.699Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#18 D-SH-RUN1=A is built: `Sh{\"git log --oneline {rev}\"}.text()`"
-    },
-    {
-      "at": "2026-11-15T03:42:13.432Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0bcerww",
-      "note": "#2 The published native runtime pack has one canonical typed id"
-    },
-    {
-      "at": "2026-11-15T03:42:12.262Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0tr523z",
-      "note": "#5 RNG, environment overlay, fault, auth and native storage sta"
-    },
-    {
-      "at": "2026-11-15T03:42:11.224Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0tr523z",
-      "note": "#4 Hot reload of a module Shared holder whose body and initiali"
-    },
-    {
-      "at": "2026-11-15T03:41:10.880Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03pc5la",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:41:03.104Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03pc5la",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T03:41:01.552Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kdgbf8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:41:00.553Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c09brw5t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:40:59.371Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c06lvend",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:40:58.484Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c03pc5la",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T03:40:57.614Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c09brw5t",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T03:40:56.104Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0kdgbf8",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T03:40:54.624Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-15T03:40:53.716Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T03:40:52.842Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T03:40:51.965Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T03:40:51.076Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T03:40:50.138Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03pc5la",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T03:40:49.172Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kdgbf8",
-      "note": "#10: strip debris; proof; was: (was #2449 c3) The inspector derives selections, values, schema and transformation facts from the same typed plot/table source [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T03:40:48.222Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kdgbf8",
-      "note": "#9: strip debris; proof; was: (was #2449 c2) Text/SVG projections share the canonical plan and deterministic materialization; numerical rendering preserves finite values with normalized signed zero [precut audit: no dev test, gold"
-    },
-    {
-      "at": "2026-11-15T03:40:47.275Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c0kdgbf8",
-      "note": "#8: strip debris; proof; was: (was #2449 c1) The typed plot plan implements checked marks, channels, scales, axes, legends, facets and layers in source [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-15T03:40:46.336Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#6: strip debris; proof; was: (was #2300 c2) Typed target capabilities and validated provider source cover MMIO, clock, entropy, scheduler, byte sink, allocator, panic and startup [precut audit: no dev test, golden, case or snapsh"
-    },
-    {
-      "at": "2026-11-15T03:40:45.454Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#5: strip debris; proof; was: (was #3244) Jet tests cover what the retired target_machines tests checked (selected target machine, no-OS machine rejects dev explicitly, MCU firmware build writes ELF, map, audit and size budget, ta"
-    },
-    {
-      "at": "2026-11-15T03:40:44.374Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#4: strip debris; one outcome with proof; was: (was #3244) verify target rejection and unused dependency exclusion. (was #3239 c55)"
-    },
-    {
-      "at": "2026-11-15T03:40:43.399Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#3: strip debris; one outcome with proof; was: (was #3244) bound buffers and cancellation work. (was #3239 c54)"
-    },
-    {
-      "at": "2026-11-15T03:40:42.457Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c09brw5t",
-      "note": "#2: strip debris; one outcome with proof; was: (was #3244) Distinguish MMIO volatility from synchronization. (was #3239 c53)"
     }
   ],
   "nextNum": 368,
