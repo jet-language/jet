@@ -446,8 +446,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     // tree; any other tool is looked up through the action's toolchain.
     made_tool: action.inputs.contains(action.argv[0])
     executable := if made_tool -> files.join(project_root, action.argv[0]) else -> build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
-    executable_bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
-    executable_digest: ContentDigest.from_bytes(executable_bytes)
+    executable_digest: build_tool_digest(action, inputs, executable) ?? return Err(err)
     action_probe_names := [String]{}
     loop probe in action.probes -> action_probe_names.push(plan.probes[probe.id].name)
     effective_probe_facts := [BuildProbeFact]{}
@@ -561,6 +560,19 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         return Err(build_native_sandbox_error(action, err))
     }
     Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command, reuse, cpu_limit_ms}})
+}
+
+// The digest the action's key holds for its tool at `executable`: a made
+// tool's is its declared input's snapshot digest, which already hashed its
+// bytes (a made jet is over a hundred megabytes), so they are read and hashed
+// once; any other tool's is that of its file's bytes, or of its name when it
+// is no file.
+build_tool_digest: fn(action: HermeticBuildAction, inputs: [ActionInputCapture], executable: String) -[FS]> ContentDigest BuildExecutionError! {
+    loop input in inputs {
+        if input.snapshot.path == action.argv[0] -> return Ok(input.snapshot.digest.copy())
+    }
+    bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
+    Ok(ContentDigest.from_bytes(bytes))
 }
 
 // `action` with each found folder bound from the folder its find_folder
