@@ -2727,7 +2727,9 @@ ir_raw_deref: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int
 // `mem.address_of(place)`: the numeric address of the place's storage. A
 // pointee `p.*` is the pointer itself; any other place is its write address
 // (ir_place_address), which must be the storage, never a scratch cell, and
-// joins the function's sentry frame (ir_sentry_register).
+// joins the function's sentry frame (ir_sentry_register). A List element's
+// storage is the List's live elements, so a pointer to one may step to any
+// other (ir_sentry_register_elements).
 ir_raw_address_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: BodyPlace, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     value: if place == {
@@ -2746,15 +2748,58 @@ ir_raw_address_of: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place
             return ir_fail_slot(b, span, "raw address of a scalar local outside a frame cell")
         }
         if !ir_failed(b) && address >= 0 {
+            if ir_sentry_register_elements(m, p, b, value, span) -> return ir_raw_address_result(m, b, row, address)
+            if ir_failed(b) -> return -1
             place_ty: ir_ty(p, b, value)
             place_row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
             ir_sentry_register(m, p, b, address, place_row)
         }
     }
     if ir_failed(b) || address < 0 -> return -1
+    ir_raw_address_result(m, b, row, address)
+}
+
+// The address `address` as the raw address row `row`.
+ir_raw_address_result: fn(m: &IRModule, b: &IRBuilder, row: Int, address: Int) -> Int Never! {
     result: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Copy, result, address, -1, -1, b.line)
     result
+}
+
+// When `place` is an element of a List: the List's live elements, from its
+// data to its length's last byte, join the function's sentry frame as one
+// range, and the answer is true. An element is no allocation of its own:
+// `mem.address_of(xs[0])` names the elements, and a raw range read from it
+// (`mem.list_append(xs, first, xs.len())`) stays inside them. False for any
+// other place, or when the image keeps no sentry.
+ir_sentry_register_elements: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Bool Never! {
+    if !p.sentries -> return false
+    node := place
+    loop {
+        if ir_body_node(p, b, node).kind == .Borrow(inner, _) {
+            node = inner
+        } else if ir_body_node(p, b, node).kind == .Move(inner) {
+            node = inner
+        } else {
+            break
+        }
+    }
+    base := -1
+    if ir_body_node(p, b, node).kind == .Index(list_place, _, kind, _, _, _) {
+        if kind == .List || kind == .FixedListProof -> base = list_place
+    }
+    if base < 0 -> return false
+    backs := [IRWriteBack]{}
+    list: ir_place_address(m, p, b, base, backs, span)
+    if ir_failed(b) || list < 0 || backs.len() > 0 || ir_kind_of(m, b, list) != .Aggregate -> return false
+    row: ir_list_item(m, p, b, list) ?? return false
+    data: ir_list_data(m, b, list)
+    length: ir_list_length(m, b, list)
+    stride: ir_list_stride(m, row)
+    width: ir_word_const(m, b, stride)
+    bytes: ir_word_op(m, b, IROp.Mul, length, width)
+    _: ir_runtime(m, b, "jet_rt_sentry_register_stack_allocation", [Int]{data, bytes}, -1)
+    true
 }
 
 // `Ptr<T>.from_addr(address)`: the numeric address as a raw pointer.
