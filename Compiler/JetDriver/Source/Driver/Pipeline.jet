@@ -60,6 +60,7 @@ use {
         sema_comptime_render_methods,
         SemaComptimeRenderMemo,
         SemaCallSiteFact,
+        SemaCoreBody,
         sema_collect_comptime_declarations,
         sema_checked_shape_defaults,
         sema_comptime_append_checked_function_to_module,
@@ -4690,6 +4691,9 @@ JetDriverLoweringInputs: struct {
     // The Core library's check (JetDriverCompileRequest.core_seal): the
     // lines of the Core seal (JetSema CoreSeal.jet sema_core_seal_lines).
     core_seal: [String]{[String]{}}
+    // The Core library's check: the Prelude's function checks as packets
+    // (JetSema CoreBodies.jet).
+    core_bodies: [SemaCoreBody]{[SemaCoreBody]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5839,7 +5843,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             registration_graph.decls = DeclTable{}
             symbols := registration_graph.symbols.move()
             registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), core_seal: checked_graph.core_seal.move(), core_bodies: checked_graph.core_bodies.move()})
             jet_driver_trace_step_end(request.trace_sink, "driver.check.capture", -1)
         }
         return result

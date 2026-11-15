@@ -1,0 +1,150 @@
+// The Prelude's checked bodies as the Core library's check leaves them, for
+// a later compile to take in place of checking them from text. While the
+// registration graph's `core_seal` is set (the Core library's check, JetCli
+// CoreLibrary.jet), each Prelude function's check is captured as the packet
+// (SemaParallelBody) a compiler thread hands the module pass, and written
+// with the packet codec (BodyPacketCodec.jet) before the module pass reads
+// it. So a capture holds the check's own result and none of what the
+// whole-program passes write after it. The packet's ids are written as
+// positions in lists of their keys in that check (symbol and declaration
+// keys, module identities), which a compile resolves to its own ids. The
+// Core library writes the captures as `{prefix}.bodies`
+// (sema_core_bodies_bytes):
+//
+//   header, count, then per body: key, symbol keys, declaration keys,
+//   module identities, packet bytes
+//
+// each string and list in the codec's form (BodyCodecRows.jet) and the
+// packet bytes as their count and the bytes.
+use jet_foundation.[
+    BodyCodecIn,
+    BodyCodecOut,
+    DeclID,
+    Diagnostic,
+    ModuleID,
+    SymbolID,
+    body_codec_get_count,
+    body_codec_get_string,
+    body_codec_out,
+    body_codec_put_count,
+    body_codec_put_string,
+    compiler_take_rows,
+    decl_table_key,
+    module_is_core,
+    module_text,
+    symbol_table_key,
+]
+
+SEMA_CORE_BODIES_HEADER: "jet core bodies 1"
+
+// One captured check: the function's symbol key, its packet's bytes, and
+// the keys of the symbols, declarations and modules the bytes name by
+// position.
+SemaCoreBody: struct {
+    key: String
+    bytes: [U8]
+    symbols: [String]
+    decls: [String]
+    modules: [String]
+}
+
+// A body of a bodies file: its key, the keys its packet names by position,
+// and where the packet's bytes are in the file (`at` up to `end`).
+SemaCoreBodyRow: struct {
+    key: String
+    at: Int
+    end: Int
+    symbols: [String]
+    decls: [String]
+    modules: [String]
+}
+
+// The Prelude: the canonical effect package and the Core modules
+// `core.prelude` and `core`.
+sema_core_prelude_module: fn(package_identity: String, module_identity: ModuleID, module_name: String) -> Bool Never! {
+    package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || (module_is_core(module_identity) && (module_name == "core.prelude" || module_name == "core"))
+}
+
+// Does the Core library's check capture the function checks of module
+// `module_index`, a Prelude module?
+sema_core_body_capturing: fn(program: SemaProgramTables, module_index: Int) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        if !graph.core_seal -> return false
+        return sema_core_prelude_module(graph.modules[module_index].package_identity, graph.modules[module_index].module_identity, graph.modules[module_index].module_name)
+    }
+    false
+}
+
+// Captures into `bodies` the check `checked` of function `owner_id` as its
+// packet: the result, the diagnostics the check added to `diagnostics` from
+// `diagnostic_start`, and its call facts, comptime requests and name
+// references, the whole of each list. The packet is drained back
+// (sema_check_drain_body), so every row ends where it was and none is
+// copied.
+sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, checked: &&SemaFunctionResult, diagnostics: &[Diagnostic], diagnostic_start: Int, call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], bodies: &[SemaCoreBody]) -> SemaFunctionResult {
+    own := [Diagnostic]{}
+    loop diagnostics.len() > diagnostic_start {
+        diagnostic: diagnostics.pop() ?? break
+        own.push(diagnostic)
+    }
+    own.reverse()
+    packet: SemaParallelBody{job_index: 0, checked: Val(checked.move()), diagnostics: own.move(), call_facts: compiler_take_rows<SemaCallSiteFact>(call_facts), comptime_requests: compiler_take_rows<SemaComptimeRequest>(comptime_requests), name_references: compiler_take_rows<SemaNameReferenceFact>(name_references), method_input: None, wanted_hooks: false}
+    out := body_codec_out()
+    body_codec_put_semaparallelbody(out, packet)
+    if program.registration_graph == .Val(graph) {
+        symbols: loop id in out.symbols -> "{symbol_table_key(graph.symbols, id)}"
+        decls: loop id in out.decls -> "{decl_table_key(graph.decls, graph.symbols, id)}"
+        modules: loop id in out.modules -> "{module_text(graph.module_table, id)}"
+        bodies.push(SemaCoreBody{key: "{symbol_table_key(graph.symbols, owner_id)}", bytes: out.bytes.move(), symbols: symbols, decls: decls, modules: modules})
+    }
+    sema_check_drain_body(packet, diagnostics, call_facts, comptime_requests, name_references)
+}
+
+// The bodies file of `bodies` (above).
+sema_core_bodies_bytes: fn(bodies: [SemaCoreBody]) -> [U8] Never! {
+    out := body_codec_out()
+    body_codec_put_string(out, SEMA_CORE_BODIES_HEADER)
+    body_codec_put_count(out, bodies.len())
+    loop body in bodies {
+        body_codec_put_string(out, body.key)
+        sema_core_bodies_put_keys(out, body.symbols)
+        sema_core_bodies_put_keys(out, body.decls)
+        sema_core_bodies_put_keys(out, body.modules)
+        body_codec_put_count(out, body.bytes.len())
+        loop byte in body.bytes -> out.bytes.push(byte)
+    }
+    out.bytes.move()
+}
+
+sema_core_bodies_put_keys: fn(out: &BodyCodecOut, keys: [String]) Never! {
+    body_codec_put_count(out, keys.len())
+    loop key in keys -> body_codec_put_string(out, key)
+}
+
+// The rows of the bodies file `bytes`; None when it is not one, or is cut
+// short or malformed.
+sema_core_bodies_rows: fn(bytes: [U8]) -> [SemaCoreBodyRow]? Never! {
+    input := BodyCodecIn{at: 0, end: bytes.len(), failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    if body_codec_get_string(bytes, input) != SEMA_CORE_BODIES_HEADER -> return None
+    // Each body is at least five bytes: its key's length and four counts.
+    count: body_codec_get_count(bytes, input, 5)
+    rows := [SemaCoreBodyRow]{}
+    loop _ in 0..<count {
+        key: body_codec_get_string(bytes, input)
+        symbols: sema_core_bodies_keys(bytes, input)
+        decls: sema_core_bodies_keys(bytes, input)
+        modules: sema_core_bodies_keys(bytes, input)
+        size: body_codec_get_count(bytes, input, 1)
+        if input.failed -> return None
+        rows.push(SemaCoreBodyRow{key: key, at: input.at, end: input.at + size, symbols: symbols, decls: decls, modules: modules})
+        input.at += size
+    }
+    if input.failed || input.at != input.end -> return None
+    Val(rows.move())
+}
+
+// A list of keys of a bodies file.
+sema_core_bodies_keys: fn(bytes: [U8], input: &BodyCodecIn) -> [String] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    loop _ in 0..<count -> body_codec_get_string(bytes, input)
+}

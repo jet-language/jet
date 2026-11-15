@@ -537,6 +537,21 @@ from JetFoundation and adds only the JetSema types.
 `Compiler/JetSema/Tests/BodyCodec.jet` round-trips every checked body of a
 program and a packet per checked function.
 
+**The capture.** The Core library's check (`JetCli/CoreLibrary.jet`, with
+`SemaRegistrationGraph.core_seal` set) captures each function check of a
+Prelude module (the canonical effect package and the Core modules
+`core.prelude` and `core`, the counter's `prelude` category) as its packet,
+right after the check and before the module pass reads it
+(`Compiler/JetSema/Source/Sema/CoreBodies.jet`). The packet is written,
+then drained back into the module's rows, so the capture moves rows and
+copies none. A method's packet carries no method input: its diagnostics
+already hold its preparation's, as a prepared packet's do, and a compile
+recomputes the input against its own memory plan. A packet's id lists are
+written as keys in that check (symbol and declaration keys, module
+identities). The library writes the captures, in module order, as
+`{prefix}.bodies`. A body the comptime pass checked first and the module
+pass reused is not captured, and is checked from text as before.
+
 #### 3.3.1 Fields that whole-program passes write (H10)
 
 These `FnBody` fields are written after a body's own check by passes that
