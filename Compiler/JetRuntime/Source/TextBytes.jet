@@ -169,12 +169,13 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
     length
 }
 
-// jet_raw_string_byte: CAbiRoutes fixed::<u64> decodes the exact Int index,
-// then the compiler-checked byte is read without a bound.
+// jet_raw_string_byte: CAbiRoutes fixed::<u64> decodes the exact Int index;
+// an index outside the text's bytes is the index-range stop, so no caller
+// reads past the storage.
 #Export(c) jet_raw_string_byte: fn(value: I64, index: I64) -> I64 {
     at: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (at < I64{0}) {
+    if (at < I64{0} || at >= rt_text_len(value)) {
         trap_native_index_range_stop()
         return I64{0}
     }

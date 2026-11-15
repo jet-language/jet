@@ -313,8 +313,8 @@ process's, the rest the calling thread's), `flush`,
 and ETF decoding enter.
 `jet.runtime.process` holds the signal subscription calls `signal_open`,
 `signal_close` and `signal_disposition` (`-[Exec]>`). Any package can call a
-binding, so a leaf whose caller must first prove a bound or a UTF-8 encoding
-(`core.encoding.__string_byte`, `__bytes_into_text`) has none and stays Core's.
+binding, so a leaf whose caller must first prove a UTF-8 encoding
+(`core.encoding.__bytes_into_text`) has none and stays Core's.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in

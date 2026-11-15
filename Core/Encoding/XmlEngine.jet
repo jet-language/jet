@@ -136,9 +136,7 @@ utf8_scalar: fn(bytes: View<U8>, offset: Int) -> UTF8Scalar Never! {
             (Int{bytes[offset + 2]} % 64) * 64 + Int{bytes[offset + 3]} % 64, width: 4}
 }
 text_byte: fn(value: String, index: Int) -> U8 Never! {
-    #Unsafe("all callers iterate or check the UTF-8 byte bounds before borrowing this byte") {
-        rt.string_byte(value, U64{index})
-    }
+    rt.string_byte(value, U64{index})
 }
 byte_prefix_text: fn(bytes: View<U8>, start: Int, needle: String) -> Bool Never! {
     size: needle.count_bytes()

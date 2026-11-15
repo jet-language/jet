@@ -14,10 +14,10 @@ encoding: module {
     #Import(c) etf_strings_enter: fn(mode: Int) -> Int = "jet_rt_codec_etf_strings_enter"
     #Import(c) etf_strings_leave: fn(previous: Int) = "jet_rt_codec_etf_strings_leave"
 
-    // The byte at `index` of `text`, read without a bound, and `bytes` as
-    // text, copied without UTF-8 validation. `priv`: Core's audited
-    // `core.encoding.__string_byte` and `__bytes_into_text` call them after
-    // checking the bound or the encoding.
+    // The byte at `index` of `text`, where an index outside its bytes is the
+    // index-range stop, and `bytes` as text, copied without UTF-8
+    // validation. `priv`: Core's codecs and `core.testing` call them, the
+    // second only after checking the encoding.
     #Import(c) priv string_byte: fn(text: String, index: U64) -> U8 = "jet_raw_string_byte"
     #Import(c) priv bytes_into_text: fn(bytes: [U8]) -> String = "jet_raw_bytes_into_text"
 

@@ -1360,7 +1360,7 @@ unexercised native carrier or runtime receipt.
 | `jet.runtime.encoding.flush` (`priv`) | `stream.jet` JSON push, `csv.jet` and the XML writer | Existing file flush; source owns sticky terminal failure |
 | `jet.runtime.encoding.utf8_validate` (`priv`) | `CborParse.jet` text chunks, `CborStream.jet`, `csv.jet` queries and `stream.jet` text conversion | Existing strict validator; its Err message is the UTF-8 error text, and source chooses the validation point and maps errors |
 | `jet.runtime.encoding.bytes_into_text` (`priv`) | `stream.jet`, `csv.jet`, the CBOR and XML engines and `core.testing` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
-| `jet.runtime.encoding.string_byte` (`priv`) | `stream.jet`, the XML engine and `core.testing` checked string-byte accessors | Borrow byte only after source bounds proof |
+| `jet.runtime.encoding.string_byte` (`priv`) | `stream.jet`, the XML engine and `core.testing` string-byte accessors | Borrow one byte; an index outside the String's bytes is the index-range stop |
 
 The codec readers need no provider: the JSON, JSONL, CSV, XML and CBOR
 readers are generic over `R: Reader` and pull bytes through

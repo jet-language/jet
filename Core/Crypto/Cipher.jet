@@ -82,9 +82,7 @@ XTS_DEC: 10
 // geometrically, which could leave freed copies behind.
 words: fn(count: Int) -> [U64] Never! {
     w := [U64]{}
-    #Unsafe("Core cipher workspace reserves its complete operation-owned word capacity before filling") {
-        if !mem.__list_reserve_exact<U64>(w, count) -> panic("cipher workspace allocation failed")
-    }
+    if !mem.__list_reserve_exact<U64>(w, count) -> panic("cipher workspace allocation failed")
     loop _ in 0..<count -> w.push(U64{0})
     w
 }
@@ -98,9 +96,7 @@ zero_bytes: fn(count: Int) -> [U8] Never! {
 
 /// Grow `out`'s capacity by exactly `count` bytes before they are appended.
 reserve: fn(out: &[U8], count: Int) Never! {
-    #Unsafe("Core cipher output reserves its exact public output width before filling") {
-        if !mem.__list_reserve_exact<U8>(out, count) -> panic("cipher output allocation failed")
-    }
+    if !mem.__list_reserve_exact<U8>(out, count) -> panic("cipher output allocation failed")
 }
 
 /// `count` bytes of `src` from `off`, in a buffer of exactly that size.

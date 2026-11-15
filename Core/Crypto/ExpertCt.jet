@@ -10,9 +10,7 @@ use {
 
 arena: fn(words: Int) -> [I64] Never! {
     w := [I64]{}
-    #Unsafe("Core fixed-limb workspace reserves its complete operation-owned word capacity before filling") {
-        if !mem.__list_reserve_exact<I64>(w, words) -> panic("crypto workspace allocation failed")
-    }
+    if !mem.__list_reserve_exact<I64>(w, words) -> panic("crypto workspace allocation failed")
     loop _ in 0..<words -> w.push(I64{0})
     w
 }
@@ -36,9 +34,7 @@ load: fn(w: &[I64], at: Int, data: [U8]) Never! {
 }
 extract: fn(w: [I64], at: Int, count: Int) -> [U8] Never! {
     out := [U8]{}
-    #Unsafe("Core fixed-limb extraction reserves its exact public output width before filling") {
-        if !mem.__list_reserve_exact<U8>(out, count) -> panic("crypto output allocation failed")
-    }
+    if !mem.__list_reserve_exact<U8>(out, count) -> panic("crypto output allocation failed")
     loop i in 0..<count -> out.push(wrapping(U8{byte(w, at + i)}))
     out
 }
@@ -322,9 +318,7 @@ reduce: fn(w: &[I64], hash: Int) Never! {
 }
 hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
     data := [U8]{}
-    #Unsafe("Core Ed25519 hashing reserves the exact combined public part lengths before filling") {
-        if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) -> panic("crypto hash input allocation failed")
-    }
+    if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) -> panic("crypto hash input allocation failed")
     loop i in 0..<an -> data.push(wrapping(U8{byte(w, a + i)}))
     loop i in 0..<bn -> data.push(wrapping(U8{byte(w, b + i)}))
     loop v in msg -> data.push(v)

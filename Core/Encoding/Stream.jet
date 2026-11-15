@@ -1170,11 +1170,7 @@ byte_at: fn(text: String, index: Int) -> U8 Never! {
         noun: if length == 1 -> "item" else -> "items"
         panic("the list has {length} {noun}, so position {index} doesn't exist")
     }
-    result := U8{0}
-    #Unsafe("the byte position was checked against this String's storage length") {
-        result = rt.string_byte(text, U64{index})
-    }
-    result
+    rt.string_byte(text, U64{index})
 }
 
 write_ascii: fn(out: &[U8], text: String) Never! {
