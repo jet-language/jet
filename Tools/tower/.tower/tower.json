@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6891,
-    "rev": 103750,
+    "nextNum": 6893,
+    "rev": 103775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72824,21 +72824,21 @@
         },
         {
           "n": 3,
-          "text": "The ratified API is implemented in Core with no gap left from the research list on Linux, macOS and Windows targets: each command has an example with golden output on o0/o1/o2 (driven through a pseudo-terminal), and raw mode is restored after a panic in a test.",
+          "text": "D-TERM-COMMANDS1=A is built: `term.execute(...)` takes any number of `term.Command` cases (.ClearBuffer, .EnableRawMode, .EnterAlternateScreen, .HideCursor, .MoveTo, .Print and the rest of the research list) and writes them at once; every lasting setting records its undo, run on return, exit, panic, stop and SIGINT, SIGTERM, SIGHUP and SIGQUIT, on Linux, macOS and Windows. Proof: `jet test Compiler --profile golden --filter Systems/Terminal/Execute` on O0, O1 and O2 through a pseudo-terminal, and `jet test Compiler --profile cases --filter term/raw_mode_restored_after_panic`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:32:33.827Z"
+          "at": "2026-11-15T03:36:22.764Z"
         },
         {
           "n": 4,
-          "text": "The ratified but unbuilt terminal decisions are implemented: D-CORE-TERMSTDIN1 (Core/Term/Term.jet:43,64,84 still say is_tty) and D-TERM-INCREMENTAL1 (term.keys(); read_key retired), with examples driven through a pseudo-terminal on o0, o1 and o2.",
+          "text": "D-CORE-TERMSTDIN1=A and D-TERM-INCREMENTAL1=A are built: the input, output and error handles answer `is_terminal()` (is_tty is renamed at Core/Term/Term.jet:62,129,149), and `term.keys()` returns a Receiver<Key> giving one whole key per receive, with `read_key` (Term.jet:427) deleted. Proof: `git grep -n -E 'is_tty|read_key' -- Core` prints nothing and `jet test Compiler --profile golden --filter Systems/Terminal/Keys` passes on O0, O1 and O2 through a pseudo-terminal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T15:17:47.316Z"
+          "at": "2026-11-15T03:36:23.952Z"
         },
         {
           "n": 7,
@@ -72912,8 +72912,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-13T02:09:11.035Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:36:23.952Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 14
     },
     {
@@ -79537,84 +79537,85 @@
       "criteria": [
         {
           "n": 1,
-          "text": "core.tui and the #Live registry row are gone; tui examples and tests import the `tui` package and #term.Live, and their goldens pass on O0/O1/O2; `use core.tui` fails with the ordinary unknown-module error (no teaching error or snapshot).",
+          "text": "core.tui and the #Live registry row are gone; tui examples and tests import the `tui` package and #term.Live, and their goldens pass on O0, O1 and O2; `use core.tui` fails with the ordinary unknown-module error (no teaching error or snapshot). Proof: `git ls-files Core/Tui` prints nothing and `jet test Compiler --profile golden --filter Tui/` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:10:32.383Z"
+          "at": "2026-11-15T03:36:14.560Z"
         },
         {
           "n": 2,
-          "text": "(was #2467 c1) A Jet program declares a typed model, routes keyboard, resize, timer, and I/O events through Update, runs asynchronous commands, and renders a View without blocking redraw, proven by a tests/cases row.",
+          "text": "A tui program declares a typed model, routes keyboard, resize, timer and I/O events through update, runs asynchronous commands, and renders its view without blocking redraw. Proof: `jet test Compiler --profile cases --filter tui/model_update_view`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:37.402Z"
+          "at": "2026-11-15T03:36:15.768Z"
         },
         {
           "n": 3,
-          "text": "(was #2467 c2) A Widget and StatefulWidget-style render unit receives typed geometry and state, and nested constraints produce deterministic layouts at narrow and wide terminal sizes, proven by a tests/cases row.",
+          "text": "A widget and a stateful widget receive typed geometry and state, and nested constraints give deterministic layouts at narrow and wide terminal sizes. Proof: `jet test Compiler --profile cases --filter tui/widget_layout_sizes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:38.421Z"
+          "at": "2026-11-15T03:36:16.897Z"
         },
         {
           "n": 4,
-          "text": "(was #2467 c3) The same `core.ui` tree renders through TuiBackend in the `jet dev` terminal host and in a user TUI, with no duplicate widget implementation, proven by a tests/cases row.",
+          "text": "The same ui node tree (D-UI-HOME1=A, the `ui` package) renders through the tui backend in the `jet dev` terminal host and in a user TUI, with no second widget implementation. Proof: `jet test Compiler --profile cases --filter tui/ui_tree_shared_backend`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:39.435Z"
+          "at": "2026-11-15T03:36:17.902Z"
         },
         {
           "n": 5,
-          "text": "(was #2467 c4) Styles choose ANSI16, ANSI256, truecolor, or ASCII behavior from terminal capability, and visible-width measurement keeps Unicode blocks aligned while NO_COLOR stays plain, proven by a tests/cases row.",
+          "text": "Styles pick ANSI16, ANSI256, truecolor or ASCII from terminal capability, visible-width measurement keeps Unicode blocks aligned, and NO_COLOR stays plain (ANSI text itself is core.term's, D-TUI-ANSI1=A). Proof: `jet test Compiler --profile cases --filter tui/style_capability`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:40.489Z"
+          "at": "2026-11-15T03:36:18.858Z"
         },
         {
           "n": 6,
           "text": "(was #2467 c5) Normal return, error propagation, panic, and interrupted input restore terminal state and leave no raw-mode residue, proven by a tests/cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:22:41.534Z"
+          "evidence": "Merged into #6446 c9: terminal restore on every exit path is part of the managed run criterion",
+          "at": "2026-11-15T03:36:25.225Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
-          "text": "(was #2467 c6) Remapped key bindings drive dispatch and generated help from one typed declaration, including a narrow-terminal help layout, proven by a tests/cases row.",
+          "text": "Remapped key bindings drive dispatch and generated help from one typed declaration, including a narrow-terminal help layout. Proof: `jet test Compiler --profile cases --filter tui/key_bindings_help`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:22:42.580Z"
+          "at": "2026-11-15T03:36:19.768Z"
         },
         {
           "n": 8,
-          "text": "(was #2470 c1) Implementation-only closure: TUI interaction, headless frame capture, readiness waits, cursor movement, click dispatch, and recordings operate on typed element IDs, hit regions, semantic cursor, and target-owned readiness rather than rendered-text parsing [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "TUI interaction, headless frame capture, readiness waits, cursor movement, click dispatch and recordings work on typed element ids, hit regions, a semantic cursor and target-owned readiness, never by parsing rendered text. Proof: `jet test Compiler --profile cases --filter tui/headless_driver_typed_ids`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:47:33.282Z"
+          "at": "2026-11-15T03:36:20.729Z"
         },
         {
           "n": 9,
-          "text": "The `tui` package publishes only the managed `tui.run`: it takes the typed model, update, view and adapt callbacks and returns the owned final model; commands are children of the structured task scope; the terminal guard is the only raw-mode boundary, restored exactly on exit, failure and panic; a non-TTY paints one frame and returns NonTty. Proof: `jet test Compiler --profile golden --filter tui/run_tasks` and `jet test Compiler --profile cases --filter tui_run_pty_`.",
+          "text": "The `tui` package publishes only the managed `tui.run`: it takes the typed model, update, view and adapt callbacks and returns the owned final model; commands are children of the structured task scope; the terminal guard is the only raw-mode boundary and leaves no raw-mode residue after normal return, error, panic or interrupted input; a non-TTY paints one frame and returns NonTty. Proof: `jet test Compiler --profile golden --filter tui/run_tasks` and `jet test Compiler --profile cases --filter tui_run_pty_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T03:30:12.265Z"
+          "at": "2026-11-15T03:36:21.709Z"
         },
         {
           "n": 10,
@@ -79634,7 +79635,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-15T03:30:13.384Z",
+      "updated": "2026-11-15T03:36:25.225Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 10
     },
@@ -82196,83 +82197,92 @@
         {
           "n": 1,
           "text": "(was #3088 c1) Trace identity survives one permitted service boundary [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:54.882Z"
+          "evidence": "Moved to #6892 c1: tracing gets its own card",
+          "at": "2026-11-15T03:36:26.443Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
           "text": "(was #3088 c2) No request principal is inferred from a trace header [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:55.517Z"
+          "evidence": "Merged into #6892 c1: no inferred principal is part of the boundary criterion",
+          "at": "2026-11-15T03:36:27.498Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
           "text": "(was #3088 c3) Secret-bearing values do not appear in logs/facts/export [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:56.170Z"
+          "evidence": "Moved to #6892 c2: tracing gets its own card",
+          "at": "2026-11-15T03:36:28.430Z",
+          "closure": "obsolete"
         },
         {
           "n": 4,
           "text": "(was #3088 c4) Loss/sampling/retention and exporter failure are observable without blocking request correctness [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:56.884Z"
+          "evidence": "Moved to #6892 c3: tracing gets its own card",
+          "at": "2026-11-15T03:36:29.429Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "(was #3088 c8, #3101 c4) Exercise a service correlates one request across a permitted boundary and exports only redacted chosen fields. with independent client/system evidence before a capability claim [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:57.545Z"
+          "evidence": "Merged into #6892 c2: the exercise is the boundary plus redacted export, covered by OBSLOG c1 and c2",
+          "at": "2026-11-15T03:36:30.504Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
           "text": "(was #3176 c1) Use exact source/build/output receipts for one fixed-message, one composed-message, one two-language message fixture, one redacted-field and one wrapper-call example; the language fixture is ordinary data, not a claim of shipped localization support [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:58.203Z"
+          "evidence": "Moved to #6892 c4: log source identity gets the tracing card",
+          "at": "2026-11-15T03:36:31.651Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "(was #3176 c2) Show whether the existing stable event field locates the correct source after message composition/translation/redaction and across a wrapper; distinguish a developer-supplied key from compiler-verified source identity [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:58.859Z"
+          "evidence": "Merged into #6892 c4: same outcome as the event-source fixtures",
+          "at": "2026-11-15T03:36:32.591Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "(was #3176 c3) Verify field values/redaction through existing text, JSON and telemetry views without leaking the redacted value or treating absent payload as empty proof. Keep sink/protocol/bounds/observer-cost work coordinated with CORE-F023 [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:59.518Z"
+          "evidence": "Moved to #6892 c5: log source identity gets the tracing card",
+          "at": "2026-11-15T03:36:33.518Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "(was #3176 c4) A source lookup must verify source content identity before navigating. Do not reinterpret the current fixed Prelude source metadata as the original Jet call site [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:46:00.178Z"
+          "evidence": "Moved to #6892 c6: log source identity gets the tracing card",
+          "at": "2026-11-15T03:36:34.518Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
@@ -82282,6 +82292,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T04:52:21.568Z"
+        },
+        {
+          "n": 13,
+          "text": "core.metrics declares counter, gauge and histogram instruments as constants and exports them through a provider (D-LOGTRACE1=A metrics hooks, D-CORE-PROVIDER1=A); the exact public names wait on an owner ballot (owner-gates row). Proof: `jet test Compiler --profile golden --filter Systems/Metrics` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:12.250Z"
         }
       ],
       "refs": [],
@@ -82296,9 +82315,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:03.436Z",
-      "updated": "2026-11-13T02:09:18.511Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 12
+      "updated": "2026-11-15T03:36:34.518Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 13
     },
     {
       "id": "c0s9rdnu",
@@ -98205,7 +98224,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-15 TowerKeeper-1 (plan approved by Main): retitled as the codec cutover card. c2-c7 were already met; c1 is cutover SUB 1 (473701c0ba) and stays. c1, c8, c10 and c11 restated with exact proofs; c12 unchanged."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98324,7 +98349,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-15T03:34:09.753Z",
+      "updated": "2026-11-15T03:34:10.862Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 12
     },
@@ -103068,6 +103093,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:10.450Z"
+        },
+        {
+          "n": 6,
+          "text": "Every Jet-owned human status line (CLI, compiler, runtime) goes through the one output adapter: TTY capability, TERM, NO_COLOR and `--color` select ANSI or plain, and `--json` writes only the machine schema. Proof: `jet test Compiler --profile cases --filter cli/human_output_modes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:13.372Z"
         }
       ],
       "refs": [],
@@ -103081,8 +103115,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:10.450Z",
-      "updated": "2026-11-15T03:03:10.450Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:36:13.372Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 6
     },
     {
       "id": "c0kgt885",
@@ -104622,6 +104657,184 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:32:39.427Z",
       "updated": "2026-11-15T03:32:39.427Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0m0b2xt",
+      "num": 6891,
+      "title": "Guided input from #CLI: typed prompts and forms that match the parser, with accessible, non-TTY and pipeline modes",
+      "body": "Destination: a `#CLI` declaration also drives interactive input: a guided field sequence and multi-page forms whose values, defaults, environment inputs and final typed result match the ordinary argv parser, with validation that keeps the invalid value, Unicode-safe editing, accessible and non-TTY modes that need no alternate screen, and small prompts that compose in shell pipelines.\n\nWhy it matters: one checked schema serves both flags and prompts, so an interactive run can never accept what the parser would refuse.\n\nDecisions: D-DX-PROMPT1=A (guided input gets its fields from the CLI schema), D-TERM-COMMANDS1=A, D-CORE-TERMSTDIN1=A.\n\nSource: #6315 c9-c13 (archived #2468, source-only acceptance, never run), #3242 c42 (archived #3294). The one CLI model is #3242.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A `#CLI` declaration derives a guided field sequence whose values, defaults, environment inputs and final typed result match the ordinary parser. Proof: `jet test Compiler --profile cases --filter cli/prompt_matches_parser`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        },
+        {
+          "n": 2,
+          "text": "One command fixture driven once through argv and once through interactive selection gives identical ParsedArgs and validation; nested navigation, invalid input, EOF and cancel, secret input and I/O failure run under a real PTY; no handler runs before the caller dispatches, and no second command schema is added. Proof: `jet test Compiler --profile cases --filter args_prompt_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        },
+        {
+          "n": 3,
+          "text": "A multi-page form validates on field change and on submit, keeps the invalid value, and reports a semantic correction without running the command body. Proof: `jet test Compiler --profile cases --filter cli/prompt_form_validation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        },
+        {
+          "n": 4,
+          "text": "Single-line and multiline fields accept Unicode paste, cursor movement and scrolling without splitting a code point or losing visible text. Proof: `jet test Compiler --profile cases --filter cli/prompt_editing_unicode`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        },
+        {
+          "n": 5,
+          "text": "TTY, accessible, NO_COLOR, CI and non-TTY modes give labeled deterministic prompts, need no alternate screen, and return a stable status for invalid input. Proof: `jet test Compiler --profile cases --filter cli/prompt_modes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        },
+        {
+          "n": 6,
+          "text": "A small prompt composes in a shell pipeline, keeps machine output separate from the human prompt, and needs no full-screen application. Proof: `jet test Compiler --profile cases --filter cli/prompt_in_pipeline`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:10.146Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "cli",
+        "term"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:36:10.146Z",
+      "updated": "2026-11-15T03:36:10.146Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c038h2n6",
+      "num": 6892,
+      "title": "core.log across boundaries: traces cross one service boundary, secrets never leak, and every record keeps a verified source",
+      "body": "Destination: core.log carries trace identity across one permitted service boundary without inferring a principal from the header; secret-bearing values never reach logs, facts or exports; loss, sampling, retention and exporter failure are visible without blocking requests; and each record's event field locates its true source after composition, translation, redaction and wrappers, verified against source content before navigating.\n\nWhy it matters: observability that leaks secrets or points at the wrong line is worse than none.\n\nDecisions: D-LOGTRACE1=A, D-LOG-SPAN-SCOPE1=A, D-LOG-LADDER1=A. The web app's request tracing is #6830.\n\nSource: #6523 c1-c9 (archived #3088, #3101, #3176).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Trace identity survives one permitted service boundary, and no request principal is ever inferred from a trace header. Proof: `jet test Compiler --profile cases --filter log/trace_crosses_service_boundary`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        },
+        {
+          "n": 2,
+          "text": "Secret-bearing values never appear in logs, facts or exports; the export holds only the chosen redacted fields. Proof: `jet test Compiler --profile cases --filter log/secret_never_logged`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        },
+        {
+          "n": 3,
+          "text": "Loss, sampling, retention and exporter failure are observable and never block request correctness. Proof: `jet test Compiler --profile cases --filter log/exporter_failure_observable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        },
+        {
+          "n": 4,
+          "text": "A record's stable event field locates the right source after message composition, translation and redaction and through a wrapper call, and a developer-supplied key is distinct from compiler-verified source identity; fixtures cover a fixed message, a composed message, a two-language message (ordinary data, not shipped localization), a redacted field and a wrapper call. Proof: `jet test Compiler --profile golden --filter Systems/Log/EventSource` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        },
+        {
+          "n": 5,
+          "text": "Field values and redaction read the same through the text, JSON and telemetry views, never leak the redacted value, and treat an absent payload as absent, not empty. Proof: `jet test Compiler --profile cases --filter log/redaction_every_view`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        },
+        {
+          "n": 6,
+          "text": "A source lookup checks the source content identity before navigating, and fixed Prelude source metadata is never read as the original call site. Proof: `jet test Compiler --profile cases --filter log/source_lookup_checks_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:36:11.187Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "log",
+        "observability"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:36:11.188Z",
+      "updated": "2026-11-15T03:36:11.188Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -210041,6 +210254,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:36:34.518Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:36:33.518Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:36:32.591Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:36:31.651Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T03:36:30.504Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:36:29.429Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:36:28.430Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T03:36:27.498Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T03:36:26.443Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0ks5561",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T03:36:25.225Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0isxyo3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T03:36:23.952Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vqsfl8",
+      "note": "#4: current lines; proof; was: The ratified but unbuilt terminal decisions are implemented: D-CORE-TERMSTDIN1 (Core/Term/Term.jet:43,64,84 still say is_tty) and D-TERM-INCREMENTAL1 (term.keys(); read_key retired), with examples dri"
+    },
+    {
+      "at": "2026-11-15T03:36:22.764Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0vqsfl8",
+      "note": "#3: name the ratified decision; proof; was: The ratified API is implemented in Core with no gap left from the research list on Linux, macOS and Windows targets: each command has an example with golden output on o0/o1/o2 (driven through a pseudo"
+    },
+    {
+      "at": "2026-11-15T03:36:21.709Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#9: absorbs c6 (interrupted input); was: The `tui` package publishes only the managed `tui.run`: it takes the typed model, update, view and adapt callbacks and returns the owned final model; commands are children of the structured task scope"
+    },
+    {
+      "at": "2026-11-15T03:36:20.729Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#8: strip debris; proof; was: (was #2470 c1) Implementation-only closure: TUI interaction, headless frame capture, readiness waits, cursor movement, click dispatch, and recordings operate on typed element IDs, hit regions, semanti"
+    },
+    {
+      "at": "2026-11-15T03:36:19.769Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#7: strip debris; proof; was: (was #2467 c6) Remapped key bindings drive dispatch and generated help from one typed declaration, including a narrow-terminal help layout, proven by a tests/cases row."
+    },
+    {
+      "at": "2026-11-15T03:36:18.858Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#5: strip debris; proof; was: (was #2467 c4) Styles choose ANSI16, ANSI256, truecolor, or ASCII behavior from terminal capability, and visible-width measurement keeps Unicode blocks aligned while NO_COLOR stays plain, proven by a "
+    },
+    {
+      "at": "2026-11-15T03:36:17.902Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#4: strip debris; current homes; proof; was: (was #2467 c3) The same `core.ui` tree renders through TuiBackend in the `jet dev` terminal host and in a user TUI, with no duplicate widget implementation, proven by a tests/cases row."
+    },
+    {
+      "at": "2026-11-15T03:36:16.897Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#3: strip debris; proof; was: (was #2467 c2) A Widget and StatefulWidget-style render unit receives typed geometry and state, and nested constraints produce deterministic layouts at narrow and wide terminal sizes, proven by a test"
+    },
+    {
+      "at": "2026-11-15T03:36:15.768Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#2: strip debris; proof; was: (was #2467 c1) A Jet program declares a typed model, routes keyboard, resize, timer, and I/O events through Update, runs asynchronous commands, and renders a View without blocking redraw, proven by a "
+    },
+    {
+      "at": "2026-11-15T03:36:14.560Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0isxyo3",
+      "note": "#1: add proof; was: core.tui and the #Live registry row are gone; tui examples and tests import the `tui` package and #term.Live, and their goldens pass on O0/O1/O2; `use core.tui` fails with the ordinary unknown-module "
+    },
+    {
+      "at": "2026-11-15T03:36:13.372Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c05ghhdo",
+      "note": "#6 Every Jet-owned human status line (CLI, compiler, runtime) g"
+    },
+    {
+      "at": "2026-11-15T03:36:12.250Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ks5561",
+      "note": "#13 core.metrics declares counter, gauge and histogram instrumen"
+    },
+    {
+      "at": "2026-11-15T03:36:11.188Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c038h2n6",
+      "note": "core.log across boundaries: traces cross one service boundary, secrets never leak, and every record keeps a verified source"
+    },
+    {
+      "at": "2026-11-15T03:36:10.146Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0m0b2xt",
+      "note": "Guided input from #CLI: typed prompts and forms that match the parser, with accessible, non-TTY and pipeline modes"
+    },
+    {
+      "at": "2026-11-15T03:34:10.862Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0ue0hua",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-15T03:34:09.754Z",
       "by": "TowerKeeper-1",
