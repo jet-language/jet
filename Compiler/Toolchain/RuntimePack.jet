@@ -28,7 +28,7 @@
 // linker binds those objects alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and no `nm`: the step reads
 // the symbol tables of every object it makes itself and refuses
-// Rust symbols (built_object_sha256). The `--tree` folders are the runtime's and
+// Rust symbols (built_object_digest). The `--tree` folders are the runtime's and
 // its producer's sources: the IR builder, optimizer and selector, the x86-64
 // encoder, object writer and linker, and the WebAssembly selector and
 // encoder of the web partition. Their files make up the pack's identity.
@@ -242,13 +242,49 @@ rust_symbols: fn(bytes: [U8], what: String) -> String {
     ""
 }
 
-// The sha256 of the object the step built at `path`, which holds no Rust
+// A file's sha256, or the problem the step fails with over it.
+FileDigest: struct {
+    sha256: String
+    problem: String
+}
+
+file_digest: fn(path: String) -> FileDigest {
+    bytes: files.read_bytes(path) ?? return FileDigest{sha256: "", problem: "cannot read `{path}`: {err}"}
+    FileDigest{sha256: crypto.sha256(bytes).hex(), problem: ""}
+}
+
+// The digest of the object the step built at `path`, which holds no Rust
 // symbol: its bytes are read once for both.
-built_object_sha256: fn(path: String) -> String {
-    bytes: files.read_bytes(path) ?? fail("cannot read `{path}`: {err}")
+built_object_digest: fn(path: String) -> FileDigest {
+    bytes: files.read_bytes(path) ?? return FileDigest{sha256: "", problem: "cannot read `{path}`: {err}"}
     problem: rust_symbols(bytes, path)
-    if problem != "" -> fail(problem)
-    crypto.sha256(bytes).hex()
+    if problem != "" -> return FileDigest{sha256: "", problem: problem}
+    FileDigest{sha256: crypto.sha256(bytes).hex(), problem: ""}
+}
+
+// The digests of the built objects `objects` (built_object_digest), then of
+// the files `others`, in order, each read and hashed on a task of its own:
+// together they are hundreds of megabytes. Nothing fails here; digest_of
+// reports a problem where the step reads that digest.
+digests: fn(objects: [String], others: [String]) -> [FileDigest] {
+    found := [FileDigest]{}
+    task.group hashing {
+        built: loop path in objects -> task built_object_digest(path)
+        plain: loop path in others -> task file_digest(path)
+        loop (index, handle) in built {
+            found.push(handle.join() ?? FileDigest{sha256: "", problem: "hashing `{objects[index]}` stopped"})
+        }
+        loop (index, handle) in plain {
+            found.push(handle.join() ?? FileDigest{sha256: "", problem: "hashing `{others[index]}` stopped"})
+        }
+    }
+    found
+}
+
+// The sha256 `found` holds, moved out; the step fails with its problem.
+digest_of: fn(found: &&FileDigest) -> String {
+    if found.problem != "" -> fail(found.problem)
+    found.sha256.move()
 }
 
 inventory_value: fn(found: Inventory) -> Dyn {
@@ -396,7 +432,52 @@ pack: fn(args: [String]) {
     jet: absolute(flag(flags, "jet"))
     // Seed seam (#6328): remove once an admitted seed's build executor publishes runnable outputs 0755 and the s3 gate passes without this.
     files.set_mode(jet, 493) ?? fail("cannot make `{jet}` executable: {err}")
-    tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{built_version(jet)}", out: absolute(flag(flags, "out"))}
+    inputs: pack_inputs(root, flags, jet)
+    tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{inputs.sources.version}", out: absolute(flag(flags, "out"))}
+    source: inputs.sources.source
+    backend: inputs.sources.backend
+    lifecycle: inputs.sources.lifecycle
+    compiler_sha256: digest_of(inputs.compiler)
+    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256)
+    // The step's folder, not /tmp: the runtime build's files outgrow a small
+    // temporary file system.
+    work: files.join(root, ".runtime-pack")
+    files.remove_all(work) ?? ()
+    files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
+    build(tool, work, source, backend, lifecycle, compiler_sha256, recipe)
+    files.remove_all(work) ?? ()
+    files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
+}
+
+// What the pack is made from (pack_sources) and the digest of the jet at
+// `jet`, which is hashed on a task while its version is asked and the
+// inventories are read.
+PackInputs: struct {
+    sources: PackSources
+    compiler: FileDigest
+}
+
+pack_inputs: fn(root: String, flags: Flags, jet: String) -> PackInputs {
+    found := [PackInputs]{}
+    task.group compiler_hash {
+        hashing: task file_digest(jet)
+        sources: pack_sources(root, flags, jet)
+        found.push(PackInputs{sources: sources, compiler: hashing.join() ?? FileDigest{sha256: "", problem: "hashing `{jet}` stopped"}})
+    }
+    found.pop() ?? fail("the pack's inputs were not read")
+}
+
+// The release of the jet at `jet` and the inventories of the runtime's
+// sources, the trees `flags` name and the lifecycle hooks.
+PackSources: struct {
+    version: String
+    source: Inventory
+    backend: Inventory
+    lifecycle: Inventory
+}
+
+pack_sources: fn(root: String, flags: Flags, jet: String) -> PackSources {
+    version: built_version(jet)
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources := runtime_sources(manifest)
     // Each source's package.jet names its memory kernel, which the unit's
@@ -416,16 +497,7 @@ pack: fn(args: [String]) {
     }
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
-    compiler_sha256: sha256_file(tool.jet)
-    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256)
-    // The step's folder, not /tmp: the runtime build's files outgrow a small
-    // temporary file system.
-    work: files.join(root, ".runtime-pack")
-    files.remove_all(work) ?? ()
-    files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
-    build(tool, work, source, backend, lifecycle, compiler_sha256, recipe)
-    files.remove_all(work) ?? ()
-    files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
+    PackSources{version: version, source: source, backend: backend, lifecycle: lifecycle}
 }
 
 // The JET_VERSION the jet at `jet` was built at: the `release` of its
@@ -521,11 +593,14 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         }
         .Err(error) -> fail("Jet runtime production could not start: {error}")
     }
-    // Each built object is read once, for its Rust check and its digest.
-    object_sha256: built_object_sha256("{prefix}.o")
-    pack_sha256: built_object_sha256(pack)
-    image_sha256: built_object_sha256(image)
-    core_object_sha256: built_object_sha256("{core}.o")
+    // Every output the provenance names is read once and hashed, all on
+    // tasks at once (digests); each built object is read once for its Rust
+    // check and its digest too.
+    hashed: digests([String]{"{prefix}.o", pack, image, "{core}.o"}, [String]{"{core}.exports", "{core}.facts", "{core}.seal", "{core}.threads", "{core}.interface", "{core}.bodies", "{web}.wasm"})
+    object_sha256: digest_of(hashed[0])
+    pack_sha256: digest_of(hashed[1])
+    image_sha256: digest_of(hashed[2])
+    core_object_sha256: digest_of(hashed[3])
     abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
     symbols: abi_symbols(abi_text)
     if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
@@ -553,18 +628,18 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
     }
     threads_sha256 := sha256_file("{prefix}.threads")
-    core_exports_sha256: sha256_file("{core}.exports")
-    core_facts_sha256: sha256_file("{core}.facts")
-    core_seal_sha256: sha256_file("{core}.seal")
-    core_threads_sha256: sha256_file("{core}.threads")
-    core_interface_sha256: sha256_file("{core}.interface")
-    core_bodies_sha256: sha256_file("{core}.bodies")
+    core_exports_sha256: digest_of(hashed[4])
+    core_facts_sha256: digest_of(hashed[5])
+    core_seal_sha256: digest_of(hashed[6])
+    core_threads_sha256: digest_of(hashed[7])
+    core_interface_sha256: digest_of(hashed[8])
+    core_bodies_sha256: digest_of(hashed[9])
     // The Core object's, export list's, facts', seal's, thread receipt's, interface's and bodies' digests.
     core_sha256: "{core_object_sha256} {core_exports_sha256} {core_facts_sha256} {core_seal_sha256} {core_threads_sha256} {core_interface_sha256} {core_bodies_sha256}"
     key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, core_sha256)
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
-    web_sha256: sha256_file("{web}.wasm")
+    web_sha256: digest_of(hashed[10])
     move_into("{prefix}.o", files.join(out, "jet_runtime_jet.o"))
     move_into("{prefix}.abi.json", files.join(out, "runtime.abi.json"))
     move_into("{prefix}.exports", files.join(out, "runtime.exports"))
@@ -1003,4 +1078,23 @@ elf_with_symbols: fn(names: [String]) -> [U8] {
     assert_eq(rust_symbols("not an object".bytes(), "x"), "x is not a 64-bit little-endian ELF object")
     truncated: rusty.slice(0, rusty.len() - 8)
     assert_eq(rust_symbols(truncated, "t.o"), "t.o has a malformed section header table")
+}
+
+#Test("the step's digests keep their files' order and each file's own problem") {
+    root: files.mkdtemp("runtime-pack-digests") ?? panic("scratch: {err}")
+    clean_bytes: elf_with_symbols([String]{"jet_main"})
+    clean: files.join(root, "c.o")
+    files.write_bytes(clean, clean_bytes) ?? panic("clean object: {err}")
+    rusty: files.join(root, "r.o")
+    files.write_bytes(rusty, elf_with_symbols([String]{"__rust_alloc"})) ?? panic("Rust object: {err}")
+    plain: files.join(root, "plain")
+    files.write(plain, "abc") ?? panic("plain file: {err}")
+    missing: files.join(root, "missing")
+    found: digests([String]{clean, rusty}, [String]{plain, missing})
+    assert_eq(found.len(), 4)
+    assert_eq(digest_of(found[0]), crypto.sha256(clean_bytes).hex())
+    assert_eq(found[1].problem, "Rust symbols in {rusty}:\n__rust_alloc")
+    assert_eq(digest_of(found[2]), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert(found[3].problem.starts_with("cannot read `{missing}`"))
+    files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
