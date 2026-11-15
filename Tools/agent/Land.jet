@@ -58,7 +58,10 @@
 // which must come out as committed or the census prints STALE); and
 // `jet test tests/guards` in GUARD_SHARDS shards (every guard: many walk the
 // whole tree), beside one `jet test tests/guards/NAME` run per GUARD_PACKAGES
-// package. Then, with the compiler the build made, at once (phase B):
+// package. The compiler the build made then checks a hello world outside any
+// tree with no toolchain root, so with the Core built into it, and must load
+// Core function checks from its Core bodies file (`core-bodies`). Then, with
+// the compiler the build made, at once (phase B):
 // its own `jet check Compiler/JetCli` (as chain s2 does), its `jet check
 // Core` (every Core body, called or not; it moves to the seed's check once
 // the seed carries `jet check Core`) and Jetpack/Bootstrap/Check.jet of each
@@ -181,7 +184,7 @@ JOB_FILES: [String]{".patch", ".msg"}
 // (every pass but the Core #Tests, which CENSUS_CORE_TESTS=0 skips), and the
 // trees an export needs for the source identity.
 RECEIPT_SCHEMA: "jet.preflight-receipt.v2"
-RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "codegen", "selfcheck", "selfcheck-core", "areas"}
+RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "areas"}
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // Test inputs the gate leaves to the tests: cases, ui and run fixtures.
 TEST_INPUT_PREFIXES: [String]{"tests/cases/", "tests/ui/", "tests/run/"}
@@ -225,7 +228,7 @@ AREA_MARGIN: 268435456
 // checks with) or the area assembler, so it reaches every Jetpack area.
 CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
 // The census passes in the order their lines print.
-PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "codegen", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "core-tests", "areas"}
 // The failing Core #Tests the core-tests pass tolerates: one "FILE: test
 // title" per line (# comments), each file run by the pass.
 CORE_KNOWN: "Tools/agent/core-known.txt"
@@ -1077,6 +1080,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         return census_finish(runs, out)
     }
     runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
+    runs.push(core_bodies_pass(out, self_jet, identity))
     runs.push(codegen_pass(snap, out, self_jet, identity))
     if !passes.selfcheck -> return census_finish(runs, out)
 
@@ -1149,6 +1153,57 @@ codegen_pass: fn(snap: String, out: String, self_jet: String, identity: String) 
     lines := [String]{"codegen rc={code}"}
     if code != 0 -> lines.push(clip(files.read("{out}/codegen.err") ?? "", 600))
     PassRun{name: "codegen", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines}
+}
+
+// The hello world the core-bodies pass checks.
+CORE_BODIES_HELLO: "run: fn() {{\n    print(\"hello\")\n}}\n"
+
+// The precompiled Core gate: the built compiler checks CORE_BODIES_HELLO in
+// a temporary directory outside any tree, with JET_TOOLCHAIN_ROOT unset so it
+// binds the Core built into it, traced with `--phase-counters` (the counters
+// print only beside a trace). It fails unless that check loads Core function
+// checks from the Core bodies file; its line gives how many it loaded and how
+// many it checked from text.
+core_bodies_pass: fn(out: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    watch: time.start()
+    log: "{out}/core-bodies"
+    dir: files.mkdtemp("land-core-bodies") ?? {
+        return PassRun{name: "core-bodies", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"core-bodies rc=1 (a temporary directory cannot be made: {err})"}}
+    }
+    files.write("{dir}/hello.jet", CORE_BODIES_HELLO) ?? ()
+    env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}}
+    code: run_spec(process.cmd([String]{self_jet, "check", "--trace={dir}/hello.trace", "--phase-counters", "hello.jet"}).env_remove("JET_TOOLCHAIN_ROOT"), self_jet, dir, env, log)
+    files.remove_all(dir) ?? ()
+    errors: files.read("{log}.err") ?? ""
+    counts: core_bodies_counts(errors)
+    loaded: counts.loaded > 0
+    rc: if code == 0 && loaded -> 0 else -> 1
+    lines := [String]{"core-bodies rc={rc} bodies_loaded={counts.loaded} bodies_from_text={counts.from_text}"}
+    if code != 0 -> lines.push(clip(errors, 600))
+    if code == 0 && !loaded -> lines.push("the built jet checked hello.jet loading no Core function checks from its Core bodies file")
+    PassRun{name: "core-bodies", rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines}
+}
+
+// A check's Core function checks: how many it loaded from the Core bodies
+// file and how many it checked from text, -1 for a count it did not print.
+CoreBodiesCounts: struct {
+    loaded: Int
+    from_text: Int
+}
+
+// The counts in `--phase-counters` stderr `text`, read from its
+// `JET_PHASE_COUNTERS {"phase":"core","NAME":VALUE}` lines.
+core_bodies_counts: fn(text: String) -> CoreBodiesCounts Never! {
+    counts := CoreBodiesCounts{loaded: -1, from_text: -1}
+    mark: "JET_PHASE_COUNTERS "
+    loop line in text.lines() {
+        if !line.starts_with(mark) -> next
+        tree: json.parse(line.slice(mark.count_bytes()..<line.count_bytes())) ?? next
+        if text_field(tree, "phase") != "core" -> next
+        if int_field(tree, "bodies_loaded") == .Val(value) -> counts.loaded = value
+        if int_field(tree, "bodies_from_text") == .Val(value) -> counts.from_text = value
+    }
+    counts
 }
 
 // The first `limit` of `lines`.
@@ -4064,6 +4119,16 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     files.write(written, "{{") ?? panic("{written}: {err}")
     assert(gate(source, seed, dir).reason.starts_with("receipt {written} is not JSON ("))
     files.remove_all(dir) ?? ()
+}
+
+#Test("the core-bodies pass reads the Core phase counters of a check") {
+    text: "note: x\nJET_PHASE_COUNTERS {{\"phase\":\"core\",\"bodies_loaded\":412}}\nJET_PHASE_COUNTERS {{\"phase\":\"core.bodies_from_text\",\"demand\":3}}\nJET_PHASE_COUNTERS {{\"phase\":\"core\",\"bodies_from_text\":7}}\nJET_PHASE_COUNTERS {{\"phase\":\"sema\",\"bodies_loaded\":9}}\n"
+    counts: core_bodies_counts(text)
+    assert_eq(counts.loaded, 412)
+    assert_eq(counts.from_text, 7)
+    none: core_bodies_counts("JET_PHASE_COUNTERS {{\"phase\":\"sema\",\"items\":1}}\n")
+    assert_eq(none.loaded, -1)
+    assert_eq(none.from_text, -1)
 }
 
 #Test("a refusal names the census that would admit the launch") {
