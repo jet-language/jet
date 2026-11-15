@@ -49,7 +49,6 @@ tests/ui_lint/prelude_shadow_warn	#6896	check not ported: L0104
 tests/ui/E0514_never_written_is_an_error	#6035	E0514 reports at lint severity (Warning) until the repo-wide `:=` -> `:` sweep lands, because as an error it stops the build's own Core compile; remove this row when that sweep makes E0514 an error again
 tests/ui/task_spawn_parameters	#6425	check not ported: E1102, E0405, E0112; the parser rejects `task (x: Int) -> x` with E0003 first
 tests/ui/source_nesting_limit	#6425	check not ported: E1403; the parser stops at depth 254 with E0003 first
-tests/ui/matrix_measure_inner_mismatch	#6425	check not ported: E2512; the parser rejects `Matrix<3,4>` with E0003 (expected a type)
 tests/ui/inline_module_return_type_mismatch	#6425	check not ported: E0080 (reports E0113 with the mangled function name)
 tests/ui/comptime_impure	#6843	E3410 (Tier-2 comptime effect) replaces E3401 and E0107
 tests/ui/pure/pure_fn_comptime_block_is_excluded_from_runtime_check	#6843	E3410 (Tier-2 comptime effect) replaces E3401
@@ -733,8 +732,6 @@ tests/cases/corelib/core_http_client_exposes_binary_body_once.case	#3665	`jet te
 tests/cases/corelib/core_http_client_multipart_boundary_does_not_collide_with_fields.case	#3665	`jet test fixture.jet` E-OperatorTypeMismatch: the fixture joins text with `+`
 tests/cases/corelib/core_http_client_owns_pre_response_errors.case	#3665	`jet test fixture.jet` E0205 at `requests.push(http_read(stream))`: `stream` has read access only
 tests/cases/corelib/core_http_client_rejects_invalid_redirect_limits_before_transport.case	#3665	`jet test fixture.jet` UnknownMethod: `to_list` isn't a method on the value at fixture.jet:49
-tests/cases/corelib/generated_internal_tagged_enum_round_trips_every_variant_shape.case	#6661	generated internal-tag decode of the unit variant `{"type":"Idle"}` fails, so the fixture panics `unit` (exit 70)
-tests/cases/corelib/parenthesized_view_place_return_keeps_parameter_provenance.case	#6066	`jet test` ViewOutlivesOwner at fixture.jet:8: a parenthesized returned view place loses its parameter provenance
 tests/cases/effects/cross_module_foreign_undo_bindings_keep_distinct_identities.case	#6951	foreign crate bridge fails to build: cargo E0428 `jet_ffi_mutate` is defined multiple times for two modules' undo bindings
 tests/cases/effects/strided_source_loop_projects_exact_arena_audit_multiplicity.case	#6066	MemoryDenialViolated: sema proves no byte size for the loop source list literal at exact.jet:9, so `!Mem.Alloc(above: 12)` rejects it (D-MEM-FACTS1); past it, `!Mem.Alloc(above: 12)` cannot be proved through the open dispatch at exact.jet:11
 tests/cases/ffi_callbacks_tasks/foreign_callback_reenters_jet_and_completes_on_a_jet_task.case	#6947	`jet build main.jet` E2104: passing a Jet function to a C callback parameter is not built yet (no native C callback trampoline)
@@ -744,9 +741,7 @@ tests/cases/http_client_law/h1_skips_early_hints_reuses_final_response_and_rejec
 tests/cases/http_client_law/pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively.case	#3665	the fixture stops with `panic: second` (exit 70, expected 0)
 tests/cases/http_i9/hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers.case	#3665	streamed response sinks do not report InvalidFraming for the hostile overruns, so the fixture's expected-output panic fires (exit 70)
 tests/cases/http_i9/http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers.case	#3665	the over-limit text projection reports `over=err:IO:transport` where the snapshot expects `over=err:BodyTooLarge:1048576`
-tests/cases/measure_symbolic_specialization/aot_jit_and_interpreter_agree_on_additive_fixed_list_length.case	#6177	ReturnTypeMismatch: `join` returns [Int#5], but the joined value is [Int]: the additive fixed-list length is not carried
 tests/cases/measure_symbolic_specialization/sema_type_checks_generic_join_with_symbolic_additive_length.case	#6177	ReturnTypeMismatch: `join` returns [T#(N + M)], but the joined value is [T]: the symbolic additive length is not carried
-tests/cases/measure_symbolic_specialization/web_target_accepts_fixed_list_measure_use.case	#6177	ReturnTypeMismatch: `join` returns [Int#5], but the joined value is [Int]: the additive fixed-list length is not carried
 tests/cases/pin/a_pin_cannot_escape_its_owner_scope.case	#6634	`jet check fixture.jet --json` accepts a pin that escapes its owner scope (exit 0, expected nonzero)
 tests/cases/source_import/javascript_import_does_not_rewrite_foreign_names_inside_strings.case	#6069	the JavaScript source import produces a program with no `run` function (MissingRunFunction)
 tests/cases/source_import/python_source_import_matches_python_oracle_fixed_corpus.case	#6069	the Python source import of the fixed corpus differs from the corpus.jet.bytes oracle snapshot
@@ -783,4 +778,3 @@ tests/cases/semindex/aggregate_view_provenance_preserves_slots_and_changes_signa
 tests/cases/semindex/returned_view_provenance_is_structured_and_changes_signature_id.case	#6630	unbuilt: semindex returned view provenance: `pick`'s view_provenance is `[]`, where the predicate reads one row with two parameter sources
 tests/cases/task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier.case	#5989	the cancel interrupts the close's channel wait, so "close worker: finished" never prints; the close is not shielded from cancellation
 tests/cases/corelib_net/net_http_service_policy_tests_pass.case	#6843	7 passed, 1 failed: a second body().text on server.response's one-shot body is not Err(.BodyConsumed); body() hands out a copy of the Body value, which carries no take state (c15)
-tests/cases/toolchain_defaults/check_core_prints_no_lint_without_a_source_path.case	#6759	`jet check Core` reports E1012: core.encoding (layer data) names core.files.[FileWriter] (layer system) in Stream.jet, CborStream.jet, Cbor.jet, Json.jet, Jsonl.jet and Xml.jet; their writers wait on the file-adapter writers and the byte traits, both still open
