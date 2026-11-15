@@ -331,14 +331,14 @@ DataStream: struct<T> {
     items: [T]
     index: Int
     cancelled: Bool
-    __source: Shared<__StreamSource<T>>?
+    __source: Shared<StreamSource<T>>?
 }
 
 // The pull side of a file-backed stream (Rust `DataStream` with its inner
 // reader, `terminal` and `eof`). `pull` reads and decodes one row; a failure
 // stays latched in `terminal`, and `ahead` keeps rows that `len` read early.
 // `limits` are the reader's: they bound `collect` and a query over the stream.
-__StreamSource: struct<T> {
+priv StreamSource: struct<T> {
     pull: fn() -> T? DataError!
     limits: DataLimits
     ahead: [T]
@@ -387,7 +387,7 @@ Group: struct<K, V> {
 // Row-list queries that only filter and sort may be collected again; every
 // other computation (map, extrema, joins, grouped reducers) is one-shot and
 // derived filter/sort queries share that one-shot state.
-__QueryCell: struct<T> {
+priv QueryCell: struct<T> {
     run: fn() -> [T] DataError!
 }
 
@@ -403,17 +403,17 @@ Query: struct<T> {
     __one_shot: Bool
     __limits: DataLimits
     __state: Shared<QueryState>
-    __cell: Shared<__QueryCell<T>>
+    __cell: Shared<QueryCell<T>>
 }
 
-__QueryKeyCell: struct<T, K> {
+priv QueryKeyCell: struct<T, K> {
     key: fn(T) -> K DataError!
 }
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
 DataGroupedQuery: struct<T, K> {
     __query: Query<T>
-    __key: Shared<__QueryKeyCell<T, K>>
+    __key: Shared<QueryKeyCell<T, K>>
 }
 
 DataTracked: struct<T, K> {
@@ -721,7 +721,7 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
 }
 
 priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move()}}}
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -781,7 +781,7 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
 // A stream over a pull source (the file readers of core.files.data): `pull`
 // reads and decodes one row, `None` at the end of input.
 __stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataStream<T> Never! {
-    source: Shared{__StreamSource<T>{pull: pull, limits: limits, ahead: [T]{}, ahead_index: 0, terminal: None, done: false}}
+    source: Shared{StreamSource<T>{pull: pull, limits: limits, ahead: [T]{}, ahead_index: 0, terminal: None, done: false}}
     DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)}
 }
 
@@ -921,7 +921,7 @@ StreamEventTime: struct<T> {
 }
 
 KeyedStream: struct<K, T> {
-    events: Stream<__KeyedEvent<K, T>>
+    events: Stream<KeyedEvent<K, T>>
 }
 
 Window: struct<K, T> {
@@ -931,12 +931,12 @@ Window: struct<K, T> {
     events: [StreamEvent<T>]
 }
 
-__KeyedEvent: struct<K, T> {
+priv KeyedEvent: struct<K, T> {
     key: K
     event: StreamEvent<T>
 }
 
-__PendingWindow: struct<T> {
+priv PendingWindow: struct<T> {
     key_index: Int
     start_ns: Int
     events: [StreamEvent<T>]
@@ -970,9 +970,9 @@ __stream_key_by: fn<K, T>(source: &&StreamEventTime<T>, key: &&fn(T) -> K Never!
     KeyedStream<K, T>{events: stream_keyed<K, T>(source.events.move(), key)}
 }
 
-priv stream_keyed: fn<K, T>(stream: &&Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+priv stream_keyed: fn<K, T>(stream: &&Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<KeyedEvent<K, T>> {
     loop event in stream {
-        yield __KeyedEvent<K, T>{key: key(event.value), event: event}
+        yield KeyedEvent<K, T>{key: key(event.value), event: event}
     }
 }
 
@@ -985,7 +985,7 @@ __stream_window: fn<K: Equatable, T>(source: &&KeyedStream<K, T>, width: time.Du
     if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
     if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
     keys := [K]{}
-    pending := [__PendingWindow<T>]{}
+    pending := [PendingWindow<T>]{}
     mark := 0
     has_mark := false
     stream := source.events.move()
@@ -1022,7 +1022,7 @@ __stream_window: fn<K: Equatable, T>(source: &&KeyedStream<K, T>, width: time.Du
                 }
             }
             if joined -> pending[position].events.push(keyed.event) else {
-                pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
+                pending.insert(position, PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
             }
         }
         loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) {
@@ -1037,9 +1037,9 @@ priv stream_event_ns: fn(at: DateTime) -> Int Never! {
     at.to_unix_ns() ?? panic("stream event time {at} is outside the Unix nanosecond range")
 }
 
-priv stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
+priv stream_windows_ready: fn<K, T>(keys: [K], pending: &[PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
     ready := [Window<K, T>]{}
-    kept := [__PendingWindow<T>]{}
+    kept := [PendingWindow<T>]{}
     loop open in pending {
         if flush || open.start_ns + width_ns <= watermark_ns {
             ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
@@ -1222,7 +1222,7 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -
 __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
     DataGroupedQuery<T, K>{
         __query: query,
-        __key: Shared{__QueryKeyCell<T, K>{
+        __key: Shared{QueryKeyCell<T, K>{
             key: fn(row: T) {
                 value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
                 Ok(value)
