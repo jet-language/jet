@@ -230,6 +230,9 @@ SemaOwnershipBindingFact: struct {
     single_use: Bool
     // The duty is a task handle's `join` (L1101), not `consume`.
     owes_join: Bool{false}
+    // The fields of a record or tuple that hold its duty: moving each of them
+    // out discharges it as a move of the whole value does.
+    duty_fields: [String]{[String]{}}
     // Provenance belongs to this exact binding, not its name.
     frozen_site: SemaOwnershipFreezeSite?{None}
     // The compiler declared this binding (a fallback's `err`); an unread one

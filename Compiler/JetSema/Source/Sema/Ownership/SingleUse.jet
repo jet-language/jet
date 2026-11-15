@@ -3,7 +3,8 @@
 // duty to consume it on every path.
 //
 // The duty is one flag on the owning SemaOwnershipBindingFact; consumption is
-// the ordinary whole-binding move fact, so no second flow store exists.
+// the ordinary move fact of the whole binding, or of each field that holds
+// the duty, so no second flow store exists.
 //   E0140  the duty reached the end of its scope undone (or `_: value`)
 //   E0141  one path through a branch consumed it and another left it
 //   E0142  a non-owning parameter would borrow or copy it
@@ -30,19 +31,20 @@ use jet_foundation.[
 // Rust `type_is_single_use` over the registry: a value holding a task handle,
 // a `#SingleUse` struct or enum, or the Core `Delivery` handle (Rust
 // `core_single_use_type`). A value that holds one of those owes its duty too:
-// a List, Option, Result, Map, tuple or generic type argument that holds a
-// duty is dropped only once every duty inside it is done.
+// a List, Option, Result, Map, tuple, generic type argument, struct field or
+// enum payload that holds a duty is dropped only once every duty inside it is
+// done.
 sema_single_use_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return true
     if ty == {
-        .Named(name) -> return sema_single_use_declared(name, environment, program)
+        .Named(name) -> return sema_single_use_declared(name, environment, program) || sema_single_use_holder(ty, environment, program)
         .Apply(name, args) -> {
             if name == "View" || name == "ViewMut" -> return false
             if sema_single_use_declared(name, environment, program) -> return true
             loop arg in args {
                 if sema_single_use_type(arg, environment, program) -> return true
             }
-            return false
+            return sema_single_use_holder(ty, environment, program)
         }
         .List(inner) | .FixedList(inner, _) | .Option(inner) -> return sema_single_use_type(inner, environment, program)
         .Result(ok, err) -> return sema_single_use_type(ok, environment, program) || sema_single_use_type(err, environment, program)
@@ -64,6 +66,21 @@ sema_single_use_declared: fn(name: String, environment: SemaScopeEnvironment, pr
     definition.single_use
 }
 
+// A struct or enum whose fields or payloads hold a `#SingleUse` value at any
+// depth (sema_copy_holds_single_use). A non-generic nominal whose table copy
+// facts hold no duty at all, neither a resource nor a `#SingleUse` part, is
+// answered without a walk.
+sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        caller: sema_type_module_row(graph, environment.module_identity)
+        row: sema_copy_fork_row_at(ty, graph, caller) ?? return false
+        if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource -> return false
+        seen := [String]{}
+        return sema_copy_holds_single_use(ty, graph, caller, seen)
+    }
+    false
+}
+
 // Rust `is_task_type`: the task handle itself.
 sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
     if ty == .Apply(name, _) -> return name == "Task"
@@ -72,7 +89,8 @@ sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
 
 // A binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y: x`: the move marks `x` consumed and `y` owns it.
-// `key` is the binding's symbol key.
+// `key` is the binding's symbol key. A record or tuple that holds the duty in
+// its fields is also consumed once each of those fields is moved out.
 sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty: symbol.ty ?? return
     if !sema_single_use_type(ty, environment, program) -> return
@@ -80,6 +98,37 @@ sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key
     if row < 0 -> return
     sema_ownership_set_single_use(state, row)
     if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
+    state.declarations[row].duty_fields = sema_single_use_duty_fields(ty, environment, program)
+}
+
+// The fields of a tuple or of a struct (not itself `#SingleUse`) that hold
+// its duty; empty when only a move of the whole value discharges it.
+sema_single_use_duty_fields: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
+    fields := [String]{}
+    if ty == {
+        .Tuple(members) -> {
+            loop member in members {
+                if sema_single_use_type(member.ty, environment, program) -> fields.push(member.name)
+            }
+        }
+        .Named(name) | .Apply(name, _) -> {
+            if sema_single_use_declared(name, environment, program) -> return fields
+            if program.registration_graph == .Val(graph) {
+                caller: sema_type_module_row(graph, environment.module_identity)
+                row: sema_copy_fork_row_at(ty, graph, caller) ?? return fields
+                nominal: graph.modules[row.module_index].nominals[row.row]
+                if nominal.kind != SemaRegistrationNominalKind.Struct -> return fields
+                bindings: sema_copy_generic_bindings(nominal, ty).bindings
+                loop field in nominal.fields {
+                    if field.computed -> next
+                    seen := [String]{}
+                    if sema_copy_holds_single_use(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen) -> fields.push(field.symbol.name)
+                }
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .FixedList(_, _) | .Option(_) | .Result(_, _) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    fields
 }
 
 // E0140 `_: value` skips the job of a `#SingleUse` value.
@@ -115,14 +164,28 @@ sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, pa
     false
 }
 
-// Consumption is a move of the whole binding (Rust `moved.contains(name)`).
-sema_single_use_moved: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
-    sema_single_use_moved_in(state.moved, key)
+// Consumption is a move of the whole binding (Rust `moved.contains(name)`),
+// or a move of each of its `duty_fields` on its own.
+sema_single_use_moved: fn(state: SemaOwnershipState, fact: SemaOwnershipBindingFact) -> Bool Never! {
+    sema_single_use_moved_in(state.moved, fact)
 }
 
-sema_single_use_moved_in: fn(moved: [SemaOwnershipMovedPlace], key: String) -> Bool Never! {
-    loop fact in moved {
-        if fact.place.root_key == key && fact.place.projections.len() == 0 -> return true
+sema_single_use_moved_in: fn(moved: [SemaOwnershipMovedPlace], fact: SemaOwnershipBindingFact) -> Bool Never! {
+    loop entry in moved {
+        if entry.place.root_key == fact.key && entry.place.projections.len() == 0 -> return true
+    }
+    if fact.duty_fields.len() == 0 -> return false
+    loop field in fact.duty_fields {
+        if !sema_single_use_field_moved(moved, fact.key, field) -> return false
+    }
+    true
+}
+
+// Whether `field` of the binding `key` was moved out whole.
+sema_single_use_field_moved: fn(moved: [SemaOwnershipMovedPlace], key: String, field: String) -> Bool Never! {
+    loop entry in moved {
+        if entry.place.root_key != key || entry.place.typed_projections.len() != 1 -> next
+        if entry.place.typed_projections[0] == .Field(name, _) && name == field -> return true
     }
     false
 }
@@ -133,7 +196,7 @@ sema_single_use_moved_in: fn(moved: [SemaOwnershipMovedPlace], key: String) -> B
 sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         fact: state.declarations[row]
-        if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
+        if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact) {
             if fact.owes_join {
                 diagnostics.push(sema_single_use_diag_unjoined(fact.name, "the program may end before this task finishes", fact.span))
             } else {
@@ -152,7 +215,7 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Di
 sema_single_use_check_return: fn(state: &SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: &[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         if !state.declarations[row].active || state.declarations[row].owes_join || state.declarations[row].scope_depth < frame_depth -> next
-        if sema_single_use_moved(state, state.declarations[row].key) -> next
+        if sema_single_use_moved(state, state.declarations[row]) -> next
         diagnostics.push(sema_single_use_diag_returned(state.declarations[row].name, span))
         sema_ownership_note_undo(state, row)
         state.declarations[row].single_use = false
@@ -246,7 +309,7 @@ SemaSingleUseDrain: struct {
 // never copies a path to list it.
 sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPath) -> [Bool] Never! {
     moves := [Bool]{}
-    loop row in sema_ownership_single_use_rows(before) -> moves.push(sema_single_use_moved_in(path.moved, before.declarations[row].key))
+    loop row in sema_ownership_single_use_rows(before) -> moves.push(sema_single_use_moved_in(path.moved, before.declarations[row]))
     moves
 }
 
@@ -260,7 +323,7 @@ sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], dia
     loop (index, row) in sema_ownership_single_use_rows(before) {
         fact: before.declarations[row]
         if !fact.active || fact.scope_depth != before.scope_depth -> next
-        if sema_single_use_moved(before, fact.key) -> next
+        if sema_single_use_moved(before, fact) -> next
         consumed := false
         kept := false
         loop moves in paths {
