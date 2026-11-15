@@ -21,7 +21,7 @@ step fix: jet fix files/main.jet
 exit: 0
 stderr: ~ "files/main.jet: applied " # the fix, across three files
 file: files/readings.jet ~ "key: fn(self) -> Int { self.celsius }" # keyed by every stored field
-file: files/readings.jet ~ "equal_by_rule: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }" # the rule stays under its new name
+file: files/readings.jet ~ "equal_by_rule: fn(self, rhs: Reading) -> Bool { self.celsius /% 10 == rhs.celsius /% 10 }" # the rule stays under its new name
 file: files/readings.jet !~ "impl Equatable" # the written equality is gone
 file: files/compare.jet ~ "same band: {a.equal_by_rule(b)}" # `==` calls the rule
 file: files/compare.jet ~ "other band: {!a.equal_by_rule(c)}" # `!=` calls it negated
