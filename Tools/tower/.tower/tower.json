@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6966,
-    "rev": 105660,
+    "rev": 105662,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27344,7 +27344,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m20-enum-language-reflection",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.$values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nDirection: enum { North South }\nchoices: Direction.$values // ordinary [Direction#2]\ncount: choices.len()\nrun: fn() {\n    print(count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `$values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.$name` compiler-fact namespace (D-COMPILER-NS1=A: `$` marks every compiler fact, as in `T.$layout` and `$build.os`) already exists for other facts: Comptime/Reflection.jet builds the range fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.$values` through the same registered `$` compiler-fact path as the range fact. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.$values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. (Rust mirror retired: the native compiler is the only implementation.)\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden types/enum_values` passes on O0, O1 and O2.\n- `jet test Compiler --profile ui enum_values_` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
       "checkSteps": "1. Owner decides the complete draft D-ENUM-CASEVALUES1 before any public method is implemented. Main first checks decision-ID uniqueness and whether an uncaptured existing API already satisfies the workload.\n2. If chosen, T.cases() yields each payload-free leaf exactly once in declaration order; groups are not values and sparse external codes do not create gaps.\n3. The iterator's items retain nominal type T. Payload-bearing or non-enum receivers receive a Jet diagnostic explaining why explicit supplied values are required.\n4. No payload values are fabricated and no implicit heap collection is required. Ordinary iterator adapters are reused.\n5. Adding a payload-free case updates the generated catalog without a second user-maintained list. Reordering deliberately changes presentation order, not a wire protocol code.\n6. Existing user methods named cases require a coherent declaration conflict diagnostic, not hidden replacement or dispatch ambiguity.",
@@ -27425,8 +27425,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): tower.json decisions: D-ENUM-CASEVALUES1 status=ratified outcome=A ratifiedAt=2026-09-12; the reader is not built yet (C7 golden types/enum_values absent), so no alias was added beside it",
-          "at": "2026-10-31T14:51:24.074Z"
+          "evidence": "D-ENUM-CASEVALUES1 is ratified (outcome A, 2026-09-12) on the board; this criterion asked for the ruling, and the reader it describes is built and proved under c9-c14 (constructor values 9e1ace6c5e, typed selection on p147-p150).",
+          "at": "2026-11-15T05:32:40.407Z",
+          "closure": "decision"
         },
         {
           "n": 3,
@@ -27570,13 +27571,14 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T05:32:08.283Z",
+      "updated": "2026-11-15T05:32:42.614Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-15T05:32:42.614Z"
     },
     {
       "id": "c0vow6jh",
@@ -217440,6 +217442,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:32:42.615Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T05:32:40.407Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb6zik",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T05:32:22.592Z",
       "by": "Main",
