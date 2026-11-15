@@ -100759,6 +100759,70 @@
       "completedAt": "2026-11-12T10:54:25.068Z",
       "questions": [],
       "retiredAt": "2026-11-15T10:59:12.116Z"
+    },
+    {
+      "id": "c0phcs40",
+      "num": 6762,
+      "title": "Debug display of a value holding Shared<T> passes sema and then ICEs in ir.build",
+      "body": "Found 2026-11-12 by Lander5. On seed-b10 (jet@a0.0.45#c089d4d3), jet build --profile dev Compiler at dev 7446243b8b exits 101 with: ir.build unlowered: jet_driver_recheck_differences: display of Shared<SemaLookupCounters> at JetDriver/Source/Driver/BodyComptime.jet:17421. The line is \"{our_graph:Debug}\" != \"{their_graph:Debug}\". Sema accepted a :Debug interpolation of a value that holds Shared<SemaLookupCounters>, but lowering has no display for Shared, so checked code reaches an internal error. That breaks I2 and I3. G4Ports-1 is changing the call site to avoid it; this card covers the root.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Both criteria are met."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Workaround G4Ports-ctfix (BodyComptime.jet): the JET_RECHECK_VERIFY comparison now skips the modules and registration_graph rows of SemaGraphResult, because their types hold Shared<SemaLookupCounters>. When c1 lands, restore the full comparison of those two rows in jet_driver_recheck_graph_rows in the same SUB, so the recheck verifies the registration graph again."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Either :Debug display works for every type sema accepts in an interpolation, Shared<T> included (rendered as its inner value, the same on O0, O1 and O2), or sema refuses the interpolation with a registered diagnostic that has a UI snapshot. A case covers a struct field of type Shared<T> under :Debug. jet build --profile dev Compiler no longer has a path to ICE 101 on it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-89 landed on dev 5e488a6cbc: sema refuses :Debug of a struct with a Shared<T> field with E0112, and the ui row tests/ui/debug_display_of_a_shared_field_is_refused.jet passes 1/1 on seed-b13 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-89/1.out).",
+          "at": "2026-11-12T11:08:38.370Z"
+        },
+        {
+          "n": 2,
+          "text": "Intake gap: ec6bdb7feb (G4Ports-ctrecheck) changed compiler sources and landed without a compiler build check, so the ICE surfaced only at the b11 build. Every compiler-input SUB at intake gets at least jet check of each touched compiler module on the train compiler, and the train's build catches the rest before landing. The Lander's intake does this, shown by its intake rule and one rejected sample.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The Lander's intake on dev b63d6eca87 ($JET_SCRATCH_ROOT/lanes/Lander/loop.sh lines 182-197, test_sub): a SUB touching Compiler/*/Source or Core gets jet check of each touched compiler module (or jet check Core), plus a dev build check, on the batch compiler before its tests; either failing rejects it. Rejected samples: G4Ports-c28 at 02:23 (line 1, jet check Compiler/JetCli rc 1, UnknownName CORE_CALLS; line 6, the build check rc 1) and G6Meta-7-r at 02:45 (line 7, the build check rc 1). Neither landed. Evidence in loop/out/G4Ports-c28/ and loop/out/G6Meta-7-r/.",
+          "at": "2026-11-12T11:08:05.593Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T06:55:29.337Z",
+      "updated": "2026-11-12T11:08:41.160Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-12T11:08:41.159Z",
+      "questions": [],
+      "retiredAt": "2026-11-15T11:09:27.071Z"
     }
   ]
 }
