@@ -13,11 +13,20 @@
 // bindings, build output, staged test projects), never user-written source, so
 // it never moves the baseline.
 //
+// The same scan classifies every region in Compiler, Core and Jetpack by the
+// raw memory actions its code performs and marks whether its file is one of
+// its package's `policy.memory` kernel files. The count of regions outside
+// kernel files that perform a raw memory action is ratcheted like the region
+// counts, against a one-line baseline beside the unsafe-ratchet data; the
+// memory kernel cutover takes it to zero. `--inventory` prints the classified
+// regions on demand, `--inventory --json` for tools.
+//
 // The scanner works on UTF-8 bytes. Positions and columns match the source
 // text: a column counts Unicode scalars, as the baseline rows always have.
 //
 // Usage (from the repository root):
 //   jet Tools/agent/UnsafeRatchet.jet [--update | --check] [--root PATH] [--baseline PATH]
+//   jet Tools/agent/UnsafeRatchet.jet --inventory [--json] [--root PATH]
 use {
     json: core.encoding.json
     files: core.files
@@ -64,6 +73,43 @@ SIGNAL_BOUNDARY: ["Compiler/JetRuntime/", "Compiler/JetBackend/Source/Image/Load
 // it is a POSIX control, gated like the others.
 SIGNAL_REGISTRATION: Regex{"\b(?:rt_sigaction|sigaction|bsd_signal|sysv_signal|sigset|signal|on_signal|on_interrupt)\s*\(|\b(?:OS_SYS_RT_SIGACTION|SYS_rt_sigaction)\b|\bos_syscall\w*\s*\(\s*(?:I64\s*\{{\s*)?13\s*[}},]"}
 
+// The baseline line for the outside-kernel count, closed by ` -->`.
+MEMORY_BASELINE: "<!-- memory-kernel:outside "
+// The memory inventory covers the regions under these prefixes; a file's area
+// is its first matching prefix, and the counts table follows this order.
+MEMORY_AREA_PREFIXES: ["Compiler/JetRuntime/", "Compiler/JetBackend/Source/OS/", "Compiler/", "Core/", "Jetpack/"]
+MEMORY_AREA_NAMES: ["runtime", "OS layer", "compiler", "Core", "Jetpack"]
+// The raw memory actions, each spotted by its pattern over a region's code
+// with comments and quoted text blanked. A region none of them match is `other`.
+MEMORY_ACTIONS: ["allocate", "free", "resize", "raw read/write", "pointer offset", "byte copy/move", "atomic", "OS mapping", "foreign crossing"]
+MEMORY_PATTERNS: [Regex]{
+    Regex{"\balloc_raw\b|\b__context_take\b|\bjet_rt_alloc\w*\s*\(|\balloc_try\w*\s*\(|\brt_alloc\w*\s*\(|\bmalloc\s*\(|\bcalloc\s*\(|\bRegion\s*\.\s*adopt\b|\.\s*allocate\s*\(|\balloc_(?:take|slab|block|large|user_take)\w*\s*\(|\bjet_alloc\w*\s*\(|\badopt\s*:\s*fn\b"},
+    Regex{"\bfree_raw\b|\b__context_give\b|\bjet_rt_free\w*\s*\(|\balloc_free\w*\s*\(|\bfree\s*\(|\balloc_give\w*\s*\(|\brt_free\w*\s*\(|\bjet_rt_block_release\b|\balloc_(?:user_)?drop\w*\s*\("},
+    Regex{"\brealloc\b|\b__list_reserve_exact\b|\.\s*resize\s*\(|\balloc_grow\w*\s*\(|\bjet_rt_realloc\w*\s*\(|\brt_grow\w*\s*\("},
+    Regex{"[\w\)\]]\s*\.\*|\bos_(?:load|store)_\w+\s*\(|\bvolatile_(?:read|write)\b|\bstream_store\b|\bfrom_addr\b|\b__string_byte\b|\bstring_byte\b|\b(?:raw_)?(?:load|store)_[iu](?:8|16|32|64)\s*\(|\bmem\s*\.\s*window\b|\bpeek\w*\s*\(|\bpoke\w*\s*\(|\bsync_(?:load|store)\w*\s*\(|\brt_(?:load|store)\w*\s*\("},
+    Regex{"\.\s*(?:byte_)?offset\s*\(|\b__ptr_(?:byte_)?offset\b|\.\s*cast\s*<|\bcast_ptr\b|\baddress_of\b|(?:\n|[=(,:\[{{]|\breturn)\s*\*[A-Za-z_(]|\.\s*addr\b"},
+    Regex{"\bmem\s*\.\s*(?:copy|fill|move)\b|\bcopy\s*<|\bfill\s*<|\bmem(?:cpy|move|set)\b|\b\w*(?:copy|move|fill|wipe)_bytes\w*\s*\(|\bos_(?:copy|fill|zero)\w*\s*\("},
+    Regex{"\bos_cas\w*\s*\(|\b[Aa]tomic\w*|\bfetch_(?:add|sub|or|and)|\bfutex|\bsync_(?:cas|swap|add|fence)\w*\s*\(|\bos_(?:xadd|xchg|swap|fetch_|fence)\w*\s*\(|\bcompare_exchange"},
+    Regex{"\bos_syscall\w*\s*\(\s*(?:I64\s*\{{\s*)?(?:9|10|11|25|28|319)\b|\bOS_SYS_(?:MMAP|MPROTECT|MUNMAP|MREMAP|MADVISE|MEMFD_CREATE|BRK)\b|\bm(?:un)?map\b|\bmprotect\b|\bmremap\b|\bmadvise\b|\bVirtual(?:Alloc|Free|Protect)\b|\b__region_(?:reserve|release)\b|\balloc_(?:un)?map\w*\s*\(|\bmemfd|\bos_(?:mmap|munmap|mprotect|map|unmap|protect)\w*\s*\("},
+    Regex{"\bFFI\s*\(\s*(?:c|cpp|rust|zig)\s*\)|#\s*Import\b|\bextern\b|\bffi\s*\.|\bLibrary\s*\.\s*open\b|\.\s*symbol\s*<|\bos_call\w*\s*\(|\bdl(?:open|sym)\b|\bjet_rt_c_\w+\s*\(|\bc\s*\.\s*[a-z_]+\s*\.|\blibc\s*\."},
+}
+// An `#FFI(asm)` template is read as written: a memory operand reads or
+// writes raw memory, a string instruction copies or fills bytes, a locked or
+// exchanging instruction is atomic, and a call through a register or operand
+// crosses into foreign code.
+ASM_ADDRESSING: Regex{"\bptr\s*\[|\[\s*(?:\{{\w+\}}|r[a-z0-9]+\b|e[a-z]{{2}}\b)"}
+ASM_BYTE_COPY: Regex{"\brep\w*\s+(?:movs|stos)"}
+ASM_ATOMIC: Regex{"\block\b|\bxchg|\bxadd|\bcmpxchg|\bmfence\b"}
+ASM_CALL: Regex{"\bcall\s+(?:r[a-z0-9]+\b|\{{)"}
+RAW_READ_WRITE: 3
+BYTE_COPY_MOVE: 5
+ATOMIC: 6
+FOREIGN_CROSSING: 8
+// A package's kernel files: `policy: { memory: .Kernel(["src/kernel", ...]) }`
+// in its package.jet, each path relative to the package, a file or a directory.
+MEMORY_KERNEL_FIELD: Regex{"\bmemory\s*:\s*\.\s*Kernel\s*\(\s*\[([^\]]*)\]"}
+QUOTED_PATH: Regex{"\"([^\"]*)\""}
+
 NEWLINE: 10
 BANG: 33
 QUOTE: 34
@@ -98,6 +144,9 @@ Options: struct {
     update: Bool
     check: Bool
     help: Bool
+    // Print the memory inventory instead of ratcheting; as JSON when `json`.
+    inventory: Bool
+    json: Bool
 }
 
 Region: struct {
@@ -205,13 +254,39 @@ CountChange: struct {
     after: Int
 }
 
+// One region of the memory inventory.
+MemoryRow: struct {
+    file: String
+    line: Int
+    // An index into MEMORY_AREA_NAMES.
+    area: Int
+    // One flag per MEMORY_ACTIONS entry.
+    actions: [Bool]
+    // The file is one of its package's kernel files, or no package.jet holds
+    // it (a loose file is its own kernel).
+    kernel: Bool
+}
+
+// The kernel declaration of a package that holds inventory regions.
+KernelPackage: struct {
+    // The package directory, relative to the root.
+    directory: String
+    // The paths `policy.memory` names, relative to the package; empty when it
+    // names none.
+    paths: [String]
+}
+
 usage: fn() -> String {
     [String]{
         "usage: {COMMAND} [--update | --check] [--root PATH] [--baseline PATH]",
+        "       {COMMAND} --inventory [--json] [--root PATH]",
         "",
         "Scan user-written Jet unsafe regions and compare them with the committed baseline.",
         "A lower count updates the baseline only for exact-row removals. Use --update to approve changes.",
         "--check never writes: any difference from the baseline, a shrink included, fails.",
+        "The count of Compiler, Core and Jetpack regions outside memory kernel files that perform a raw",
+        "memory action is ratcheted the same way: a rise fails, a fall lowers the baseline.",
+        "--inventory prints every such region with its actions and kernel; --json prints it as JSON.",
     }.join("\n")
 }
 
@@ -759,6 +834,287 @@ format_signals: fn(regions: [Region]) -> String RatchetError! {
 }
 
 // ---------------------------------------------------------------------------
+// Memory inventory
+
+// The inventory area of `file`, or -1 when the inventory leaves it out.
+memory_area: fn(file: String) -> Int {
+    loop index in 0..<MEMORY_AREA_PREFIXES.len() {
+        if file.starts_with(MEMORY_AREA_PREFIXES[index]) -> return index
+    }
+    -1
+}
+
+// The raw memory actions of the region at `start..<end`: the patterns over
+// `code`, the literal-blanked source, and an `#FFI(asm)` template as written.
+memory_actions: fn(source: [U8], code: [U8], start: Int, end: Int) -> [Bool] {
+    body: span_text(code, start, end)
+    actions := [Bool]{}
+    loop pattern in MEMORY_PATTERNS -> actions.push(pattern.is_match(body))
+    if body.contains("FFI(asm)") {
+        template: span_text(source, start, end)
+        if ASM_ADDRESSING.is_match(template) -> actions[RAW_READ_WRITE] = true
+        if ASM_BYTE_COPY.is_match(template) -> actions[BYTE_COPY_MOVE] = true
+        if ASM_ATOMIC.is_match(template) -> actions[ATOMIC] = true
+        if ASM_CALL.is_match(template) -> actions[FOREIGN_CROSSING] = true
+    }
+    actions
+}
+
+// One inventory row per region of `source`, pushed onto `out`.
+memory_regions: fn(source: [U8], file: String, area: Int, out: &[MemoryRow]) {
+    markers: unsafe_markers(source)
+    if markers.len() == 0 -> return
+    code: blank_literals(source)
+    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    loop marker in markers {
+        at: locate(source, cursor, marker.start)
+        actions: memory_actions(source, code, marker.start, region_end(code, marker.end))
+        out.push(MemoryRow{file: file.copy(), line: at.line, area: area, actions: actions, kernel: true})
+    }
+}
+
+// The directory of the nearest package.jet above `file`, relative to `root`
+// ("" for the root itself), or None when no package.jet holds the file.
+package_directory: fn(root: String, file: String) -[FS]> String? {
+    directory := file.rpartition("/").head
+    loop directory != "" {
+        if files.exists(files.join(root, "{directory}/package.jet")) -> return Val(directory)
+        parent: directory.rpartition("/").head
+        directory = parent
+    }
+    if files.exists(files.join(root, "package.jet")) -> Val("") else -> None
+}
+
+// The paths `policy.memory` names in a package.jet's `text`, relative to the
+// package, without a leading `./` or a trailing `/`.
+kernel_paths: fn(text: String) -> [String] {
+    paths := [String]{}
+    field: MEMORY_KERNEL_FIELD.match(text) ?? return paths
+    loop found in QUOTED_PATH.matches(field.groups[0]) {
+        path: found.groups[0]
+        trimmed: if path.starts_with("./") -> byte_tail(path, 2) else -> path.copy()
+        paths.push(if trimmed.ends_with("/") -> byte_slice(trimmed, 0, byte_len(trimmed) - 1) else -> trimmed)
+    }
+    paths
+}
+
+// The package-relative `path` is a kernel path or sits inside one.
+in_kernel: fn(path: String, kernel: [String]) -> Bool {
+    loop prefix in kernel {
+        if path == prefix || path.starts_with("{prefix}/") -> return true
+    }
+    false
+}
+
+// Set each row's kernel flag from its package's `policy.memory`; the
+// packages that hold rows, sorted by directory.
+mark_kernels: fn(root: String, rows: &[MemoryRow]) -[FS]> [KernelPackage] RatchetError! {
+    packages := [KernelPackage]{}
+    file := ""
+    kernel := true
+    loop index in 0..<rows.len() {
+        if rows[index].file != file {
+            file = rows[index].file.copy()
+            kernel = true
+            if package_directory(root, file) == {
+                .Val(directory) -> {
+                    known := -1
+                    loop at in 0..<packages.len() {
+                        if packages[at].directory == directory -> known = at
+                    }
+                    if known < 0 {
+                        manifest: if directory == "" -> files.join(root, "package.jet") else -> files.join(root, "{directory}/package.jet")
+                        text: read_text(manifest) ?? return Err(err)
+                        packages.push(KernelPackage{directory: directory.copy(), paths: kernel_paths(text)})
+                        known = packages.len() - 1
+                    }
+                    relative: if directory == "" -> file.copy() else -> byte_tail(file, byte_len(directory) + 1)
+                    kernel = in_kernel(relative, packages[known].paths)
+                }
+                .None -> {}
+            }
+        }
+        rows[index].kernel = kernel
+    }
+    packages.sort_by(fn(left: KernelPackage, right: KernelPackage) { left.directory <=> right.directory })
+    Ok(packages)
+}
+
+memory_outside: fn(row: MemoryRow) -> Bool { !row.kernel && row.actions.contains(true) }
+
+memory_outside_count: fn(rows: [MemoryRow]) -> Int {
+    count := 0
+    loop row in rows {
+        if memory_outside(row) -> count += 1
+    }
+    count
+}
+
+// Add `row` to `counts`: regions, outside the kernel, one per action, other.
+memory_count: fn(row: MemoryRow, counts: &[Int]) {
+    counts[0] = counts[0] + 1
+    if memory_outside(row) -> counts[1] = counts[1] + 1
+    other := true
+    loop index in 0..<row.actions.len() {
+        if row.actions[index] {
+            counts[index + 2] = counts[index + 2] + 1
+            other = false
+        }
+    }
+    last: counts.len() - 1
+    if other -> counts[last] = counts[last] + 1
+}
+
+memory_count_line: fn(label: String, counts: [Int]) -> String {
+    line := "| {label}"
+    loop count in counts -> line = "{line} | {count}"
+    "{line} |"
+}
+
+memory_action_names: fn(row: MemoryRow) -> String {
+    names := [String]{}
+    loop index in 0..<row.actions.len() {
+        if row.actions[index] -> names.push(MEMORY_ACTIONS[index].copy())
+    }
+    if names.len() == 0 -> "other" else -> names.join(", ")
+}
+
+// The memory inventory as Markdown tables: the outside-kernel count, the
+// counts by area and action, the kernel packages, and one row per region.
+render_memory_inventory: fn(rows: [MemoryRow], packages: [KernelPackage]) -> String {
+    lines := [String]{"Regions outside kernel files that perform a raw memory action: {memory_outside_count(rows)}", ""}
+    header := "| area | regions | outside the kernel"
+    rule := "| --- | ---: | ---:"
+    loop name in MEMORY_ACTIONS {
+        header = "{header} | {name}"
+        rule = "{rule} | ---:"
+    }
+    lines.push("{header} | other |")
+    lines.push("{rule} | ---: |")
+    width: MEMORY_ACTIONS.len() + 3
+    totals := [Int]{}
+    loop _ in 0..<width -> totals.push(0)
+    loop area in 0..<MEMORY_AREA_NAMES.len() {
+        counts := [Int]{}
+        loop _ in 0..<width -> counts.push(0)
+        loop row in rows {
+            if row.area != area -> next
+            memory_count(row, counts)
+            memory_count(row, totals)
+        }
+        lines.push(memory_count_line(MEMORY_AREA_NAMES[area], counts))
+    }
+    lines.push(memory_count_line("total", totals))
+    lines.push("")
+    lines.push("| package | policy.memory |")
+    lines.push("| --- | --- |")
+    if packages.len() == 0 -> lines.push("| (none) | (none) |")
+    loop package in packages {
+        name: if package.directory == "" -> "(root)" else -> package.directory.copy()
+        declared: if package.paths.len() == 0 -> "(none)" else -> package.paths.join(", ")
+        lines.push("| {markdown_cell(name)} | {markdown_cell(declared)} |")
+    }
+    lines.push("")
+    lines.push("| file | line | actions | kernel |")
+    lines.push("| --- | ---: | --- | --- |")
+    if rows.len() == 0 -> lines.push("| (none) | - | (none) | - |")
+    loop row in rows {
+        kernel: if row.kernel -> "yes" else -> "no"
+        lines.push("| {markdown_cell(row.file)} | {row.line} | {memory_action_names(row)} | {kernel} |")
+    }
+    lines.join("\n")
+}
+
+// The memory inventory as JSON, for tools.
+memory_inventory_json: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Dyn {
+    kernels := [Dyn]{}
+    loop package in packages {
+        paths := [Dyn]{}
+        loop path in package.paths -> paths.push(Dyn.Text(path.copy()))
+        kernels.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths)}))
+    }
+    regions := [Dyn]{}
+    loop row in rows {
+        actions := [Dyn]{}
+        loop index in 0..<row.actions.len() {
+            if row.actions[index] -> actions.push(Dyn.Text(MEMORY_ACTIONS[index].copy()))
+        }
+        regions.push(Dyn.Object([String: Dyn]{"file": Dyn.Text(row.file.copy()), "line": Dyn.Int(row.line), "area": Dyn.Text(MEMORY_AREA_NAMES[row.area].copy()), "actions": Dyn.Array(actions), "kernel": Dyn.Bool(row.kernel)}))
+    }
+    Dyn.Object([String: Dyn]{"outside_kernel": Dyn.Int(memory_outside_count(rows)), "packages": Dyn.Array(kernels), "regions": Dyn.Array(regions)})
+}
+
+// The outside-kernel count recorded in the baseline `text`, or None when it
+// has no such line.
+memory_baseline: fn(text: String) -> Int? {
+    at: text.find(MEMORY_BASELINE)
+    if at < 0 -> return None
+    rest: byte_tail(text, at + byte_len(MEMORY_BASELINE))
+    close: rest.find(" -->")
+    if close < 0 -> return None
+    count: Int.parse(byte_slice(rest, 0, close)) ?? return None
+    Val(count)
+}
+
+// The baseline `text` with its outside-kernel count set to `count`; a new
+// line goes just before the unsafe-ratchet section.
+with_memory_baseline: fn(text: String, count: Int) -> String {
+    line: "{MEMORY_BASELINE}{count} -->"
+    at: text.find(MEMORY_BASELINE)
+    if at >= 0 {
+        close: byte_tail(text, at).find("-->")
+        if close >= 0 -> return "{byte_slice(text, 0, at)}{line}{byte_tail(text, at + close + 3)}"
+    }
+    begin: text.find(BEGIN)
+    if begin < 0 -> return "{text.trim_end()}\n\n{line}\n"
+    "{byte_slice(text, 0, begin)}{line}\n{byte_tail(text, begin)}"
+}
+
+// Ratchet the count of regions outside kernel files that perform a raw
+// memory action against the baseline: a rise fails, a fall fails `--check`
+// and lowers the baseline on any other run, and `--update` records any count.
+// False when the check failed.
+memory_ratchet: fn(options: Options, rows: &[MemoryRow]) -[FS, IO]> Bool RatchetError! {
+    if rows.len() == 0 -> return Ok(true)
+    _ := mark_kernels(options.root, rows) ?? return Err(err)
+    count: memory_outside_count(rows)
+    summary: "memory kernel: {count} regions outside kernel files perform a raw memory action"
+    text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> ""
+    // -1 when the baseline has no outside-kernel line yet.
+    before: memory_baseline(text) ?? -1
+    if before == count {
+        print(summary)
+        return Ok(true)
+    }
+    if before >= 0 && count > before && !options.update {
+        term.eprint("memory kernel: regions outside kernel files that perform a raw memory action rose from {before} to {count}; keep raw memory actions in the files `policy.memory` names (`{COMMAND} --inventory` lists every region)")
+        return Ok(false)
+    }
+    if options.check {
+        problem: if before < 0 -> "{options.baseline} has no outside-kernel count; record it with {COMMAND} --update" else -> "the count fell from {before} to {count}; lower the baseline with {COMMAND}"
+        term.eprint("memory kernel: {problem}")
+        return Ok(false)
+    }
+    write_text(options.baseline, with_memory_baseline(text, count)) ?? return Err(err)
+    print("{summary}; baseline recorded")
+    Ok(true)
+}
+
+// Print the classified inventory, as JSON when `json`.
+print_memory_inventory: fn(options: Options) -[FS, IO]> () RatchetError! {
+    signals := [Region]{}
+    rows := [MemoryRow]{}
+    _ := scan(options.root, signals, rows) ?? return Err(err)
+    packages: mark_kernels(options.root, rows) ?? return Err(err)
+    if options.json {
+        print(json.to_string_pretty(memory_inventory_json(rows, packages)) ?? return Err(ratchet_fail("cannot encode the inventory: {err}")))
+    } else {
+        print(render_memory_inventory(rows, packages))
+    }
+    Ok()
+}
+
+// ---------------------------------------------------------------------------
 // Tree walk
 
 // User-written `.jet` files under `base`, as sorted paths relative to it.
@@ -828,8 +1184,9 @@ compare_regions: fn(left: Region, right: Region) -> Ordering {
 }
 
 // The census of `root`; the regions that register a signal handler outside
-// the vetted runtime boundary go to `signals`.
-scan: fn(root: String, signals: &[Region]) -[FS]> Census RatchetError! {
+// the vetted runtime boundary go to `signals`, and the memory inventory's
+// regions to `memory`.
+scan: fn(root: String, signals: &[Region], memory: &[MemoryRow]) -[FS]> Census RatchetError! {
     paths := [String]{}
     jet_files(root, "", paths) ?? return Err(err)
     regions := [Region]{}
@@ -838,6 +1195,8 @@ scan: fn(root: String, signals: &[Region]) -[FS]> Census RatchetError! {
         owner: package_name(root, file) ?? return Err(err)
         scan_source(source, file, owner, regions)
         if !signal_boundary(file) -> signal_registrations(source, file, owner, signals)
+        area: memory_area(file)
+        if area >= 0 -> memory_regions(source, file, area, memory)
     }
     // #6319: sort_by with a named comparator crashes; the lambda forwards to it.
     regions.sort_by(fn(left: Region, right: Region) { compare_regions(left, right) })
@@ -1400,8 +1759,8 @@ write_text: fn(path: String, text: String) RatchetError! -[FS]> {
 }
 
 // Compare the scan with the baseline; false when the check failed.
-ratchet: fn(options: Options, signals: &[Region]) -[FS, IO]> Bool RatchetError! {
-    current: scan(options.root, signals) ?? return Err(err)
+ratchet: fn(options: Options, signals: &[Region], memory: &[MemoryRow]) -[FS, IO]> Bool RatchetError! {
+    current: scan(options.root, signals, memory) ?? return Err(err)
     baseline: read_baseline(options.baseline) ?? {
         if !options.update -> return Err(err)
         text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> "# Safety\n"
@@ -1450,7 +1809,7 @@ resolved: fn(path: String) -[FS, Env]> String RatchetError! {
 
 parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
     root: resolved(".") ?? return Err(err)
-    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, check: false, help: false}
+    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, check: false, help: false, inventory: false, json: false}
     index := 0
     loop index < args.len() {
         arg: args[index]
@@ -1458,6 +1817,10 @@ parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
             options.update = true
         } else if arg == "--check" {
             options.check = true
+        } else if arg == "--inventory" {
+            options.inventory = true
+        } else if arg == "--json" {
+            options.json = true
         } else if arg == "--root" || arg == "--baseline" {
             index += 1
             value: if index < args.len() -> args[index].copy() else -> ""
@@ -1477,22 +1840,31 @@ parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
         index += 1
     }
     if options.update && options.check -> return Err(ratchet_fail("--update and --check exclude each other\n\n{usage()}"))
+    if options.inventory && (options.update || options.check) -> return Err(ratchet_fail("--inventory only prints; it excludes --update and --check\n\n{usage()}"))
+    if options.json && !options.inventory -> return Err(ratchet_fail("--json prints the inventory; add --inventory\n\n{usage()}"))
     Ok(options)
 }
 
-// Run the ratchet and the CoreLib audit; false when either failed.
+// Run the ratchet, the memory-kernel count and the CoreLib audit; false when
+// any failed. `--inventory` only prints the classified regions.
 unsafe_ratchet_main: fn(args: [String]) -[FS, Env, IO]> Bool RatchetError! {
     options: parse_args(args) ?? return Err(err)
     if options.help {
         print(usage())
         return Ok(true)
     }
+    if options.inventory {
+        print_memory_inventory(options) ?? return Err(err)
+        return Ok(true)
+    }
     signals := [Region]{}
-    passed := ratchet(options, signals) ?? return Err(err)
+    memory := [MemoryRow]{}
+    passed := ratchet(options, signals, memory) ?? return Err(err)
     if signals.len() > 0 {
         term.eprint(format_signals(signals) ?? return Err(err))
         passed = false
     }
+    if !(memory_ratchet(options, memory) ?? return Err(err)) -> passed = false
     baseline_text: if files.exists(options.baseline) -> read_text(options.baseline) ?? return Err(err) else -> ""
     problems: check_corelib(options.root, baseline_text) ?? return Err(err)
     if problems != "" {
@@ -1630,6 +2002,56 @@ signals_in: fn(text: String) -> [Region] {
     }
     missing: read_abstractions("no registry") ?? panic("none: {err.message}")
     assert_eq(missing.len(), 0)
+}
+
+inventoried: fn(text: String, file: String) -> [MemoryRow] {
+    rows := [MemoryRow]{}
+    memory_regions(text.bytes(), file, memory_area(file), rows)
+    rows
+}
+
+#Test("the memory inventory tags each region with the raw memory actions its code spells") {
+    source: "a: fn(p: Ptr<U8>) {{\n    #Unsafe(\"alloc\") {{ q: alloc_raw(8)\n p.* = 1 }}\n    // free_raw(q)\n    #Unsafe(\"text\") {{ s: \"free_raw(q)\" }}\n}}\n#[Unsafe(\"store\"), FFI(asm)]\nstore: fn(address: Int, value: Int) {{\n    \"\"\"\n    mov qword ptr [{{address}}], {{value}}\n    \"\"\"\n}}\n#[Unsafe(\"abi\"), FFI(c)]\nwrite: fn(fd: Int) -> Int\n"
+    rows := inventoried(source, "Core/A.jet")
+    assert_eq(rows.len(), 4)
+    assert_eq(rows[0].line, 2)
+    assert_eq(memory_action_names(rows[0]), "allocate, raw read/write")
+    assert_eq(memory_action_names(rows[1]), "other")
+    assert_eq(rows[2].line, 7)
+    assert_eq(memory_action_names(rows[2]), "raw read/write")
+    assert_eq(rows[3].line, 13)
+    assert_eq(memory_action_names(rows[3]), "foreign crossing")
+    assert_eq(memory_area("Compiler/JetRuntime/Source/A.jet"), 0)
+    assert_eq(memory_area("Compiler/JetBackend/Source/OS/Linux.jet"), 1)
+    assert_eq(memory_area("Tools/agent/A.jet"), -1)
+    loop index in 0..<rows.len() -> rows[index].kernel = false
+    packages: [KernelPackage]{KernelPackage{directory: "Core", paths: [String]{}}}
+    text: render_memory_inventory(rows, packages)
+    assert(text.starts_with("Regions outside kernel files that perform a raw memory action: 3\n"))
+    assert(text.contains("\n| Core | 4 | 3 | 1 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 1 | 1 |\n"))
+    assert(text.contains("\n| Core | (none) |\n"))
+    assert(text.contains("\n| Core/A.jet | 2 | allocate, raw read/write | no |\n"))
+    encoded: json.to_string(memory_inventory_json(rows, packages)) ?? panic("json: {err}")
+    assert(encoded.starts_with("{{\"outside_kernel\":3,"))
+    assert(encoded.contains("{{\"file\":\"Core/A.jet\",\"line\":2,\"area\":\"Core\",\"actions\":[\"allocate\",\"raw read/write\"],\"kernel\":false}}"))
+}
+
+#Test("kernel files come from policy.memory, and the outside-kernel count has a one-line baseline") {
+    paths: kernel_paths("name: \"k\"\npolicy: {{ memory: .Kernel([\"./src/kernel/\", \"src/arena.jet\"]) }}\n")
+    assert_eq(paths.join(","), "src/kernel,src/arena.jet")
+    assert(in_kernel("src/kernel/a.jet", paths) && in_kernel("src/arena.jet", paths))
+    assert(!in_kernel("src/kernels.jet", paths) && !in_kernel("src/arena.jet.bak", paths))
+    assert_eq(kernel_paths("name: \"k\"\n").len(), 0)
+    first: with_memory_baseline("# Safety\n\n{BEGIN}\n{END}\n", 511)
+    assert_eq(first, "# Safety\n\n{MEMORY_BASELINE}511 -->\n{BEGIN}\n{END}\n")
+    assert_eq(memory_baseline(first) ?? -1, 511)
+    lowered: with_memory_baseline(first, 7)
+    assert_eq(lowered, "# Safety\n\n{MEMORY_BASELINE}7 -->\n{BEGIN}\n{END}\n")
+    assert(memory_baseline("# Safety\n") == None)
+    if parse_args([String]{"--json"}) == {
+        .Ok(_) -> panic("--json without --inventory was accepted")
+        .Err(error) -> assert(error.message.starts_with("--json prints the inventory"))
+    }
 }
 
 #Test("--check compares without writing and excludes --update") {

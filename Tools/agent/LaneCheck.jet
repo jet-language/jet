@@ -162,12 +162,13 @@ assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
     spec
 }
 
-// The unsafe-region ratchet with $JET, else the `jet` on PATH; it never writes.
+// The unsafe-region ratchet and memory-kernel count with $JET, else the `jet`
+// on PATH; it never writes.
 unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     ratchet: process.cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
     if ratchet.code == 0 && ratchet.signal == None -> return
-    check_refused(process.combined_output(ratchet).trim_end(), "the unsafe-region ratchet differs from Docs/spec/safety.md (see above; record an audited row with jet Tools/agent/UnsafeRatchet.jet --update)")
+    check_refused(process.combined_output(ratchet).trim_end(), "the unsafe-region ratchet differs from Docs/spec/safety.md (see above; record an audited row with jet Tools/agent/UnsafeRatchet.jet --update; lower a fallen memory-kernel count with jet Tools/agent/UnsafeRatchet.jet)")
 }
 
 // The vocabulary rows check with $JET, else the `jet` on PATH; it never writes.

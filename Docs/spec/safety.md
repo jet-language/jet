@@ -220,6 +220,16 @@ A source-level gate does not itself require a raw unsafe operation: expert
 crypto calls may use safe, source-owned Core Jet bodies while sema still requires
 `#Unsafe` for nonce, algorithm, and secret-exposure obligations (E0510).
 
+The same scan counts the `#Unsafe` regions in Compiler, Core and Jetpack that
+perform a raw memory action outside their package's kernel files (the files
+`policy.memory` names; a file no `package.jet` holds is its own kernel). The
+`memory-kernel:outside` line above the generated section records that count.
+A rise fails. A fall fails `--check` and lowers the line on a plain run. The
+memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
+--inventory` lists each region with its actions and kernel, and
+`--inventory --json` prints the same for tools.
+
+<!-- memory-kernel:outside 511 -->
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
 {
