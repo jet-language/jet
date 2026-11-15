@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6880,
-    "rev": 103250,
+    "rev": 103275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30165,6 +30165,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:45:33.741Z"
+        },
+        {
+          "n": 32,
+          "text": "Case conversion has one home and one answer: String.lower and String.to_lower (Core/Text/String.jet:23-24), text.lower and Core/Text/Parse.jet:464 lower collapse to one Core name (D-CORE-ONE-NAME1=A). Proof: `git grep -n -E '^(lower|to_lower): fn' -- Core` shows one definition, and `jet test Compiler --profile golden --filter text/unicode_contracts` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:34.953Z"
         }
       ],
       "refs": [
@@ -30181,13 +30190,13 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-13T10:26:52.896Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:34.954Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 218,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 31
+      "criteriaLastN": 32
     },
     {
       "id": "c0t54oz7",
@@ -31292,6 +31301,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:54:47.987Z"
+        },
+        {
+          "n": 45,
+          "text": "Stream.key_by, window, watermark and the late-event disposition share one SendFn callback identity and the bare event side-output shape on O0, O1, O2 and web where applicable; a callback whose result is not sendable, or that escapes, is refused. Proof: `jet test Compiler --profile golden --filter collections/stream_windows`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:38.418Z"
+        },
+        {
+          "n": 46,
+          "text": "`[1,2].lazy().cycle().take(5)` prints [1,2,1,2,1], an empty replayable source ends, an effectful map runs once per source item per pass, `cycle(5)` is unchanged, and replay of an effectful source is never silent or unbounded. Proof: `jet test Compiler --profile golden --filter collections/lazy_cycle` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:39.826Z"
+        },
+        {
+          "n": 47,
+          "text": "Zero-argument `cycle()` on a Stream or other one-shot source is refused with a registered error. Proof: `jet test Compiler --profile ui --filter cycle_one_shot_source`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:41.116Z"
         }
       ],
       "refs": [
@@ -31321,13 +31357,13 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-13T02:19:30.501Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:41.117Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 37,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 44
+      "criteriaLastN": 47
     },
     {
       "id": "c0l0ygs4",
@@ -31498,6 +31534,24 @@
           "verifiedBy": null,
           "evidence": "CardClose-1 verdict 2026-10-31: gold4.sh collections/family_iter_capabilities on w9b: o0/o1/o2 and AOT all \"stdout == .../expected/collections/family_iter_capabilities.out\" [exit 0]; ui-w9b-wave.txt \"PASS tests/ui/iter_family_mutable_key.jet\"",
           "at": "2026-10-31T19:52:00.136Z"
+        },
+        {
+          "n": 20,
+          "text": "Set follows D-SET-DECLINE1=C: `sort` and `shuffle` ship on Set and return a List, `indexof` and `indexed` stay declined with that decision ID in the core-surface ledger. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0 and `jet test Compiler --profile cases --filter corelib/set_sort_shuffle` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:36.140Z"
+        },
+        {
+          "n": 21,
+          "text": "Every core.collections.set function runs through Core/Collections/Set.jet with no dispatcher row or tier-specific wrapper (none on dev 452b6443f3), and a test covers each one: Set.jet has no #Test today. Proof: `jet test Core/Collections/Set.jet` runs a #Test per public function.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:37.222Z"
         }
       ],
       "refs": [
@@ -31525,13 +31579,13 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-13T02:19:39.426Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:37.223Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 44,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 19
+      "criteriaLastN": 21
     },
     {
       "id": "c0u913de",
@@ -35584,6 +35638,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T17:59:44.779Z"
+        },
+        {
+          "n": 17,
+          "text": "`sys.set` reports a failed set as an EnvError: Core/Sys/Sys.jet:61 declares it Never! while its leaf (`__env_set`, jet_std_env_try_set) can fail; a golden calls sys.set and handles the error. Proof: `jet test Compiler --profile golden --filter sys/env_set_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:19.523Z"
+        },
+        {
+          "n": 18,
+          "text": "Core env APIs can read and write non-Unicode raw-byte values, once a ballot (D-ENV-RAW-BYTES1, not yet drafted) settles the API. Proof: `jet test Compiler --profile cases --filter sys/env_raw_bytes`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:20.467Z"
         }
       ],
       "refs": [],
@@ -35596,13 +35668,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-13T01:57:22.158Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:20.467Z",
+      "updatedBy": "TowerKeeper-1",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 18
     },
     {
       "id": "c0qus24o",
@@ -38888,6 +38960,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:14.915Z"
+        },
+        {
+          "n": 17,
+          "text": "On Windows, Stat.size_on_disk and Stat.changed follow the D-CORE-FILESTAT1=A definitions (they deviate since 3ec4f6b0c). Proof: `jet test Compiler --profile cases --filter files/stat_windows_terms` on a Windows runner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:15.967Z"
+        },
+        {
+          "n": 18,
+          "text": "core.files can set a file's modification time, once a ballot (D-FILES-SET-MTIME1, not yet drafted) settles the API. Proof: `jet test Compiler --profile cases --filter files/set_mtime`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:16.843Z"
+        },
+        {
+          "n": 19,
+          "text": "`Directory.lock()` (Core/Files/Files.jet:644) is either ratified into the file and directory API or removed, as a ballot (D-DIR-LOCK1, not yet drafted) decides; it is public surface no decision covers today. Proof: `git grep -n 'lock: fn(self)' -- Core/Files/Files.jet` matches the ratified outcome.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:17.751Z"
+        },
+        {
+          "n": 20,
+          "text": "Stat reports a Windows reparse-point fact, which the Jetpack registry needs, once a ballot (D-STAT-REPARSE1, not yet drafted) settles its shape. Proof: `jet test Compiler --profile cases --filter files/stat_reparse_point` on a Windows runner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:18.639Z"
         }
       ],
       "refs": [
@@ -38904,12 +39012,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-15T03:03:14.915Z",
+      "updated": "2026-11-15T03:03:18.639Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 20
     },
     {
       "id": "c0ufrhm0",
@@ -40389,6 +40497,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:51:45.921Z"
+        },
+        {
+          "n": 24,
+          "text": "TCP writes have one spelling and never drop bytes: a write either writes everything or returns the short count to a caller that must handle it; the five write spellings collapse to one. Proof: `jet test Compiler --profile cases --filter net/tcp_write_short_count`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:33.768Z"
         }
       ],
       "refs": [
@@ -40410,12 +40527,12 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-13T01:57:43.123Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:33.769Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 23
+      "criteriaLastN": 24
     },
     {
       "id": "c077ihdp",
@@ -42878,6 +42995,33 @@
           "verifiedBy": null,
           "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/core_surface_ledger/core_surface_ledger_checker_rejects_hostile_fixtures.case PASS. This row is the proof the precut audit named for this criterion.",
           "at": "2026-11-07T03:47:09.008Z"
+        },
+        {
+          "n": 19,
+          "text": "Markers are PascalCase only: `#Allow(lint)` and `#Wire` are the only spellings, `#allow` and `#wire` (5 .jet files on dev 452b6443f3) are migrated, and a test checks every marker row against the marker NameCase rule. Proof: `git grep -l -E '#(allow|wire)\\b' -- '*.jet'` prints nothing and `jet test tests/guards --filter closed_lists` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:22.384Z"
+        },
+        {
+          "n": 20,
+          "text": "The CLI has one spelling per flag meaning: for each pair the Jet CLI accepts (--route/--path, --cook/--cook-mode, --force-clean/--clean in Compiler/JetCli/Source/Cli/Commands.jet) the owner chooses keep both or keep one; a removed spelling is an ordinary unknown-flag error, and help, completion and CLI snapshots are regenerated. Proof: `jet test Compiler --profile cases --filter cli_flag_one_spelling`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:23.256Z"
+        },
+        {
+          "n": 21,
+          "text": "The 20 most common Python collection and string spellings in the ScriptBench Python programs (`sorted`, `list(range(...))`, `Counter`, `join`, `split`, `strip`, `startswith` and so on) each map to one Jet name or get an E0311 whose `fix_edits` names it; `xs.sorted()` and `(0..<8).to_list()` no longer fail without a fix (today E0311 for both). Proof: `jet test Compiler --profile ui --filter python_spelling_fix_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:24.179Z"
         }
       ],
       "refs": [],
@@ -42888,12 +43032,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:31.228Z",
-      "updated": "2026-11-14T20:35:20.602Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:24.179Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 21
     },
     {
       "id": "c036453d",
@@ -50607,6 +50751,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:22:04.409Z"
+        },
+        {
+          "n": 3,
+          "text": "One way chooses who implements a library service, in builds, scopes and tests (D-CORE-PROVIDER1=A). Proof: `jet test Compiler --profile cases --filter core_provider_choice_`. The frozen #4570 holds the original item.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:30.459Z"
         }
       ],
       "refs": [
@@ -50620,11 +50773,12 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:58.270Z",
-      "updated": "2026-11-13T08:25:19.250Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:30.459Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 3
     },
     {
       "id": "c0tdf1ct",
@@ -74338,6 +74492,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:40:28.147Z"
+        },
+        {
+          "n": 44,
+          "text": "The sqlite3 C-module fixture imports through `use c.sqlite3` and its calls dispatch to the C library on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter cffi/sqlite3_import_dispatch`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:32.688Z"
         }
       ],
       "refs": [
@@ -74350,9 +74513,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-15T02:40:28.147Z",
+      "updated": "2026-11-15T03:03:32.688Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 43
+      "criteriaLastN": 44
     },
     {
       "id": "c0ov7lce",
@@ -78700,6 +78863,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T08:17:45.659Z"
+        },
+        {
+          "n": 10,
+          "text": "The web store is one generic impl over its state type in the `web` package, not per-type copies. Proof: `jet test Compiler --profile cases --filter web_app/store_generic_impl`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:31.581Z"
         }
       ],
       "refs": [],
@@ -78710,9 +78882,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-14T08:49:53.935Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9
+      "updated": "2026-11-15T03:03:31.581Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 10
     },
     {
       "id": "c0isxyo3",
@@ -81087,6 +81259,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:53:57.338Z"
+        },
+        {
+          "n": 7,
+          "text": "Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed instruction entries (chip feature, encoding, plain Jet body checked against the chip) are Core declarations, and a new chip entry lands as a Core change with no compiler edit; Core loads lazily. Proof: `jet test Compiler --profile cases --filter hw/chip_entry_is_a_core_change`. The frozen #4565 holds the original item.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:25.134Z"
         }
       ],
       "refs": [],
@@ -81100,9 +81281,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:49.683Z",
-      "updated": "2026-11-13T01:53:57.338Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 6
+      "updated": "2026-11-15T03:03:25.134Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 7
     },
     {
       "id": "c0pf4ki0",
@@ -90436,6 +90617,15 @@
           "verifiedBy": null,
           "evidence": "18cd07d573 (on dev): math.rem_quo, math.remainder and math.fmod given two F32 arguments return an F32 through sema_call_try_core_math_f32 (computed in Float on the exactly widened operands and rounded once). rem_quo gives (rem: F32, quo: Int) through the internal Core __rem_quo_f32, and no public name is added. On the gate-p55 jet (dev 9623399213): `jet test Compiler --profile cases --filter core_math_f32_exact_and_bit_functions_match_c23_on_every_tier` rc 0, 1/0 (the fmod, remainder and rem_quo corpora cover signed zeros, subnormals, infinities, NaN payloads, halfway and past-2^31 quotients against glibc 2.42 and musl remquof, at O0, O1, O2 and web); `--filter core_math_matches_musl_bit_for_bit_on_every_tier` rc 0, 1/0 (Float arguments keep Float results).",
           "at": "2026-11-14T06:24:30.898Z"
+        },
+        {
+          "n": 10,
+          "text": "core.math's elementary functions accept F32 and return F32 at the same width: the Float-only source facade (Core/Math/Math.jet, e.g. `sin: fn(n: Float)`) gains the F32 forms the old sema accepted, with no widening. Proof: `jet test Compiler --profile cases --filter corelib/math_f32_same_width`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:21.446Z"
         }
       ],
       "refs": [
@@ -90451,9 +90641,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-14T06:24:30.898Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9
+      "updated": "2026-11-15T03:03:21.446Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 10
     },
     {
       "id": "c0l39twq",
@@ -99682,6 +99872,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:25:20.775Z"
+        },
+        {
+          "n": 12,
+          "text": "Each number family has one generic definition that compile-time code expands to the needed widths (D-CORE-NUMFAMILY1=A), replacing one hand-written type per size. Proof: `jet test Compiler --profile golden --filter Basics/` on O0, O1 and O2, and `git grep` shows one family definition per number kind in Core. The frozen #4570 holds the original item.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:29.264Z"
         }
       ],
       "refs": [],
@@ -99696,9 +99895,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-15T02:25:20.775Z",
+      "updated": "2026-11-15T03:03:29.264Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c07ywjvi",
@@ -100236,6 +100435,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:25:07.534Z"
+        },
+        {
+          "n": 13,
+          "text": "Compiler-provided operations go through one private door named `jet_builtins` (D-CORE-BUILTINS1=A), and no other compiler-known Core entry remains. Proof: `jet test tests/guards --filter core_declarations` and a guard listing compiler-known Core names outside jet_builtins reports none. The frozen #4570 holds the original item.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:26.070Z"
+        },
+        {
+          "n": 14,
+          "text": "Every `__`-prefixed item in Core is private to its package, and a public `__` name fails the build with a registered error. Proof: `jet test Compiler --profile ui --filter public_dunder_name_is_an_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:26.997Z"
         }
       ],
       "refs": [],
@@ -100249,8 +100466,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-15T02:25:07.534Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:03:26.997Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 14
     },
     {
       "id": "c0sdz4q0",
@@ -100412,6 +100630,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:25:09.260Z"
+        },
+        {
+          "n": 8,
+          "text": "Library types take on language meaning (what `+` calls, what indexing calls) through declared roles (D-CORE-ROLE1=A, PascalCase markers), never by compiler name lookup. Proof: `jet test Compiler --profile cases --filter core_role_operator_dispatch`. The frozen #4570 holds the original item.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:28.110Z"
         }
       ],
       "refs": [],
@@ -100426,8 +100653,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-15T02:25:09.261Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:03:28.110Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 8
     },
     {
       "id": "c0lidgow",
@@ -207760,6 +207988,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:03:41.117Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#47 Zero-argument `cycle()` on a Stream or other one-shot source"
+    },
+    {
+      "at": "2026-11-15T03:03:39.827Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#46 `[1,2].lazy().cycle().take(5)` prints [1,2,1,2,1], an empty "
+    },
+    {
+      "at": "2026-11-15T03:03:38.418Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0m83e3n",
+      "note": "#45 Stream.key_by, window, watermark and the late-event disposit"
+    },
+    {
+      "at": "2026-11-15T03:03:37.223Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0l0ygs4",
+      "note": "#21 Every core.collections.set function runs through Core/Collec"
+    },
+    {
+      "at": "2026-11-15T03:03:36.140Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0l0ygs4",
+      "note": "#20 Set follows D-SET-DECLINE1=C: `sort` and `shuffle` ship on S"
+    },
+    {
+      "at": "2026-11-15T03:03:34.954Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0uyfbge",
+      "note": "#32 Case conversion has one home and one answer: String.lower an"
+    },
+    {
+      "at": "2026-11-15T03:03:33.769Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#24 TCP writes have one spelling and never drop bytes: a write e"
+    },
+    {
+      "at": "2026-11-15T03:03:32.688Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#44 The sqlite3 C-module fixture imports through `use c.sqlite3`"
+    },
+    {
+      "at": "2026-11-15T03:03:31.581Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#10 The web store is one generic impl over its state type in the"
+    },
+    {
+      "at": "2026-11-15T03:03:30.459Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0tr523z",
+      "note": "#3 One way chooses who implements a library service, in builds,"
+    },
+    {
+      "at": "2026-11-15T03:03:29.264Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0r6d7ja",
+      "note": "#12 Each number family has one generic definition that compile-t"
+    },
+    {
+      "at": "2026-11-15T03:03:28.110Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c06r6neu",
+      "note": "#8 Library types take on language meaning (what `+` calls, what"
+    },
+    {
+      "at": "2026-11-15T03:03:26.997Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#14 Every `__`-prefixed item in Core is private to its package, "
+    },
+    {
+      "at": "2026-11-15T03:03:26.070Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#13 Compiler-provided operations go through one private door nam"
+    },
+    {
+      "at": "2026-11-15T03:03:25.134Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c09brw5t",
+      "note": "#7 Chip knowledge lives in Core (D-CORE-BOUNDARY1=A): typed ins"
+    },
+    {
+      "at": "2026-11-15T03:03:24.179Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0q38sm2",
+      "note": "#21 The 20 most common Python collection and string spellings in"
+    },
+    {
+      "at": "2026-11-15T03:03:23.256Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0q38sm2",
+      "note": "#20 The CLI has one spelling per flag meaning: for each pair the"
+    },
+    {
+      "at": "2026-11-15T03:03:22.384Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0q38sm2",
+      "note": "#19 Markers are PascalCase only: `#Allow(lint)` and `#Wire` are "
+    },
+    {
+      "at": "2026-11-15T03:03:21.446Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#10 core.math's elementary functions accept F32 and return F32 a"
+    },
+    {
+      "at": "2026-11-15T03:03:20.467Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fi6uj5",
+      "note": "#18 Core env APIs can read and write non-Unicode raw-byte values"
+    },
+    {
+      "at": "2026-11-15T03:03:19.523Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0fi6uj5",
+      "note": "#17 `sys.set` reports a failed set as an EnvError: Core/Sys/Sys."
+    },
+    {
+      "at": "2026-11-15T03:03:18.639Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#20 Stat reports a Windows reparse-point fact, which the Jetpack"
+    },
+    {
+      "at": "2026-11-15T03:03:17.751Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#19 `Directory.lock()` (Core/Files/Files.jet:644) is either rati"
+    },
+    {
+      "at": "2026-11-15T03:03:16.843Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#18 core.files can set a file's modification time, once a ballot"
+    },
+    {
+      "at": "2026-11-15T03:03:15.967Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#17 On Windows, Stat.size_on_disk and Stat.changed follow the D-"
+    },
     {
       "at": "2026-11-15T03:03:14.915Z",
       "by": "TowerKeeper-1",
