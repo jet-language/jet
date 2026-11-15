@@ -10,7 +10,7 @@
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
 // chosen (`web_reason`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -50,10 +50,11 @@ sema_web_type_id: fn(types: &SemaWebTypes, name: String) -> Int Never! {
     id
 }
 
-sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic], threads: CompilerThreads) {
     // Only the checks of a program that opts in read the declarations for the
-    // ABI rule, the `#Export(wasm)` signatures and the bucket reasons, so a
-    // program that doesn't collects none of them.
+    // ABI rule, the `#Export(wasm)` signatures, the bucket reasons and the
+    // functions without a checked body, so a program that doesn't collects
+    // none of them.
     active: sema_web_partition_active(graph)
     metas := [SemaWebMeta]{}
     types := SemaWebTypes{names: name_table_sized(64), struct_at: [Int]{-1}, enum_at: [Int]{-1}, structs: [StructDef]{}, enums: [EnumDef]{}}
@@ -63,7 +64,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         is_entry: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
         spans: sema_web_rows(modules[module_index].functions)
-        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types, abi_types: active)
+        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types, active: active)
     }
     if metas.len() == 0 {
         return
@@ -93,15 +94,9 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             id: name_index(name_intern(keys, modules[metas[at].slot].functions[metas[at].row].key))
             if id == meta_of.len() -> meta_of.push(at) else -> meta_of[id] = at
         }
-        loop meta in metas {
-            callee_first.push(callees.len())
-            if meta.row < 0 -> next
-            loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
-                found: name_find(keys, edge) ?? next
-                if meta_of[name_index(found)] >= 0 -> callees.push(meta_of[name_index(found)])
-            }
-        }
-        callee_first.push(callees.len())
+        edges: sema_web_resolve_edges(modules, metas, keys, meta_of, threads)
+        callee_first = edges.first.move()
+        callees = edges.callees.move()
     }
     // Close the partition over the call edges.
     changed := any_js
@@ -173,6 +168,76 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     }
 }
 
+// The fewest call edges worth a compiler thread of their own in
+// sema_web_resolve_edges: an edge resolves in about 100 ns.
+SEMA_WEB_EDGES_PER_THREAD: 16384
+
+// Each meta's call edges as metas, in meta order:
+// callees[first[at]..<first[at + 1]].
+SemaWebEdges: struct {
+    first: [Int]
+    callees: [Int]
+}
+
+// The call edges of `metas`' checked bodies, each resolved through `keys`
+// to the meta `meta_of` names for its key and dropped when there is none.
+// Compiler threads resolve consecutive parts of `metas`, weighed by their
+// edges, and the parts join in order, so the edges are the same for any
+// thread count.
+sema_web_resolve_edges: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], threads: CompilerThreads) -> SemaWebEdges {
+    weights := [Int]{}
+    work := 0
+    loop meta in metas {
+        count: if meta.row < 0 -> 0 else -> modules[meta.slot].functions[meta.row].effects.call_edges.len()
+        weights.push(count)
+        work += count
+    }
+    workers: compiler_threads_admit(threads, metas.len(), work, SEMA_WEB_EDGES_PER_THREAD, 0, 0)
+    bounds: compiler_threads_partition(weights, workers)
+    edges := SemaWebEdges{first: [Int]{}, callees: [Int]{}}
+    loop part in sema_web_resolve_parts(modules, metas, keys, meta_of, bounds, 0) {
+        base: edges.callees.len()
+        loop start in part.first -> edges.first.push(base + start)
+        loop callee in part.callees -> edges.callees.push(callee)
+    }
+    edges.first.push(edges.callees.len())
+    edges
+}
+
+// The edges of parts `part..<bounds.len() - 1` (sema_web_resolve_part), in
+// part order: the first part on its own thread, the ones after it the same
+// way, and the last on this one.
+sema_web_resolve_parts: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], bounds: [Int], part: Int) -> [SemaWebEdges] {
+    done := [SemaWebEdges]{}
+    if part + 1 >= bounds.len() -> return done
+    if part + 2 == bounds.len() {
+        done.push(sema_web_resolve_part(modules, metas, keys, meta_of, bounds[part], bounds[part + 1]))
+        return done
+    }
+    task.group sema_web_threads {
+        head: task sema_web_resolve_part(modules, metas, keys, meta_of, bounds[part], bounds[part + 1])
+        rest: sema_web_resolve_parts(modules, metas, keys, meta_of, bounds, part + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop edges in rest.move() -> done.push(edges)
+    }
+    done
+}
+
+// The edges of metas `start..<end`: `first` counts from this part's own
+// first edge.
+sema_web_resolve_part: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], start: Int, end: Int) -> SemaWebEdges {
+    edges := SemaWebEdges{first: [Int]{}, callees: [Int]{}}
+    loop at in start..<end {
+        edges.first.push(edges.callees.len())
+        if metas[at].row < 0 -> next
+        loop edge in modules[metas[at].slot].functions[metas[at].row].effects.call_edges {
+            found: name_find(keys, edge) ?? next
+            if meta_of[name_index(found)] >= 0 -> edges.callees.push(meta_of[name_index(found)])
+        }
+    }
+    edges
+}
+
 // Whether a program opts in to the partition's checks: a module has a file
 // `#Target` ceiling or a function a web marker. Before it does, the partition
 // only stamps buckets, so a check that leaves some bodies unchecked
@@ -226,16 +291,18 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
     false
 }
 
-// Each function in `items` as a meta, and with `abi_types`, the first
-// declaration of each struct and enum name for the `#Codable` ABI rule.
-sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes, abi_types: Bool{false}) Never! {
+// Each function in `items` as a meta. A program that opts in (`active`)
+// gets every function's, and the first declaration of each struct and enum
+// name for the `#Codable` ABI rule; one that doesn't only its checked
+// functions', which are all the partition stamps.
+sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes, active: Bool{false}) Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
-                sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
             }
             .Struct(structure) -> {
-                if abi_types {
+                if active {
                     type_id: sema_web_type_id(types, structure.name)
                     if types.struct_at[type_id] < 0 {
                         types.struct_at[type_id] = types.structs.len()
@@ -243,16 +310,16 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
                     }
                 }
                 loop method in structure.methods {
-                    sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
                 }
                 loop implementation in structure.trait_impls {
                     loop method in implementation.methods {
-                        sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                        sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
                     }
                 }
             }
             .Enum(enumeration) -> {
-                if abi_types {
+                if active {
                     type_id: sema_web_type_id(types, enumeration.name)
                     if types.enum_at[type_id] < 0 {
                         types.enum_at[type_id] = types.enums.len()
@@ -260,23 +327,23 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
                     }
                 }
                 loop method in enumeration.methods {
-                    sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
                 }
                 loop implementation in enumeration.trait_impls {
                     loop method in implementation.methods {
-                        sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                        sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
                     }
                 }
             }
             .Impl(implementation) -> {
                 loop method in implementation.methods {
-                    sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
+                    sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas, active: active)
                 }
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     inner: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
-                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, spans, metas, types, abi_types: abi_types)
+                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, spans, metas, types, active: active)
                 }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -322,13 +389,23 @@ sema_web_row: fn(rows: SemaWebRows, span: Span) -> Int Never! {
     assert_eq(sema_web_row(rows, Span{start: 5, end: 9}), -1)
 }
 
-sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta]) Never! {
-    name: if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
-    key := name
-    if module_prefix == .Val(module_name) -> key = "{module_name}::{name}" else if file_prefix == .Val(alias) {
-        key = "{alias}::{name}"
-    }
+// `function`'s meta. Before a program opts in (`active`), the partition
+// only stamps checked bodies and reads no name, so a function without one
+// has none, and a meta has no key or name.
+sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], active: Bool{false}) Never! {
     row: sema_web_row(spans, function.span)
+    if !active && row < 0 {
+        return
+    }
+    name := ""
+    key := ""
+    if active {
+        name = if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
+        key = name
+        if module_prefix == .Val(module_name) -> key = "{module_name}::{name}" else if file_prefix == .Val(alias) {
+            key = "{alias}::{name}"
+        }
+    }
     // Only a `#Export(wasm)` signature is checked for ABI safety.
     params := [Type]{}
     if function.web_marker == .Val(.WasmExport) {
