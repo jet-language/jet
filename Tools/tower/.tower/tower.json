@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102607,
+    "rev": 102622,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50599,7 +50599,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -50628,20 +50628,20 @@
         {
           "n": 1,
           "text": "D-PRIVATE-NATIVE-CARRIER1=A is built: core.http declares its native stream type in a `priv module`, and `Body` is a struct holding it in a `priv` field; Bodies come only from responses, requests, `body_text`, `body_bytes` and `body_empty`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:27:43.954Z"
+          "evidence": "Holds on dev since 43873ce5e6: Core/Http/Http.jet declares `priv body_carrier: module { BodyStream }` and `Body: struct { priv stream: body_carrier.BodyStream }`; Bodies come from requests, responses and the body_* / Body.* constructors. Proven by `jet test Compiler --profile ui --filter http_body_carrier_is_private` and `--filter http_body_literal_is_private`: PASS on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:49.074Z"
         },
         {
           "n": 2,
           "text": "Naming the stream type or building a `Body` (or a `Directory` or `FileWriter`) by hand from user code is E0605, with UI snapshots; the HTTP Body cutover lands on the new carrier and the http goldens pass on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:27:44.885Z"
+          "evidence": "Holds on dev since 43873ce5e6 (with 4c64794ac9 streaming bodies on it). `jet test Compiler --profile ui --filter` http_body_carrier_is_private, http_body_literal_is_private, directory_literal_is_private and forged_file_writer_literal: each PASS (E0605); `jet test Compiler --profile golden --filter Network/HTTP/`: 51 PASS, 0 FAIL over O0/O1/O2, on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:50.040Z"
         }
       ],
       "refs": [],
@@ -50656,12 +50656,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-08T12:42:12.406Z",
-      "updated": "2026-11-09T19:01:19.991Z",
+      "updated": "2026-11-15T01:10:59.933Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:59.933Z"
     },
     {
       "id": "c00hgc5h",
@@ -56325,11 +56326,11 @@
         {
           "n": 6,
           "text": "D-SCRIPT-HELPERS1=A is built (ratified 2026-11-13). A function declared in a script may use the script's variables: the checker gives it one label-only parameter per script variable it (or a helper it calls) reaches, & when changed, filled in at every call inside the script and passed by name elsewhere, such as from a #Test. A call before a needed variable is set is E0107 naming the helper, the chain and the binding line. A changing helper used as a value is E0227 and in a task is E1101, with text naming the extra parameter. Hover and `jet inspect expand --facts callable-signature` show the extra parameters. The ballot program prints `1/3 apple`, `2/3 pear`, `done: 2` on O0, O1, O2. Proof: that golden plus a ui snapshot per refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:16:33.242Z"
+          "evidence": "Holds on dev since 44bfd5eb16 (with d0cb277b2e and 5fa7016ca3, D-SCRIPT-HELPERS1=A). `jet test Compiler --profile cases --filter run_entry/script_functions_`: 3 PASS (script_functions_take_the_script_variables_they_use prints `1/3 apple`, `2/3 pear`, `done: 2` on -O0/-O1/-O2 and shows the label-only parameters in `inspect expand --facts callable-signature`); `--profile ui --filter script_function_`: 5 PASS (E0107, E0227, E1101 and two more); `--profile cases --filter lsp/lsp_hover_shows_a_script_functions_extra_parameters`: PASS, all on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:51.010Z"
         }
       ],
       "refs": [
@@ -56343,7 +56344,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-14T23:34:33.470Z",
+      "updated": "2026-11-15T01:10:51.010Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -67984,11 +67985,11 @@
         {
           "n": 3,
           "text": "jet check and jet build with --target=<a no-OS machine> (board.sensor_v1, wasm.no-os) carry the selected machine into sema, so tests/ui/freestanding_e3303.jet reports E3303, and a build that calls core.files reports E3301, not E2104. Proof: `jet test Compiler --profile ui --filter freestanding_e3303` plus a case that builds for board.sensor_v1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T21:07:52.019Z"
+          "evidence": "Holds on dev since 811ddd3f72 (the selected no-OS machine reaches the body checks). `jet test Compiler --profile ui --filter freestanding_e3303`: PASS; `jet test Compiler --profile cases --filter target_machines/no_os_board_check_refuses_core_files_call` (check and build --target=board.sensor_v1 refuse files.read at the call): PASS, both on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:45.130Z"
         }
       ],
       "refs": [],
@@ -67999,8 +68000,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-14T02:17:23.221Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-15T01:10:45.131Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -90781,7 +90782,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": "jet run of the repro prints 10 on O0, O1 and O2; a case under tests/cases covers the call, a return and an assignment of a range value to Int",
@@ -90814,11 +90815,11 @@
         {
           "n": 2,
           "text": "Safe widening is one rule applied at every place a value meets a declared type: call and Core-call arguments, returns, local and place assignment, struct-literal fields, list and map items, and returned field reads. A ranged Int or a narrower fixed-width integer passes where Int is expected at each place, at O0, O1 and O2, and narrowing stays refused. Proof: the tests/cases range-widening case covers every position and its refused case. No `+ 0` widening workaround remains in Core, Compiler, Tools or tests.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T19:33:16.571Z"
+          "evidence": "Holds on dev since b41eaf314b (with e6e08afe22, which dropped Core's `+ 0` widening; the remaining `+ 0` hits are index offsets like `start + 0`, not widening). `jet test Compiler --profile cases --filter numeric_widening/safe_widening_fills_every_typed_slot_on_every_tier` (every slot at -O0/-O1/-O2, plus 5 refused narrowings) on the gate-p136 batch jet: PASS.",
+          "at": "2026-11-15T01:10:48.133Z"
         }
       ],
       "refs": [],
@@ -90833,9 +90834,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T20:32:10.659Z",
-      "updated": "2026-11-14T14:32:01.256Z",
+      "updated": "2026-11-15T01:10:58.369Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:58.369Z"
     },
     {
       "id": "c0ky4017",
@@ -92336,7 +92338,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -92369,11 +92371,11 @@
         {
           "n": 2,
           "text": "core.ui's canvas fill uses it, and a full redraw at 2560x1440 on O2 takes at most 6 ms, measured on a landed compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T02:37:47.371Z"
+          "evidence": "Holds on dev since 55904de918 (core.ui full redraw under 6 ms on O2; Draw fills through the public fill_repeat since 3c4f26d466). `jet build --release Tools/perf/redraw/Main.jet` with the gate-p136 batch jet, run twice on a loaded host (load 21): median 5.64 ms and 5.95 ms per 2560x1440 full redraw, \"median within the 6.00 ms limit\", rc 0.",
+          "at": "2026-11-15T01:10:51.945Z"
         },
         {
           "n": 3,
@@ -92402,9 +92404,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:32:55.781Z",
-      "updated": "2026-11-13T02:02:07.158Z",
+      "updated": "2026-11-15T01:11:01.670Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-15T01:11:01.670Z"
     },
     {
       "id": "c027ynbk",
@@ -93526,7 +93529,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -93559,11 +93562,11 @@
         {
           "n": 2,
           "text": "Every runtime binding that reads ambient state is never computed while compiling. It either declares the effect it reads (so the empty-row rule refuses to fold it, as clock_mono_ns does), or it is a run-time-only read (RUNTIME_ONLY_READS) when an effect row would spread into user signatures that never perform that effect. live_load and replace reach every Db write, so they are run-time-only reads. Found by G4Ports-1, 2026-11-12: live_load, task_identity, simd_lanes, os and os_family, clipboard_get and event_pop had empty rows. Proof: a census #Test lists every jet.runtime binding with an empty row and no run-time-only listing, and fails unless that list matches the reviewed pure list. A comptime case shows each read runs at run time on O0, O1 and O2 as a local, and is E0643 as a module value.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T05:22:19.377Z"
+          "evidence": "Holds on dev since 591822c267 (no read of ambient state is computed while building). `jet test Compiler/JetFoundation/Tests/Registry/RuntimeInterfacePurity.jet`: 255 passed, 0 failed, including \"every jet.runtime binding with no effect row is on the reviewed pure list or run-time only\"; `jet test Compiler --profile cases --filter runtime_interface/runtime_reads_are_never_computed_while_building` (E0643 per module value, runs at -O0/-O1/-O2 as locals): PASS, on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:46.143Z"
         },
         {
           "n": 3,
@@ -93583,9 +93586,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-13T05:22:19.377Z",
+      "updated": "2026-11-15T01:10:55.274Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-15T01:10:55.274Z"
     },
     {
       "id": "c0ssy5wy",
@@ -97566,7 +97570,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97585,11 +97589,11 @@
         {
           "n": 1,
           "text": "The command lists each function's placement, whether it is an endpoint and under which marker, and which context fields it reads, with a pin hint (D-AUTOPIN1). Proof: `jet test Compiler --profile cases --filter inspect_choices_` runs `jet inspect choices` on a fixture app with a server-only, a client-placed and an #App.SignedIn function, and matches its expected listing (placement, marker, context reads, and the pin hint on automatic placement rows only). (#6792 r2 gap K10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T08:47:51.258Z"
+          "evidence": "Holds on dev since 64158ab782 (one app case pins placement, exposure, context reads and the pin hint). `jet test Compiler --profile cases --filter inspect_choices_` on the gate-p136 batch jet: 8 PASS, 0 FAIL, including web_app/inspect_choices_lists_one_apps_placement_exposure_and_context_reads (a #Target(JS) client fn, an automatic row with its pin hint, a server-only method, an #App.SignedIn endpoint and its context reads).",
+          "at": "2026-11-15T01:10:47.170Z"
         }
       ],
       "refs": [],
@@ -97600,9 +97604,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:38.888Z",
-      "updated": "2026-11-14T08:47:51.258Z",
+      "updated": "2026-11-15T01:10:56.824Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T01:10:56.824Z"
     },
     {
       "id": "c0vc9b8r",
@@ -98787,7 +98792,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -98806,11 +98811,11 @@
         {
           "n": 1,
           "text": "The optimize option's values are O0, O1 and O2 in the BuildOptions registry. `jet build -O0|-O1|-O2`, `jet run`, `jet test` and every command that takes the option accept only these flags. `--optimize=none|basic|full` and `--optimize` with any value fail as ordinary unknown flags, with no teaching error, alias or jet fix rule. A build profile writes `optimize: O1` and a build fn `b.optimize(.O1)`. Help text and `jet explain` name the levels O0, O1 and O2. Proof: a cases row runs `jet build -O0`, `-O1` and `-O2` on one program, checks the level each traces, and shows that `--optimize=basic` is refused.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T08:59:12.954Z"
+          "evidence": "Holds on dev since c85b927fab (with 41f5054d46): the optimize option's registry values are O0/O1/O2, -O0/-O1/-O2 are its flags and --optimize with or without a value is jet.UnknownFlag. `jet test Compiler --profile cases --filter build_entry/optimize_levels_are_flags_and_trace_their_level` on the gate-p136 batch jet: PASS (1 PASS, 0 FAIL).",
+          "at": "2026-11-15T01:10:43.954Z"
         },
         {
           "n": 2,
@@ -98830,9 +98835,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T08:59:10.868Z",
-      "updated": "2026-11-14T23:17:28.050Z",
+      "updated": "2026-11-15T01:10:53.610Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:53.610Z"
     },
     {
       "id": "c0nwrfck",
@@ -205670,6 +205676,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T01:11:01.671Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3vq4p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:59.933Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ayfc4w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:58.369Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nxjs80",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:56.824Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqtwkf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:55.274Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d72itt",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:53.610Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c3gh6u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:10:51.945Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x3vq4p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T01:10:51.010Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ys8fj",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T01:10:50.040Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayfc4w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T01:10:49.074Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayfc4w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T01:10:48.133Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nxjs80",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T01:10:47.170Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0aqtwkf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T01:10:46.143Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d72itt",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T01:10:45.131Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0q31aks",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T01:10:43.954Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0c3gh6u",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T01:06:00.091Z",
       "by": "Main",
