@@ -367,7 +367,7 @@ sema_live_remote_call: fn(call: Expr, span: Span, environment: SemaScopeEnvironm
                 return sema_live_remote_endpoint(remote_args[0], holder, holder_span, holder_id, method, method_span, args, call_id, environment, program, diagnostics)
             }
         }
-        return sema_live_not_remote("`{holder}` is a `{sema_type_show(remote_ty)}`, not an `app.Remote`", holder_span, diagnostics)
+        return sema_live_not_remote("`{holder}` is a {sema_type_show_quoted(remote_ty)}, not an `app.Remote`", holder_span, diagnostics)
     }
     sema_live_not_remote("its body is not a method call on an `app.Remote`", span, diagnostics)
 }
@@ -417,7 +417,7 @@ sema_live_remote_endpoint: fn(service: Type, holder: String, holder_span: Span, 
         } ?? ""
         if missing != "" {
             at_argument: if index - 1 < args.len() -> args[index - 1].span else -> method_span
-            return sema_live_not_remote("parameter `{declaration.params[index].name}` of `{service_name}.{method}` has the type `{sema_type_show(param)}`, which isn't `{missing}`", at_argument, diagnostics)
+            return sema_live_not_remote("parameter `{declaration.params[index].name}` of `{service_name}.{method}` has the type {sema_type_show_quoted(param)}, which isn't `{missing}`", at_argument, diagnostics)
         }
         params.push(param)
     }
