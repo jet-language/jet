@@ -380,7 +380,7 @@ Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 `Write` for a `&` parameter, or `Move` for a `&&` one); its `default`, a
 `DefaultInfo?` read the same way as a field's and never run; and whether it is
 `variadic`. A catalog reads a callable's parameters without parsing a
-signature string (`Examples/Metaprogramming/Reflection/CallableCatalog.jet`).
+signature string (`Examples/Metaprogramming/Reflection/CallableCatalog/`).
 
 The signature's `effects` is an `EffectInfo`, and the `effects` fact read
 (`send.reflect().effects`) is that same record: it reads
@@ -391,6 +391,13 @@ check, so `b.program.functions()` reads it, while a read folded inside the
 check (`send.reflect().effects`, a marker body, a template) reads `None`.
 `values` is the row known where it is read: the solved row once there is one,
 else the written row.
+
+A signature read depends on the callee's checked signature, never on a copy
+kept from an earlier compile. When the callee's signature changes, the next
+check of the code that reads it sees the new parameters, return type and
+effect row. A constant folded from that read also changes, even when the
+reading file itself is unchanged
+(`tests/cases/reflect/a_signature_read_follows_its_callee_when_the_callee_changes.case`).
 
 A name bound once to a lambda reflects as a `ClosureInfo`: `keep.reflect()`
 reads its `name`, its `signature` (a `CallableSignature` whose parameters are
