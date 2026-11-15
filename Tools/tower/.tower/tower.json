@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6966,
-    "rev": 105625,
+    "rev": 105650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27512,11 +27512,11 @@
         {
           "n": 12,
           "text": "A qualified payload case such as `Message.Text` passes as a callable value wherever the equivalent lambda would (D-ENUM-CONSTRUCTORCALL1=A): labels and effects are kept, an unrepresentable signature is refused with a UI snapshot, and unit cases stay values. Proof: `jet test Compiler --profile golden --filter Types/ConstructorValues`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:53.536Z"
+          "evidence": "p150 (dev cb824d0276; GoalsA-1-3-constructor-values landed 9e1ace6c5e): jet test Compiler --profile golden --filter Types/ConstructorValues: PASS 3 FAIL 0.",
+          "at": "2026-11-15T05:32:08.283Z"
         },
         {
           "n": 13,
@@ -27570,7 +27570,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T05:03:52.463Z",
+      "updated": "2026-11-15T05:32:08.283Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
@@ -73689,21 +73689,21 @@
         },
         {
           "n": 8,
-          "text": "Hosts without counters report unavailable with a reason, never zero counts (merged from #4727 c3)",
+          "text": "Hosts without counters report unavailable with a reason, never zero counts. Proof: `jet test Compiler --profile cases --filter perf_run/no_counters_reports_unavailable`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:07.966Z"
+          "at": "2026-11-15T05:31:50.042Z"
         },
         {
           "n": 9,
-          "text": "`jet perf run` on bench w04 (wordfreq) writes a sampling profile with self and inclusive time per Jet source line plus allocation counts per line. (merged from #4727 c4)",
+          "text": "`jet perf run` on ScriptBench w04 (wordfreq) writes a sampling profile with self and inclusive time per Jet source line plus allocation counts per line. Proof: `jet test Compiler --profile cases --filter perf_run/sampling_profile_per_line`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:52:09.471Z"
+          "at": "2026-11-15T05:31:51.027Z"
         },
         {
           "n": 10,
@@ -73753,7 +73753,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-15T05:31:48.677Z",
+      "updated": "2026-11-15T05:31:51.027Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 13
     },
@@ -80678,12 +80678,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park/wake), measured same-run on the iterloop kit case and a 10M-yield microbench; every generator golden is unchanged on O0/O1/O2.",
+          "text": "A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park and wake), measured same-run on the iterloop kit case and a 10M-yield microbench, with every generator golden unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter generator` and the committed microbench receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T11:41:55.139Z"
+          "at": "2026-11-15T05:31:51.947Z"
         }
       ],
       "refs": [],
@@ -80694,8 +80694,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T11:41:45.304Z",
-      "updated": "2026-11-11T12:45:15.552Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:31:51.947Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c05p5u7s",
@@ -80764,12 +80764,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The cat cell (Floor-1 cells/cat) is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin/stdout golden and interactive REPL case is unchanged on O0/O1/O2.",
+          "text": "The cat cell is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin and stdout golden and interactive REPL case is unchanged on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime/stdin_buffered_reads` and the committed same-run cat receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T14:01:45.019Z"
+          "at": "2026-11-15T05:31:52.879Z"
         }
       ],
       "refs": [],
@@ -80780,8 +80780,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-07T04:02:42.693Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:31:52.879Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0y7zq8s",
@@ -81362,12 +81362,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "measurement-manifest.json names the matched Rust, C, Zig and Go peers per entry, where they apply; the gate script fails a required cell whose peer is missing, unmatched, or fails the AGENTS.md comparator; wordfreq 10k/200k and cat are recorded with matched peers.",
+          "text": "measurement-manifest.json names the matched Rust, C, Zig and Go peers per entry where they apply; the gate fails a required cell whose peer is missing, unmatched or fails the AGENTS.md comparator; wordfreq 10k and 200k and cat are recorded with matched peers. Proof: `node --test Tools/gauntlet/harness/measurement-manifest.test.mjs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T16:40:37.345Z"
+          "at": "2026-11-15T05:31:53.803Z"
         }
       ],
       "refs": [],
@@ -81378,8 +81378,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T16:40:33.121Z",
-      "updated": "2026-11-07T04:02:44.328Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:31:53.803Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0j6lwuh",
@@ -81795,12 +81795,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A small heap allocation that provably never escapes its function is a stack slot and then scalar-replaced; binparse release shows no alloc_8/free_8 in its loop profile; outputs identical on o0/o1/o2; FULL cases and goldens show no loss.",
+          "text": "A small heap allocation that provably never escapes its function becomes a stack slot and is then scalar-replaced: the binparse release loop profile shows no alloc_8 or free_8, outputs are identical on O0, O1 and O2, and cases and goldens show no loss. Proof: `jet test Compiler --profile cases --filter jetir/nonescaping_box_on_stack` and `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells binparse`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T21:00:51.087Z"
+          "at": "2026-11-15T05:31:54.687Z"
         }
       ],
       "refs": [],
@@ -81811,8 +81811,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:00:46.628Z",
-      "updated": "2026-11-11T12:45:18.720Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:31:54.687Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0u19cev",
@@ -81895,21 +81895,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Small runtime-routed Core leaves are inlinable across packages (their IR ships with the runtime pack or compiles from Core source), and an inlined cross-file located op keeps its trap site.",
+          "text": "Small runtime-routed Core leaves are inlinable across packages (their IR ships with the runtime pack or compiles from Core source), and an inlined cross-file located op keeps its trap site. Proof: `jet test Compiler --profile cases --filter inline_package/runtime_leaf_keeps_trap_site`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:42.622Z"
+          "at": "2026-11-15T05:31:56.466Z"
         },
         {
           "n": 2,
-          "text": "fft and tensormap no longer call Core fabs through to_bits/from_bits; their cells improve by the measured 12-16%, with identical output.",
+          "text": "fft and tensormap no longer call Core fabs through to_bits and from_bits, and their cells improve by the measured 12-16% with identical output. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells fft,tensormap`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:43.464Z"
+          "at": "2026-11-15T05:31:58.363Z"
         },
         {
           "n": 3,
@@ -81929,7 +81929,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:31:05.067Z",
-      "updated": "2026-11-15T02:10:48.490Z",
+      "updated": "2026-11-15T05:31:58.363Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
@@ -81965,12 +81965,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A constant Regex{\"…\"} evaluated 1000 times in a loop runs core_regex_compile_program exactly once per run (callgrind call count), and jet inspect decisions shows a hoisted or declined row for it.",
+          "text": "A constant `Regex{\"…\"}` evaluated 1000 times in a loop runs core_regex_compile_program once per run, and `jet inspect` decisions show a hoisted or declined row for it. Proof: `jet test Compiler --profile cases --filter regex/constant_literal_compiled_once`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:56:35.100Z"
+          "at": "2026-11-15T05:32:00.052Z"
         },
         {
           "n": 2,
@@ -81990,7 +81990,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T22:21:58.734Z",
-      "updated": "2026-11-15T03:25:56.259Z",
+      "updated": "2026-11-15T05:32:00.052Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
@@ -82026,12 +82026,12 @@
       "criteria": [
         {
           "n": 2,
-          "text": "(was #4130 c1) Jet backend 4: linear-scan register allocation: implemented, with a focused test or fixture that passes; the command and its result are logged on this card [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "The linear-scan register allocator (Compiler/JetIR/Source/X64Alloc.jet) has a focused case: a hot loop keeps its live values in registers with no spill inside the loop, with identical output on O1 and O2. Proof: `jet test Compiler --profile cases --filter backend/linear_scan_hot_loop_no_spill`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:51:10.664Z"
+          "at": "2026-11-15T05:32:01.741Z"
         },
         {
           "n": 3,
@@ -82051,7 +82051,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T23:01:49.944Z",
-      "updated": "2026-11-15T05:31:40.677Z",
+      "updated": "2026-11-15T05:32:01.741Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
@@ -82127,21 +82127,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every asm-parity ceiling cell, every gauntlet cell against every peer, and a seeded random sample of example and workload programs is profiled: cycles, instructions and bytes as ratios to the ceiling and each peer, plus hotspots and a size breakdown by symbol and section.",
+          "text": "Every asm-parity ceiling cell, every gauntlet cell against every peer, and a seeded random sample of example and workload programs is profiled: cycles, instructions and bytes as ratios to the ceiling and each peer, plus hotspots and a size breakdown by symbol and section. Proof: `git ls-files Docs/audits/*pareto-census*` names the committed census.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:45.634Z"
+          "at": "2026-11-15T05:32:03.483Z"
         },
         {
           "n": 2,
-          "text": "Every gap is attributed to a root (startup, RC and locks, bounds checks, spills, missing loop opts or vectorization, inlining, allocation, runtime size, dead code), the roots are ranked by total gap mass, and each root has a G13 card.",
+          "text": "Every gap in the census is attributed to a root (startup, RC and locks, bounds checks, spills, missing loop opts or vectorization, inlining, allocation, runtime size, dead code), the roots are ranked by total gap mass, and each root names its card. Proof: the census root table, each row naming a live card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:28:46.471Z"
+          "at": "2026-11-15T05:32:05.243Z"
         }
       ],
       "refs": [],
@@ -82152,8 +82152,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T23:57:46.382Z",
-      "updated": "2026-11-11T12:45:30.630Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:32:05.243Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 2
     },
     {
@@ -82218,21 +82218,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A #CLI struct Args{n: Int} program carries at most 16 KB of CLI-attributable bytes (core_args_*, *_cli_* and their unique callees by nm --size-sort), and its file is at most the empty-program floor + 24 KB.",
+          "text": "A `#CLI struct Args{n: Int}` program carries at most 16 KB of CLI-attributable bytes (core_args_*, *_cli_* and their unique callees by `nm --size-sort`), and its file is at most the empty-program floor plus 24 KB. Proof: `jet test Compiler --profile cases --filter size/cli_args_bytes`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:16.154Z"
+          "at": "2026-11-15T05:32:07.014Z"
         },
         {
           "n": 2,
-          "text": "The help, refusal and EBADF/EPIPE outputs of #CLI programs (jet run app.jet --help and its refusal paths) are byte-identical to dev 360e470044.",
+          "text": "The help, refusal and EBADF and EPIPE outputs of #CLI programs (`jet run app.jet --help` and its refusal paths) are byte-identical to dev 360e470044. Proof: `jet test Compiler --profile golden --filter cli_help`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:20.927Z"
+          "at": "2026-11-15T05:32:09.136Z"
         }
       ],
       "refs": [],
@@ -82243,8 +82243,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:20.054Z",
-      "updated": "2026-11-11T12:45:32.644Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:32:09.136Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0ewbdj1",
@@ -82327,12 +82327,12 @@
         },
         {
           "n": 2,
-          "text": "In collatz, fib, isum and sieve, arbitrary-precision Int symbols link only behind the overflow route and total at most 8 KB per image, with overflow results unchanged (a probe covers MAX+1 promotion).",
+          "text": "In collatz, fib, isum and sieve, arbitrary-precision Int symbols link only behind the overflow route and total at most 8 KB per image, with overflow results unchanged (a probe covers MAX+1 promotion). Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate --cells collatz,fib,isum,sieve` size columns and `jet test Compiler --profile golden --filter int_overflow_promotion`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:14.587Z"
+          "at": "2026-11-15T05:32:11.123Z"
         }
       ],
       "refs": [],
@@ -82343,8 +82343,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:22.472Z",
-      "updated": "2026-11-12T16:19:04.815Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:32:11.123Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0nqr80d",
@@ -82383,12 +82383,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "An empty program (fn run(){}) image is at most 8192 B in release and 10240 B in default (asm-parity release and default builds; ab-stderr 0 DIFF; cell outputs identical). Baseline 360e470044: 21168 / 23064 B.",
+          "text": "An empty program (`fn run(){}`) image is at most 8192 B in release and 10240 B in default, with identical output (baseline 360e470044: 21168 and 23064 B). Proof: `jet test Compiler --profile cases --filter size/empty_program_image`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T20:20:09.000Z"
+          "at": "2026-11-15T05:32:12.094Z"
         },
         {
           "n": 2,
@@ -82417,8 +82417,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:29.538Z",
-      "updated": "2026-11-11T12:45:36.254Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T05:32:12.094Z",
+      "updatedBy": "TowerKeeper-1"
     },
     {
       "id": "c0agsbqj",
@@ -100515,56 +100515,56 @@
         {
           "n": 1,
           "text": "`self.tell_assignee` and `crew.my_projects` are values of function type with the receiver bound, usable wherever a fn value is (app.enqueue(self.tell_assignee(id)) form aside). Proof: `jet test Compiler --profile cases --filter lang/bound_method_value_passes_as_fn`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:04.578Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/bound_method_value_passes_as_fn: PASS 1 FAIL 0 (the ICE from the receiver binding being declared at the member span is fixed in Places.jet).",
+          "at": "2026-11-15T05:31:55.599Z"
         },
         {
           "n": 2,
           "text": "A bound method value that captures a receiver it cannot keep (a borrowed view past its scope) is a compile error naming the receiver. Proof: `jet test Compiler --profile cases --filter lang/bound_method_value_refuses_escaping_borrow`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:05.793Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/bound_method_value_refuses_escaping_borrow: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:31:57.460Z"
         },
         {
           "n": 3,
           "text": "A closure or a method passed where an optional function type is expected (a `(fn(Int) -> String)?` slot) type-checks (D-BOUND-METHOD1=A); today it gets E0108. Proof: `jet test Compiler --profile cases --filter lang/optional_fn_slot_accepts_closure_and_method` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:55:43.948Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/optional_fn_slot_accepts_closure_and_method: PASS 1 FAIL 0 (the case runs O0, O1 and O2).",
+          "at": "2026-11-15T05:31:59.224Z"
         },
         {
           "n": 4,
           "text": "A read of a method without parentheses where a union with a function member is expected (`Int | fn() -> Int`) is the registered error that suggests the call (D-BOUND-METHOD1=A), with a UI snapshot. Proof: `jet test Compiler --profile ui --filter bound_method_union_suggests_call`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:55:44.839Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter bound_method_union_suggests_call: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:32:00.894Z"
         },
         {
           "n": 5,
           "text": "Where a function type is expected and the type has both a field and a method of that name, the read is an error naming both and offering the closure for each (D-BOUND-METHOD1=A); `each([1, 2], crew.tell)` with a `tell` field beside the method no longer compiles. Proof: `jet test Compiler --profile ui --filter bound_method_field_method_clash`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:55:45.747Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter bound_method_field_method_clash: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:32:02.623Z"
         },
         {
           "n": 6,
           "text": "The bound-method rule has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars (`jet self devtools grammars`) and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:55:46.676Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e), in the dev worktree at b42504dfe6: jet self devtools grammars regenerated the editor grammar sections; git status --short Tools/editors is empty; jet test tests/guards --filter grammar: 13 passed 0 failed; --filter syntax_reconciliation: 15 passed 0 failed.",
+          "at": "2026-11-15T05:32:04.393Z"
         },
         {
           "n": 7,
@@ -100605,8 +100605,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-15T02:55:52.043Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T05:32:04.393Z",
+      "updatedBy": "Main",
       "criteriaLastN": 9
     },
     {
@@ -100952,11 +100952,11 @@
         {
           "n": 2,
           "text": "When a marker's arguments don't match its signature (`#App.Public(limit: \"many\")`), `jet check` reports that MarkerArgumentMismatch and nothing else. No error is reported against any <corelib> file. Proof: `jet test tests/ui --filter app_marker_argument_mismatch_reports_alone` passes, and its .stderr snapshot holds exactly one error, at the marker.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:42:42.530Z"
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter app_marker_argument_mismatch_reports_alone: PASS 1 FAIL 0; tests/ui/app_marker_argument_mismatch_reports_alone.stderr holds exactly one Error line, at the marker. The marker filter also passes 88 of 88.",
+          "at": "2026-11-15T05:32:06.115Z"
         }
       ],
       "refs": [],
@@ -100967,7 +100967,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:29.121Z",
-      "updated": "2026-11-15T03:57:27.157Z",
+      "updated": "2026-11-15T05:32:06.115Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -104295,11 +104295,11 @@
         {
           "n": 5,
           "text": "Route markers on struct methods are added to the app with one call (D-HTTP-ROUTE-EXPOSE1=A): a jokes API with GET and POST routes serves identically on O0, O1 and O2, `web.openapi` renders both routes, and a bad path parameter is a compile error with a UI snapshot. Proof: `jet test Compiler --profile golden --filter Web/JokesApi`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:52:16.627Z"
+          "evidence": "p150 (dev cb824d0276; JokesAPI landed 0fec89bfa1, renamed a147a156e6): jet test Compiler --profile golden --filter Web/JokesAPI: PASS 3 FAIL 0. The criterion's filter Web/JokesApi predates the rename and matches nothing; the example's name is JokesAPI.",
+          "at": "2026-11-15T05:32:10.122Z"
         },
         {
           "n": 6,
@@ -104332,7 +104332,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:16.627Z",
-      "updated": "2026-11-15T04:56:20.225Z",
+      "updated": "2026-11-15T05:32:10.122Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -217438,6 +217438,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T05:32:12.094Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0nqr80d",
+      "note": "#1: proof; was: An empty program (fn run(){}) image is at most 8192 B in release and 10240 B in default (asm-parity release and default builds; ab-stderr 0 DIFF; cell outputs identical). Baseline 360e470044: 21168 / "
+    },
+    {
+      "at": "2026-11-15T05:32:11.123Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ewbdj1",
+      "note": "#2: proof; was: In collatz, fib, isum and sieve, arbitrary-precision Int symbols link only behind the overflow route and total at most 8 KB per image, with overflow results unchanged (a probe covers MAX+1 promotion)."
+    },
+    {
+      "at": "2026-11-15T05:32:10.122Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sf9ixl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T05:32:09.136Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0awiifz",
+      "note": "#2: proof; was: The help, refusal and EBADF/EPIPE outputs of #CLI programs (jet run app.jet --help and its refusal paths) are byte-identical to dev 360e470044."
+    },
+    {
+      "at": "2026-11-15T05:32:08.283Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb6zik",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T05:32:07.014Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0awiifz",
+      "note": "#1: proof; was: A #CLI struct Args{n: Int} program carries at most 16 KB of CLI-attributable bytes (core_args_*, *_cli_* and their unique callees by nm --size-sort), and its file is at most the empty-program floor + "
+    },
+    {
+      "at": "2026-11-15T05:32:06.116Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pwde2g",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T05:32:05.243Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cdnofm",
+      "note": "#2: proof; was: Every gap is attributed to a root (startup, RC and locks, bounds checks, spills, missing loop opts or vectorization, inlining, allocation, runtime size, dead code), the roots are ranked by total gap m"
+    },
+    {
+      "at": "2026-11-15T05:32:04.393Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-15T05:32:03.483Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0cdnofm",
+      "note": "#1: proof; was: Every asm-parity ceiling cell, every gauntlet cell against every peer, and a seeded random sample of example and workload programs is profiled: cycles, instructions and bytes as ratios to the ceiling "
+    },
+    {
+      "at": "2026-11-15T05:32:02.623Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T05:32:01.741Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0f1eda4",
+      "note": "#2: strip debris; the allocator exists on dev, the focused proof does not; was: (was #4130 c1) Jet backend 4: linear-scan register allocation: implemented, with a focused test or fixture that passes; the command and its result are logged on this card [precut audit: no dev test, g"
+    },
+    {
+      "at": "2026-11-15T05:32:00.894Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T05:32:00.052Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0wssehw",
+      "note": "#1: proof; was: A constant Regex{\"…\"} evaluated 1000 times in a loop runs core_regex_compile_program exactly once per run (callgrind call count), and jet inspect decisions shows a hoisted or declined row for it."
+    },
+    {
+      "at": "2026-11-15T05:31:59.224Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T05:31:58.363Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02qdoro",
+      "note": "#2: proof; was: fft and tensormap no longer call Core fabs through to_bits/from_bits; their cells improve by the measured 12-16%, with identical output."
+    },
+    {
+      "at": "2026-11-15T05:31:57.460Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-15T05:31:56.466Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02qdoro",
+      "note": "#1: proof; was: Small runtime-routed Core leaves are inlinable across packages (their IR ships with the runtime pack or compiles from Core source), and an inlined cross-file located op keeps its trap site."
+    },
+    {
+      "at": "2026-11-15T05:31:55.599Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vc9b8r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T05:31:54.687Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0p2n50x",
+      "note": "#1: proof; was: A small heap allocation that provably never escapes its function is a stack slot and then scalar-replaced; binparse release shows no alloc_8/free_8 in its loop profile; outputs identical on o0/o1/o2; "
+    },
+    {
+      "at": "2026-11-15T05:31:53.803Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0y7kqfw",
+      "note": "#1: proof; was: measurement-manifest.json names the matched Rust, C, Zig and Go peers per entry, where they apply; the gate script fails a required cell whose peer is missing, unmatched, or fails the AGENTS.md compar"
+    },
+    {
+      "at": "2026-11-15T05:31:52.879Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c05p5u7s",
+      "note": "#1: proof; was: The cat cell (Floor-1 cells/cat) is faster than Rust same-run (Jet/Rust < 1.00) by wall time and task-clock, strace shows reads of at least 64 KiB per syscall on a pipe, and every stdin/stdout golden "
+    },
+    {
+      "at": "2026-11-15T05:31:51.947Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00w7rum",
+      "note": "#1: proof; was: A generator pull that stays on the consumer thread costs under 50 ns per value (a direct switch or a compiled state machine, no scheduler park/wake), measured same-run on the iterloop kit case and a 1"
+    },
+    {
+      "at": "2026-11-15T05:31:51.027Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9nq8j",
+      "note": "#9: strip debris; proof; was: `jet perf run` on bench w04 (wordfreq) writes a sampling profile with self and inclusive time per Jet source line plus allocation counts per line. (merged from #4727 c4)"
+    },
+    {
+      "at": "2026-11-15T05:31:50.042Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0x9nq8j",
+      "note": "#8: strip debris; proof; was: Hosts without counters report unavailable with a reason, never zero counts (merged from #4727 c3)"
+    },
+    {
       "at": "2026-11-15T05:31:48.678Z",
       "by": "TowerKeeper-1",
       "action": "card.criteria-edit",
@@ -220796,713 +220971,6 @@
       "action": "card.criteria-meet",
       "ref": "c077ihdp",
       "note": "#14"
-    },
-    {
-      "at": "2026-11-15T05:02:24.123Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#13: strip debris; proof; was: (was #2441 c5) Job dependency/status/inspection and canonical lifecycle events are integrated without a second process or job identity model, proven by named-process and environment execution tests on"
-    },
-    {
-      "at": "2026-11-15T05:02:23.247Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#12: strip debris; proof; was: (was #2441 c4) Declared input/output freshness, dependency invalidation, per-job working directories, and affected-subgraph watch are integrated, proven by cache/watch execution tests on every applica"
-    },
-    {
-      "at": "2026-11-15T05:02:22.353Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#11: strip debris; proof; was: (was #2441 c2) The production source validates job graphs, authority context, working directories, and arguments before invoking job effects, proven by failure-path execution tests on every applicable"
-    },
-    {
-      "at": "2026-11-15T05:02:21.453Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#7: strip debris; proof; the STAGE=prod golden is its own criterion; was: [#3684] `jet jobs web --port 3000` forwards to the job, while global flags stay with jet and `--` forwards. Reserved job names fail with E0928 from the self-hosted sema. A STAGE=prod ProcessSpec.env g"
-    },
-    {
-      "at": "2026-11-15T05:02:20.539Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#6: proof; was: A jetpack_tasks case proves the built binary runs `after:` predecessors in order, stops on a failing predecessor, rejects a bad root argument with E1331 (exit 2) before any predecessor, and prints byt"
-    },
-    {
-      "at": "2026-11-15T05:02:19.272Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#5: proof; was: A built binary dispatches the same jobs with the same output as `jet jobs` (a jetpack_tasks case; `jet test Compiler --profile cases --filter jetpack_tasks`)."
-    },
-    {
-      "at": "2026-11-15T05:02:18.341Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c077ihdp",
-      "note": "#4: proof; was: `jet test Compiler --profile cases jetpack_tasks/` passes."
-    },
-    {
-      "at": "2026-11-15T05:02:17.406Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0tzvhij",
-      "note": "#16 A tool installs with no accidental project capture, and its "
-    },
-    {
-      "at": "2026-11-15T05:02:16.466Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0w8kkg9",
-      "note": "#6 D-SCRIPT-CONFIRM1=A: a manifest-less script shows one defaul"
-    },
-    {
-      "at": "2026-11-15T05:02:15.566Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0etvk8s",
-      "note": "#7 A clean prepared environment runs a script with its recorded"
-    },
-    {
-      "at": "2026-11-15T05:02:14.656Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c077ihdp",
-      "note": "#21 An executable example sets STAGE=prod through ProcessSpec.en"
-    },
-    {
-      "at": "2026-11-15T05:02:13.742Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c077ihdp",
-      "note": "#20 `jet <job>` runs a project job by name before retired words,"
-    },
-    {
-      "at": "2026-11-15T05:02:12.854Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0brgvda",
-      "note": "`jet generate` runs a checked #Job generator explicitly, previews and applies writes atomically, and records a reproducible receipt"
-    },
-    {
-      "at": "2026-11-15T05:01:09.106Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T05:01:07.978Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T05:01:06.828Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T05:01:05.413Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T05:01:04.350Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-15T05:01:03.423Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c03habw5",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T05:01:02.375Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#24: strip debris; proof; was: (was #3032 c7) Channel SHA-256 values identify bytes only. Direct feeds have no public signature, key or proof fields. Existing authenticated-provider failure is hard [precut audit: no dev test, golde"
-    },
-    {
-      "at": "2026-11-15T05:01:01.263Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#18: strip debris; split into c18 and c26-c29; the update --deps and use --prep half is #6941 c2; was: [#3031] First unpinned install and explicit update discover moving releases. Launch and pinned offline replay never do discovery. `jetpack update --deps` changes only the channel lock. `jetpack use <r"
-    },
-    {
-      "at": "2026-11-15T05:01:00.336Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#17: wording; was: `jet test Compiler --profile packages --filter Release` passes with PackageModel/Tests/Release.jet and EnvModel/Tests/ModuleEvalReleases.jet claims covering the A declaration, E1270 rejections (other "
-    },
-    {
-      "at": "2026-11-15T05:00:59.339Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#15: strip debris; proof; was: [retarget] Option A (ratified) is the only shipped form: Pkg.adapt carries resolver and asset beside source; no Recipe.release wrapper exists."
-    },
-    {
-      "at": "2026-11-15T05:00:58.325Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#10: proof; was: Existing BuildStep.fetch hash and credential-free laws remain unchanged."
-    },
-    {
-      "at": "2026-11-15T05:00:57.331Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#9: proof; was: Raw, archive and app-bundle selectors stage one explicit asset and reuse exactly one existing installer. Release trust never authorizes Build or launch."
-    },
-    {
-      "at": "2026-11-15T05:00:56.398Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#8: proof; was: Metadata, artifact and redirect origins are authorized before their requests or follows. New origins cannot be trusted retroactively."
-    },
-    {
-      "at": "2026-11-15T05:00:55.383Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#7: proof; was: Bare and prefixed SHA-256 assertions normalize to one lowercase 64-hex Sha256 value. Malformed and unknown algorithms fail."
-    },
-    {
-      "at": "2026-11-15T05:00:54.475Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#6: proof; was: Provider validation rejects empty fields, malformed RFC3339 times, unsafe URLs, unsupported formats, unsafe paths, oversized data and ambiguous trees."
-    },
-    {
-      "at": "2026-11-15T05:00:53.573Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#5: proof; was: Release.github derives one repository from the `Releases` source (`RefSource.Releases`). Release.https keeps logical source target and metadata authority separate."
-    },
-    {
-      "at": "2026-11-15T05:00:52.623Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#4: proof; was: The finite decoder types and ReleaseDecodeError are defined. The decoder is pure, bounded and cannot expose direct-feed signature, key or proof fields."
-    },
-    {
-      "at": "2026-11-15T05:00:51.687Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-edit",
-      "ref": "c03habw5",
-      "note": "#3: proof; was: The complete custom HTTPS example declares metadata, three ordered HTTPS origins, the Acme decoder, one archive selector and one existing installer."
-    },
-    {
-      "at": "2026-11-15T05:00:50.748Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c03habw5",
-      "note": "#29 Pins, caches and receipts bind candidate identity and observ"
-    },
-    {
-      "at": "2026-11-15T05:00:49.839Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c03habw5",
-      "note": "#28 GitHub and custom feeds map to one candidate record, and ins"
-    },
-    {
-      "at": "2026-11-15T05:00:48.899Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c03habw5",
-      "note": "#27 A moving selector needs a valid RFC3339 published_at and fai"
-    },
-    {
-      "at": "2026-11-15T05:00:47.940Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c03habw5",
-      "note": "#26 GitHub release pagination completes within 100 pages and 10,"
-    },
-    {
-      "at": "2026-11-15T04:59:48.768Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0rkebo4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T04:59:46.889Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-15T04:59:05.085Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T04:59:03.959Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T04:58:35.983Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c04wn01h",
-      "note": "body"
-    },
-    {
-      "at": "2026-11-15T04:58:21.347Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0rkebo4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:58:20.357Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-15T04:58:19.264Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-15T04:58:18.153Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-15T04:58:16.865Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T04:58:15.462Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T04:58:14.441Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T04:58:13.420Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T04:58:12.141Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T04:58:11.100Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T04:58:10.103Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T04:58:09.111Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T04:58:08.057Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-15T04:58:06.953Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-15T04:58:05.847Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-15T04:58:04.618Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-15T04:58:03.343Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-15T04:58:01.681Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-15T04:58:00.046Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T04:57:58.443Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-15T04:57:57.286Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-15T04:57:55.948Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-15T04:57:54.446Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T04:57:52.959Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-15T04:57:51.592Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-15T04:57:50.257Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-15T04:57:49.013Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-15T04:57:47.746Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T04:57:46.507Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T04:57:44.980Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T04:57:43.166Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0wowe4m",
-      "note": "#5 D-WIT-EXPORT2=A: a Jet component exports against a pinned WI"
-    },
-    {
-      "at": "2026-11-15T04:57:41.915Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c05nw9a0",
-      "note": "#14 Examples/Modules/Packages/SandboxMathKit builds mathkit.wasm"
-    },
-    {
-      "at": "2026-11-15T04:57:40.788Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c05nw9a0",
-      "note": "#13 A `targets: [sandbox]` manifest entry builds a wasm componen"
-    },
-    {
-      "at": "2026-11-15T04:57:39.725Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c05nw9a0",
-      "note": "#12 The sandbox package kind has a syntax-registry row and a gol"
-    },
-    {
-      "at": "2026-11-15T04:57:38.583Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-add",
-      "ref": "c0abvxai",
-      "note": "#3 The PowerShell binder round-trips dynamic state and cleans u"
-    },
-    {
-      "at": "2026-11-15T04:57:37.375Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0ru6u3t",
-      "note": "User Rust crates in native programs: offline cargo, builds inside packages, foreign panics as stops, and undo hooks"
-    },
-    {
-      "at": "2026-11-15T04:57:35.989Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c04wn01h",
-      "note": "Language binders run real foreign code: Python, JavaScript, Lua, Ruby, Perl, PHP, R, Go, COBOL and Octave"
-    },
-    {
-      "at": "2026-11-15T04:57:34.653Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0itin1p",
-      "note": "`use x: <lang>.<lib>` resolves the generated binding cache for every active foreign language, and planned ones stay reserved with clear errors"
-    },
-    {
-      "at": "2026-11-15T04:57:33.507Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0zvan7c",
-      "note": "Foreign calls carry checked facts: derived effects, evidence per fact, out-of-bounds reach probes, and header-driven C++"
-    },
-    {
-      "at": "2026-11-15T04:57:32.582Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0kkogun",
-      "note": "Jet functions cross to C as callbacks with explicit registration lifetimes, including from foreign threads"
-    },
-    {
-      "at": "2026-11-15T04:57:31.681Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c05nyh21",
-      "note": "C boundary types: counted pointers as lists, sized booleans, pointer-sized integers, exact Int range stops and C strings"
-    },
-    {
-      "at": "2026-11-15T04:57:30.778Z",
-      "by": "TowerKeeper-1",
-      "action": "card.add",
-      "ref": "c0qqeaqb",
-      "note": "C imports marshal every C ABI shape on the native backend, and the C binder emits plain user-namespace declarations"
-    },
-    {
-      "at": "2026-11-15T04:56:20.225Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0sf9ixl",
-      "note": "#7 A request body read under ?? (request.json<T>() ?? return .."
-    },
-    {
-      "at": "2026-11-15T04:55:17.015Z",
-      "by": "TowerKeeper-1",
-      "action": "card.update",
-      "ref": "c0heplig",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T04:55:16.089Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-15T04:55:15.138Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T04:55:14.211Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-15T04:55:13.248Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-15T04:55:12.153Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-15T04:55:11.073Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-15T04:55:10.147Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-15T04:55:09.219Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-15T04:55:08.272Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-15T04:55:07.368Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-15T04:55:06.470Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-15T04:55:05.370Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-15T04:55:04.449Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-15T04:55:03.497Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T04:55:02.568Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-15T04:55:01.618Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-15T04:55:00.732Z",
-      "by": "TowerKeeper-1",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#6"
     }
   ],
   "nextNum": 368,
