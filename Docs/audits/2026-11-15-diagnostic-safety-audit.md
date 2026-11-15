@@ -286,7 +286,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0946 | DispatchHoleCount | Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:749 | a hole table header holds one hole |
 | E0947 | DispatchHoleOutsideTable | Compiler/JetSema/Source/Sema/Diagnostics.jet:369 | `_` is a value only in a hole table header |
 | E0948 | DispatchHoleCandidatePattern | Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:755 | patterns and ranges match against the subject of `subject == _` |
-| E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1590 | list the values you need yourself |
+| E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1591 | list the values you need yourself |
 | E0950 | FieldMethodClash | Compiler/JetSema/Source/Sema/Expressions/Places.jet:1297 | write the closure that names the one you mean |
 | E0952 | ComptimeFuelExhausted | Compiler/JetEval/Source/EvalValues.jet:148 | the comptime work is reduced or split to fit the budget |
 | E0953 | ComptimePanic | Compiler/JetEval/Source/EvalValues.jet:150 | the condition that raises the authored error is changed |
@@ -317,7 +317,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0986 | DetachedCallableMarker | Compiler/JetLexer/Source/Lexer/Terminators.jet:560 | the marker stays on the line of the closing `)` |
 | E0987 | UnknownLoopLabel | Compiler/JetSema/Source/Sema/Statements.jet:3308 | `break(name)` and `next(name)` target a visible named loop |
 | E0988 | LoopLabelAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:4906 | a loop name is not a value |
-| E0989 | CompileTimeIfNotConstant | Compiler/JetSema/Source/Sema/Registration/Derives.jet:1304 | a run-time condition uses a plain `if` |
+| E0989 | CompileTimeIfNotConstant | Compiler/JetSema/Source/Sema/Registration/Derives.jet:1311 | a run-time condition uses a plain `if` |
 | E0992 | DispatchMissingComparison | Compiler/JetParser/Source/Formatter/Formatter.jet:1790 | value dispatch writes the comparison before the brace |
 | E0995 | MissingWorkspaceModule | Compiler/JetCli/Source/Cli/Entry.jet:941 | `workspace.jet` declares one `workspace` module |
 | E0996 | InvalidMembersList | Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet:410 | `members:` evaluates to `[String]` |
@@ -362,7 +362,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1133 | SetNotBits | Compiler/JetSema/Source/Sema/Calls/Collections.jet:482 | the call takes a Set of an enum with 1 to 64 plain cases |
 | E1134 | MarkerLookupNotMarker | Compiler/JetSema/Source/Sema/Calls/Build.jet:1140 | `marker(T)` names a marker |
 | E1135 | RewriteIncompatible | Compiler/JetSema/Source/Sema/Calls/Build.jet:808 | the replacement takes and returns what the callee does |
-| E1136 | MarkerUsesOutsidePackage | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1333 | the marker's own package reads its uses |
+| E1136 | MarkerUsesOutsidePackage | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1334 | the marker's own package reads its uses |
 | E1201 | PackageVersionConflict | Jetpack/PackageModel/Source/Lock/Verify.jet:340 | the dependencies agree on one version |
 | E1203 | MissingGit | Jetpack/PackageModel/Source/Lock/Verify.jet:376 | install `git` |
 | E1204 | StoreEntryTampered | Compiler/JetCli/Source/Cli/InspectProvenance.jet:510 | the entry is fetched again from its source |
