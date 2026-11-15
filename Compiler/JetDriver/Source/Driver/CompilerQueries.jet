@@ -27,6 +27,7 @@ use {
         SemaComptimeFunctionResult,
         SemaComptimeItemValue,
         SemaGraphResult,
+        SemaFunctionMemoryPlan,
         SemaRegistrationGraph,
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
@@ -341,6 +342,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     stage.modules = [SemaGraphModuleResult]{}
     declared_facts := stage.graph_facts.move()
     stage.graph_facts = None
+    memory_plan := [SemaFunctionMemoryPlan]{}
     run := jet_driver_run_comptime(
         registration,
         declared_modules,
@@ -350,6 +352,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         [SemaComptimeFunctionResult]{},
         input.request,
         stage_diagnostics,
+        memory_plan,
     )
     jet_driver_comptime_return_declared(stage, run)
     load.diagnostics = stage_diagnostics

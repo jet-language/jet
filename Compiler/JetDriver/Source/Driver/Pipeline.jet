@@ -2788,6 +2788,10 @@ jet_driver_run_comptime: fn(
     initial_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
+    // The run's function memory plan, zero or one row: a caller holding the
+    // plan of `staged`'s functions lends it here, and an empty slot gets the
+    // one the run builds (jet_driver_comptime_run).
+    memory_plan: &[SemaFunctionMemoryPlan],
 ) -> JetDriverComptimeRunResult {
     counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, item_functions_evaluated: 0, functions_built: 0}
     // Read before the tables take `staged`.
@@ -2826,7 +2830,7 @@ jet_driver_run_comptime: fn(
     programs.push(program)
     environments := [SemaScopeEnvironment]{}
     environments.push(environment)
-    result := jet_driver_comptime_run(programs, environments, trail, keep_going, sources, initial_values, initial_functions, request, staging, counters, diagnostics)
+    result := jet_driver_comptime_run(programs, environments, trail, keep_going, sources, initial_values, initial_functions, request, staging, counters, diagnostics, memory_plan)
     result.declared = staging.declared.move()
     staging.declared = [SemaGraphModuleResult]{}
     if request.trace_sink == .Val(sink) {
@@ -2871,15 +2875,16 @@ jet_driver_comptime_run: fn(
     staging: &JetDriverComptimeStaging,
     counters: &JetDriverComptimeCounters,
     diagnostics: &[Diagnostic],
+    // The memory plan reads only function declarations, which staged values
+    // never change, so every on-demand function check shares one (zero or
+    // one row): the caller's, or else built by the main thread while a
+    // precheck's threads check, or at the run's first function check
+    // (jet_driver_comptime_function_closure).
+    memory_plan: &[SemaFunctionMemoryPlan],
 ) -> JetDriverComptimeRunResult {
     // copy: this run grows its own value list. initial_values is jet_driver_run_comptime's read
     // parameter, which also seeds the comptime environment and stays with the caller.
     values := initial_values.copy()
-    // The memory plan reads only function declarations, which staged values
-    // never change, so every on-demand function check shares one, built by
-    // the main thread while a precheck's threads check, or else at the run's
-    // first function check (jet_driver_comptime_function_closure).
-    memory_plan := [SemaFunctionMemoryPlan]{}
     // copy: this run grows its own checked-function list. initial_functions is
     // jet_driver_run_comptime's read parameter, which stays with the caller.
     checked_functions := initial_functions.copy()
@@ -5097,6 +5102,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     comptime_stage.modules = [SemaGraphModuleResult]{}
     declared_facts := comptime_stage.graph_facts.move()
     comptime_stage.graph_facts = None
+    memory_plan := [SemaFunctionMemoryPlan]{}
     comptime_run := jet_driver_run_comptime(
         run_staged,
         declared_modules,
@@ -5106,6 +5112,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         [SemaComptimeFunctionResult]{},
         request,
         stage_diagnostics,
+        memory_plan,
     )
     jet_driver_comptime_return_declared(comptime_stage, comptime_run)
     if request.trace_sink == .Val(sink) -> sink.end("comptime", comptime_run.values.len())

@@ -18,10 +18,12 @@ use {
         SemaComptimeItemValue,
         SemaCoreSeal,
         SemaFinalizeBodies,
+        SemaFunctionMemoryPlan,
         SemaGraphModuleResult,
         SemaGraphResult,
         SemaLocalSpliceDemand,
         SemaLocalSpliceInto,
+        SemaPassFacts,
         SemaRegistrationGraph,
         sema_comptime_body_item_source,
         sema_comptime_function_diagnostics,
@@ -30,6 +32,7 @@ use {
         sema_graph_trail_init,
         sema_graph_trail_undo,
         sema_finalize_graph,
+        sema_function_memory_plan_new,
         sema_local_splice_demand_snapshot,
         sema_local_splice_demand_swap,
         sema_local_value_land,
@@ -292,7 +295,8 @@ jet_driver_comptime_body_pass: fn(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
-    run := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics)
+    memory_plan := [SemaFunctionMemoryPlan]{}
+    run := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics, memory_plan)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.run", body_sources.len())
     finished_registration := run.graph.move()
     run.graph = None
@@ -474,6 +478,7 @@ jet_driver_validate_checked_text: fn(
     if sources.len() == 0 {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(initial_graph, initial_values, initial_functions, initial_trace, true, false), registration)
     }
+    memory_plan := [SemaFunctionMemoryPlan]{}
     run := jet_driver_run_comptime(
         registration,
         [SemaGraphModuleResult]{},
@@ -483,6 +488,7 @@ jet_driver_validate_checked_text: fn(
         initial_functions,
         request,
         diagnostics,
+        memory_plan,
     )
     finished_registration := run.graph.move()
     run.graph = None
@@ -626,10 +632,15 @@ jet_driver_land_local_values: fn(
         // the full recheck's do, so the graph's demand goes back to what it
         // held before the run.
         held_demand := sema_local_splice_demand_snapshot(registration)
+        // The finalization's memory plan serves the run: it reads only the
+        // function declarations, and the run's graph edits change only
+        // constant types.
+        memory_plan := jet_driver_carried_plan_take(bodies.carried)
         run := jet_driver_run_comptime(
             registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
-            request, run_diagnostics,
+            request, run_diagnostics, memory_plan,
         )
+        jet_driver_carried_plan_put(bodies.carried, memory_plan)
         finished_registration := run.graph.move()
         run.graph = None
         partial_registration := run.partial_graph.move()
@@ -658,6 +669,26 @@ jet_driver_land_local_values: fn(
         jet_driver_trace_step_end(request.trace_sink, "comptime.land.carry", values.len())
     }
     registration
+}
+
+// Moves the memory plan out of `carried`, a finalization's pass facts (its
+// one row), into the one-row slot a comptime run takes
+// (jet_driver_run_comptime). An empty `carried` gives an empty slot.
+jet_driver_carried_plan_take: fn(carried: &[SemaPassFacts]) -> [SemaFunctionMemoryPlan] Never! {
+    plan := [SemaFunctionMemoryPlan]{}
+    facts := carried.pop() ?? return plan
+    plan.push(facts.memory_plan.move())
+    facts.memory_plan = sema_function_memory_plan_new()
+    carried.push(facts)
+    plan
+}
+
+// Moves the plan jet_driver_carried_plan_take lent from `carried` back
+// there.
+jet_driver_carried_plan_put: fn(carried: &[SemaPassFacts], plan: &[SemaFunctionMemoryPlan]) Never! {
+    facts := carried.pop() ?? return
+    facts.memory_plan = plan.pop() ?? panic("a comptime run lost the finalization's memory plan")
+    carried.push(facts)
 }
 
 // Whether the body half of a finalization (`bodies`) over the declaration
