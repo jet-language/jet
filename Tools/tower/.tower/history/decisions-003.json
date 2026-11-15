@@ -22682,6 +22682,90 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-17",
       "retiredAt": "2026-11-15T09:27:19.301Z"
+    },
+    {
+      "id": "D-CONC-ALLNAMED1",
+      "cardId": "c0509i8n",
+      "group": "syntax",
+      "title": "Named results for task.all",
+      "gist": "Whether task.all branches can be named, so results come back as named fields instead of positions.",
+      "lesson": "task.all runs several branches at the same time and returns every result. Today the results are positional: the third result is whatever the third branch was. When several branches return the same type, a reordered branch list silently swaps results. Names remove that failure class. JavaScript is adding Promise.allKeyed for exactly this reason, and its users welcomed it.",
+      "explainer": "",
+      "story": "Maya builds a status dashboard. She fetches the build state, the deploy state, and the alert state concurrently. All three are String. A teammate adds a fourth fetch and sorts the branches alphabetically. The build column now shows deploy text. No error fired anywhere.",
+      "inWild": "fn load() Status ! [NetError] -> {\n    // three concurrent fetches, all String\n    results :: task.all {\n        fetch(\"/api/build\"),\n        fetch(\"/api/deploy\"),\n        fetch(\"/api/alerts\"),\n    }\n    // results[0] means 'build' only by convention.\n    // Reorder the branches and every column lies.\n    Status{build: results[0], deploy: results[1], alerts: results[2]}\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named branches, record result",
+          "detail": "A branch may be written name: expression. When branches are named, task.all returns a value with those fields, and you read results.build. Positional branches keep working exactly as today. Reads like a record literal, so there is nothing new to learn.",
+          "technical": "Grammar: task.all block accepts either all-positional or all-named branches (mixing is an error with a registered diagnostic). Named form types as an anonymous record whose fields are the branch names; failure semantics per branch are unchanged (D-CONC-FAIL1). Parity across parser, sema, TIR, AOT, JIT, interpreter, web (I9).",
+          "code": "results :: task.all {\n    build: fetch(\"/api/build\"),\n    deploy: fetch(\"/api/deploy\"),\n    alerts: fetch(\"/api/alerts\"),\n}\nStatus{build: results.build, deploy: results.deploy, alerts: results.alerts}"
+        },
+        {
+          "key": "B",
+          "name": "Keep positional, lean on destructuring",
+          "detail": "No grammar change. The idiom is to destructure results into named bindings right at the call. Zero new surface, but when two branches share a type, a swapped branch still compiles and runs wrong — the names live one line away from the branches instead of on them.",
+          "technical": "Documentation and example work only. The swap-bug class remains undiagnosable by sema because positions carry no intent.",
+          "code": "(build, deploy, alerts) :: task.all {\n    fetch(\"/api/build\"),\n    fetch(\"/api/deploy\"),\n    fetch(\"/api/alerts\"),\n}"
+        },
+        {
+          "key": "C",
+          "name": "Library join over a record of tasks",
+          "detail": "No change inside task.all. You build an ordinary record whose fields are running tasks, then join the record to await all fields. Keeps the grammar frozen, but it creates a second way to await a group, and it makes raw Task values something beginners hold and pass around.",
+          "technical": "Requires Task-typed record fields, a generic join over records (comptime field walk), and rules for a Task value that escapes its scope. Two join spellings then exist: task.all and join(record).",
+          "code": "pending :: {\n    build: task fetch(\"/api/build\"),\n    deploy: task fetch(\"/api/deploy\"),\n}\nresults :: join(pending)\nprint(results.build)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript (TC39)",
+          "note": "Await Dictionary is Stage 3 precisely because positional Promise.all mis-wires results as call sites grow.",
+          "code": "const {build, deploy} = await Promise.allKeyed({build: fetchBuild(), deploy: fetchDeploy()});"
+        },
+        {
+          "lang": "Go",
+          "note": "No named form. errgroup collects by closure side effects; result wiring is manual and positional.",
+          "code": "g.Go(func() error { build, err = fetchBuild(); return err })"
+        },
+        {
+          "lang": "Python",
+          "note": "asyncio.gather is positional; the swap bug is a known review item in async code.",
+          "code": "build, deploy = await asyncio.gather(fetch_build(), fetch_deploy())"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Named branches put the intent on the branch itself, so a reordered list cannot swap results. The spelling copies the record literal the reader already knows, and positional stays valid for small cases. One mechanism gains one additive form.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Destructuring names the bindings, not the branches. Two same-typed branches can still swap silently; the compiler has no intent to check."
+          },
+          {
+            "key": "C",
+            "reason": "It creates a second way to await a group and makes raw Task values a beginner-visible concept, which the current surface deliberately avoids."
+          }
+        ],
+        "tradeoff": "The parser and sema must handle a second branch form inside task.all, and mixing named with positional needs its own clear diagnostic. That is accepted because the swap-bug class disappears at the surface where it is caused."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared named branches, positional with destructuring, and a library join over a record of tasks. It recommended named branches because the spelling mirrors record literals and removes the positional swap-bug class.",
+        "boilOcean": "The breadth review also examined a string-keyed map form and a caller-supplied result struct type. Both were folded into the library option because they change how results are keyed, not who owns the join.",
+        "hybrid": "The hybrid review checked combining named and positional forms. The recommendation already is that hybrid: positional branches remain valid, named is additive, and mixing inside one block is rejected with a diagnostic.",
+        "cooperative": "The cooperative review strengthened the positional option with destructuring placed directly at the call and a naming convention. It still cannot make the compiler see intent, so same-typed swaps stay silent.",
+        "adversarial": "The adversarial review attacked the name: spelling for collisions with map literals and labeled arguments, and probed partial-failure semantics. Branch names mirror record fields, not map keys, and named branches add no new failure semantics, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-28T16:04:39.898Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-28",
+      "retiredAt": "2026-11-15T12:08:59.200Z"
     }
   ]
 }
