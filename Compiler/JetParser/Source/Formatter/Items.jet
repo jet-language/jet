@@ -1224,6 +1224,7 @@ jfmt_fmt_effect_row: fn(f: &JetFmt, effects: [EffectRowEntry], source: JetFmtSou
 
 jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
     jfmt_fmt_above_markers(f, t.markers)
+    jfmt_fmt_written_privacy(f, t.is_pub, t.name_span.start)
     jfmt_write(f, t.name)
     jfmt_write(f, ": trait")
     // One supertrait stays bare, several use the list.
@@ -1436,8 +1437,7 @@ jfmt_fmt_test: fn(f: &JetFmt, t: TestDef) {
     jfmt_end_block(f)
 }
 
-// `priv module` / `priv(package) module`. Declarations other
-// than modules carry no visibility marker.
+// `priv module` / `priv(package) module`.
 jfmt_fmt_module_privacy: fn(f: &JetFmt, is_pub: Bool, is_package_pub: Bool) {
     if is_package_pub {
         jfmt_write(f, "priv(package) ")
@@ -1446,8 +1446,18 @@ jfmt_fmt_module_privacy: fn(f: &JetFmt, is_pub: Bool, is_package_pub: Bool) {
     }
 }
 
+// A declaration's `priv` or `priv(package)` as written directly before its
+// name. An item of a narrowed module body is not public with no keyword
+// written, so the source decides, not `is_pub`.
+jfmt_fmt_written_privacy: fn(f: &JetFmt, is_pub: Bool, name_start: Int) {
+    if is_pub -> return
+    privacy: jfmt_source_privacy_before(f, name_start)
+    if privacy.len() > 0 -> jfmt_write(f, privacy)
+}
+
 jfmt_fmt_distinct: fn(f: &JetFmt, d: DistinctDef) {
     jfmt_fmt_type_markers(f, d.type_markers, true)
+    jfmt_fmt_written_privacy(f, d.is_pub, d.name_span.start)
     jfmt_write(f, d.name)
     jfmt_write(f, ": distinct ")
     jfmt_fmt_type_at(f, d.base, Val(d.base_span))
@@ -1455,6 +1465,7 @@ jfmt_fmt_distinct: fn(f: &JetFmt, d: DistinctDef) {
 }
 
 jfmt_fmt_type_alias: fn(f: &JetFmt, a: TypeAliasDef) {
+    jfmt_fmt_written_privacy(f, a.is_pub, a.name_span.start)
     jfmt_write(f, a.name)
     type_source: jfmt_source_list_span_after(f, a.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, a.type_params, type_source)
@@ -1771,8 +1782,7 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     // `#run` mark stays first after the markers.
     // A member `priv` or `priv(package)` (parsed onto the method) survives; a
     // narrowed module body's methods carry no written keyword.
-    privacy: if func.is_pub -> "" else -> jfmt_source_privacy_before(f, func.name_span.start)
-    if privacy.len() > 0 -> jfmt_write(f, privacy)
+    jfmt_fmt_written_privacy(f, func.is_pub, func.name_span.start)
     if func.is_comptime -> jfmt_write(f, "#run ")
     if func.external_type == .Val(owner) {
         jfmt_write(f, owner.name)
@@ -2336,6 +2346,7 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
     // formatter input. Typed flags remain for sema/codegen only.
     lone_hash_ok: s.layout == None && !s.is_published_schema && !s.is_single_use && !s.is_must_use
     jfmt_fmt_type_markers(f, jfmt_above_markers(s.type_markers), lone_hash_ok)
+    jfmt_fmt_written_privacy(f, s.is_pub, s.name_span.start)
     jfmt_write(f, s.name)
     jfmt_write(f, ": struct")
     type_source: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
@@ -2390,6 +2401,7 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     // reconstruction. The flags below remain semantic data only.
     lone_hash_ok: !e.is_single_use && !e.is_must_use
     jfmt_fmt_type_markers(f, jfmt_above_markers(e.type_markers), lone_hash_ok)
+    jfmt_fmt_written_privacy(f, e.is_pub, e.name_span.start)
     jfmt_write(f, e.name)
     jfmt_write(f, ": enum")
     type_source: jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE)
@@ -2625,6 +2637,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
     // so. Preserve `:` vs `:=`.
     if c.is_persist {
         jfmt_write(f, "#Persist ")
+        jfmt_fmt_written_privacy(f, c.is_pub, c.name_span.start)
         jfmt_write(f, c.name)
         jfmt_write(f, if c.mutable -> " := " else -> ": ")
         if c.is_comptime -> jfmt_fmt_prepared_value(f, c.value) else -> jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
@@ -2641,6 +2654,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
     if c.is_comptime {
         // Compile time is always the explicit
         // `NAME: #run value`.
+        jfmt_fmt_written_privacy(f, c.is_pub, c.name_span.start)
         jfmt_write(f, c.name)
         jfmt_write(f, ": ")
         jfmt_fmt_prepared_value(f, c.value)
@@ -2657,6 +2671,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
         }
     }
     // Runtime module bindings retain their authored mutability.
+    jfmt_fmt_written_privacy(f, c.is_pub, c.name_span.start)
     jfmt_write(f, c.name)
     jfmt_write(f, if c.mutable -> " := " else -> ": ")
     jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)

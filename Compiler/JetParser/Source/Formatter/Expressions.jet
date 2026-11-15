@@ -1003,18 +1003,35 @@ jfmt_fmt_return_type: fn(f: &JetFmt, ty: Type) {
     jfmt_fmt_type(f, ty)
 }
 
+// A struct literal's head. The parser keeps the type arguments of a
+// `Owner<Args>.Name{ … }` head (an enum variant, or a module's type) on the
+// owner, so they print there: `Tree.Node<Int>{ … }` would read back as a
+// typed literal.
 jfmt_fmt_named_struct_head: fn(f: &JetFmt, type_name: String, type_args: [Type], import_ns: String?, source_span: Span?) {
     if import_ns == .Val(ns) {
         jfmt_write(f, ns)
+        jfmt_fmt_struct_head_type_args(f, type_args, source_span)
         jfmt_write(f, ".")
+        jfmt_write(f, type_name)
+        return
     }
-    jfmt_write(f, type_name)
-    if type_args.len() > 0 {
-        jfmt_write(f, "<")
-        type_source: jfmt_source_list_at(f, source_span, JFMT_DELIM_ANGLE)
-        jfmt_fmt_type_list(f, type_args, type_source, source_span ?? Span{start: 0, end: 0})
-        jfmt_write(f, ">")
+    dot: type_name.find(".")
+    if dot <= 0 {
+        jfmt_write(f, type_name)
+        jfmt_fmt_struct_head_type_args(f, type_args, source_span)
+        return
     }
+    jfmt_write(f, type_name.slice(0, dot))
+    jfmt_fmt_struct_head_type_args(f, type_args, source_span)
+    jfmt_write(f, type_name.slice(dot, type_name.len()))
+}
+
+jfmt_fmt_struct_head_type_args: fn(f: &JetFmt, type_args: [Type], source_span: Span?) {
+    if type_args.len() == 0 -> return
+    jfmt_write(f, "<")
+    type_source: jfmt_source_list_at(f, source_span, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_list(f, type_args, type_source, source_span ?? Span{start: 0, end: 0})
+    jfmt_write(f, ">")
 }
 
 jfmt_fmt_struct_lit_body: fn(f: &JetFmt, fields: [ExprField], span: Span) {

@@ -1691,6 +1691,40 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
     assert_eq(alone.text, "package: {{\n    name: \"p\"\n}}\n")
 }
 
+// fmt keeps what a declaration means: the written `priv` of each kind of
+// top-level declaration, and the type arguments of an `Owner<Args>.Variant{ … }`
+// head on the owner, where `Tree.Node<Int>{ … }` would read as a typed literal.
+#Test("fmt_keeps_declaration_privacy_and_owner_type_arguments") {
+    cases: [[String]]{
+        {"priv Hidden: struct {{\n    impl Marker {{\n        sites: [.Function]\n    }}\n}}\n", "priv Hidden: struct"},
+        {"priv Point: struct {{\n    x: Int\n}}\n", "priv Point: struct"},
+        {"priv Mode: enum {{\n    On\n    Off\n}}\n", "priv Mode: enum"},
+        {"priv Shape: trait {{\n    area: fn(self) -> Int\n}}\n", "priv Shape: trait"},
+        {"priv Meters: distinct Int\n", "priv Meters: distinct Int"},
+        {"priv LIMIT: 3\n", "priv LIMIT: 3"},
+        {"Tree: enum<T> {{\n    Leaf\n    Node(value: T, left: Tree<T>, right: Tree<T>)\n}}\n\nleaf: fn() -> Tree<Int> {{\n    Tree<Int>.Node{{value: 1, left: Tree<Int>.Leaf, right: Tree<Int>.Leaf}}\n}}\n", "Tree<Int>.Node{{"},
+    }
+    loop row in cases {
+        result: jet_cli_fmt_ordinary(row[0], false, false)
+        assert(result.ok, "the source formats: {row[0]}")
+        assert(result.structure_change == None, "fmt keeps the syntax tree of: {row[0]}")
+        assert(result.text.contains(row[1]), "fmt keeps `{row[1]}` in: {result.text}")
+        assert_eq(fl_check_preserves("inline.jet", row[0], result.text), "")
+    }
+    // The corpus sources the cutover stopped on. Run from the repository root.
+    corpus: [String]{
+        "tests/cases/marker_groups_modules/grouped_file_visibility_does_not_export_another_modules_private_member.fixture/v1/rules.jet",
+        "tests/cases/memory_semantics/payload_free_variants_allocate_nothing.fixture/main.jet",
+    }
+    loop path in corpus {
+        src: fl_files.read(path) ?? panic("read {path}: {err}")
+        result: jet_cli_fmt_ordinary(src, false, false)
+        assert(result.ok, "{path} formats")
+        assert(result.structure_change == None, "fmt keeps the syntax tree of {path}")
+        assert_eq(fl_check_preserves(path, src, result.text), "")
+    }
+}
+
 #Test("canonical_rewrite_rules_are_explicit_and_narrow") {
     allowed: [[String]]{
         {"top-level ordering", "#Target(Web)\nuse core.ui as ui\nrun: fn() {{}}\n", "use core.ui as ui\n#Target(Web)\nrun: fn() {{}}\n"},
