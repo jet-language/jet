@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6894,
-    "rev": 103900,
+    "rev": 103925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31627,30 +31627,30 @@
       "criteria": [
         {
           "n": 7,
-          "text": "[retarget] Every operation row states receiver/result ownership, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result and required buffering.",
+          "text": "Every row in the one authored operation row set states receiver and result ownership, eager or lazy timing, callback count and order, stop-item consumption, failure channel, empty result and required buffering. Proof: a #Test in Compiler/JetFoundation/Source/Collections.jet fails on a row missing any field (`jet test Compiler/JetFoundation/Source/Collections.jet`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:39:23.467Z"
+          "at": "2026-11-15T03:46:14.234Z"
         },
         {
           "n": 8,
-          "text": "[retarget] Examples cover empty all/any, zero, first failure, strict/short/pad zip and remainder continuation; source errors are not advertised as successes.",
+          "text": "Examples cover empty all and any, zero, first failure, strict, short and padded zip, and remainder continuation, and no source error prints as a success. Proof: `jet test Compiler --profile golden --filter Collections/OperationContract` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:39:24.061Z"
+          "at": "2026-11-15T03:46:15.151Z"
         },
         {
           "n": 9,
-          "text": "[retarget] Current, proposed and source-only behaviour are distinguishable; LAST ties stay pinned by #2298 and eager defaults stay D-CORE-EAGER1/2=A.",
+          "text": "Generated docs mark each operation as shipped or source-only; LAST ties stay as #2298 pinned and eager defaults stay D-CORE-EAGER1=A and D-CORE-EAGER2=A. Proof: `jet test Compiler --profile golden --filter Collections/` passes and the generated operation docs show the marker.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:39:24.625Z"
+          "at": "2026-11-15T03:46:16.111Z"
         },
         {
           "n": 11,
@@ -31663,12 +31663,12 @@
         },
         {
           "n": 13,
-          "text": "The four method tables in Compiler/JetFoundation/Source/Collections.jet are replaced by one authored row set, the generated operation views come from it, and jet check Compiler is clean.",
+          "text": "The four method tables in Compiler/JetFoundation/Source/Collections.jet are replaced by one authored row set; JetSema, JetCodegen and the generated docs, completion and explain views all read it, with no second registry, and `jet check Compiler` is clean. Proof: `git grep -n -E 'sema_collection_method_(contract|argument_type|result_type|operation)' -- Compiler` prints nothing and `jet check Compiler` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:01:40.458Z"
+          "at": "2026-11-15T03:46:17.130Z"
         },
         {
           "n": 14,
@@ -31681,12 +31681,12 @@
         },
         {
           "n": 15,
-          "text": "[#3281] golden `collections/collection_contracts` shows each shipped family's order, equality, invalidation and ownership contract.",
+          "text": "A golden shows each shipped collection family's order, equality, invalidation and ownership contract. Proof: `jet test Compiler --profile golden --filter Collections/CollectionContracts` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:26:37.812Z"
+          "at": "2026-11-15T03:46:18.125Z"
         },
         {
           "n": 16,
@@ -31759,7 +31759,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-15T03:03:37.223Z",
+      "updated": "2026-11-15T03:46:18.126Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 44,
       "goals": [
@@ -47183,12 +47183,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "[#4440] D-BINARY-SIGNEXT1=A: sign_extend takes bits: Int(1..64) and stays infallible. Every caller migrates in the same change, with no teaching diagnostic or jet fix rule (owner 2026-11-06).",
+          "text": "sign_extend takes `bits: Int(1..64)` and stays infallible (D-BINARY-SIGNEXT1=A; Core/Encoding/Binary.jet takes a plain Int today), and every caller migrates in the same change with no teaching diagnostic or jet fix rule (owner 2026-11-06). Proof: `jet test Compiler --profile ui --filter sign_extend_bits_out_of_range` and `jet test Compiler --profile cases --filter encoding/sign_extend`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:00.653Z"
+          "at": "2026-11-15T03:46:19.075Z"
         },
         {
           "n": 2,
@@ -47237,12 +47237,12 @@
         },
         {
           "n": 7,
-          "text": "[#4448] Scoped requested-capacity accounting enforces the encoding max_bytes law exactly on all tiers, including error and Int-growth paths.",
+          "text": "Scoped requested-capacity accounting enforces the encoding max_bytes limit exactly on every tier, including the error and Int-growth paths. Proof: `jet test Compiler --profile cases --filter encoding/max_bytes_exact_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:44:06.038Z"
+          "at": "2026-11-15T03:46:19.990Z"
         },
         {
           "n": 8,
@@ -47292,8 +47292,8 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-03T11:17:39.038Z",
-      "updated": "2026-11-13T01:50:14.901Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:46:19.990Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ]
@@ -47673,6 +47673,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T18:44:29.982Z"
+        },
+        {
+          "n": 6,
+          "text": "D-SQL-CLASS1=A is built: ordinary SQL{...} literals carry an inferred Query, Mutation, Schema or Dynamic class that every receiving method (query, execute and the rest) enforces; the class survives return, storage and web decode; forged tags, altered bindings and stale identities are refused. Proof: `jet test Compiler --profile cases --filter sql/statement_class_` and `jet test Compiler --profile ui --filter sql_class_mismatch`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:10.418Z"
         }
       ],
       "refs": [],
@@ -47682,11 +47691,12 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:21.092Z",
-      "updated": "2026-11-13T01:50:17.378Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:46:10.418Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 6
     },
     {
       "id": "c08rdp62",
@@ -50873,6 +50883,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-29T11:13:37.285Z"
+        },
+        {
+          "n": 5,
+          "text": "A decimal literal next to a Complex adopts Float the way an expected Float parameter does (D-LITCARRIER1), so `2.0 + 3.0i` prints a Complex instead of E0109. Proof: `jet test Compiler --profile cases --filter math/decimal_literal_with_complex`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:11.288Z"
         }
       ],
       "refs": [
@@ -50890,11 +50909,12 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-13T01:50:42.120Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:46:11.288Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 5
     },
     {
       "id": "c0li0kor",
@@ -66538,7 +66558,7 @@
       "id": "c0mhdm27",
       "num": 6048,
       "title": "Typed service workers: build D-SERVICE-WORKER1, REPLY1, KEEP1 and BATCH1 (Ladder L-10)",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-10; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: task.group -> core.service cliff: string names and messages vs D-SERVICE1 typed endpoints\n\nEvidence: Core/Service/Service.jet:529,549,1196,1378,1900; D-SERVICE1=D SD:6988\n\nAudit action: ballot. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "body": "Build the four ratified service-worker decisions (D-SERVICE-WORKER1, REPLY1, KEEP1, BATCH1, all A, 2026-10-30) and the actor library (D-ACTOR1=A), closing the ladder cliff from task.group to core.service: today Core/Service/Service.jet takes string names and messages.\n\nSource: ladder audit Docs/audits/ladder-audit-2026-10-28.md, finding L-10; philosophy pillar 4, Ladders, Not Cliffs.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
@@ -66579,12 +66599,12 @@
         },
         {
           "n": 2,
-          "text": "D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1 and D-SERVICE-BATCH1 (all A) are built in core.service: a worker is its function, run once per message in order, and tree.send takes only its message type (anything else is E0112; a missed enum case is E0307); a replying handler gives Endpoint<Q, R> and tree.call returns R ServiceError! (send on a replying endpoint is an error whose fix is call; a worker that fails mid-message gives .Ambiguous); a &S first parameter keeps state from state:; batch: N with wait: passes up to N waiting messages to a [T] handler. The String name and message forms in Core/Service/Service.jet are gone in one cutover, and each rung has a golden or UI snapshot on O0, O1 and O2.",
+          "text": "D-SERVICE-WORKER1, REPLY1, KEEP1 and BATCH1 (all A) are built in core.service: a worker is its function, run once per message in order, and tree.send takes only its message type (E0112 otherwise; a missed enum case is E0307); a replying handler gives Endpoint<Q, R> and tree.call returns R ServiceError! (send on a replying endpoint is an error whose fix is call; a worker failing mid-message gives .Ambiguous); a &S first parameter keeps state from state:; batch: N with wait: passes up to N waiting messages to a [T] handler. The String name and message forms in Core/Service/Service.jet are gone in one cutover. Proof: `jet test Compiler --profile golden --filter Concurrency/ServiceWorkers` on O0, O1 and O2 and `jet test Compiler --profile ui --filter service_send_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:01:22.487Z"
+          "at": "2026-11-15T03:44:43.083Z"
         },
         {
           "n": 3,
@@ -66604,7 +66624,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-15T03:42:19.157Z",
+      "updated": "2026-11-15T03:44:52.952Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -72811,12 +72831,12 @@
         },
         {
           "n": 3,
-          "text": "Every ratified allocator and SoA surface is implemented natively in Core and the compiler: a user-written allocator backs List, Map and String, and Columns<T> (D-SOA-SITE1 A, which retires #Layout(columnar)) supports the full logical-list API; each has examples with golden output on o0/o1/o2.",
+          "text": "A user-written allocator backs List, Map and String: each grows, shrinks and frees through it, with examples whose golden output matches on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter Memory/UserAllocatorCollections`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:32:26.450Z"
+          "at": "2026-11-15T03:46:20.880Z"
         },
         {
           "n": 5,
@@ -72871,6 +72891,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:14:08.559Z"
+        },
+        {
+          "n": 12,
+          "text": "Columns<T> (D-SOA-SITE1=A, which retires #Layout(columnar)) stores a struct list column by column and supports the full logical-list API, and no #Layout(columnar) use remains. Proof: `jet test Compiler --profile golden --filter Memory/ColumnsSoa` on O0, O1 and O2 and `git grep -n 'Layout(columnar)' -- Core Examples Compiler` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:09.534Z"
         }
       ],
       "refs": [],
@@ -72881,9 +72910,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-15T03:14:08.559Z",
+      "updated": "2026-11-15T03:46:20.880Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0vqsfl8",
@@ -82485,8 +82514,8 @@
     {
       "id": "c0s9rdnu",
       "num": 6524,
-      "title": "Pipelines as values, and a declared restart policy on service trees",
-      "body": "There is no pipeline or dataflow value in Core. Supervision is a setter, `set_restart(tree, restart)` (Core/Service/Service.jet:261-264), with a tree-wide strategy and no intensity (ServiceRestart, :467-471).\n\nDone when: `tasks.pipeline(source).map(f).filter(p).sink(g)` builds a value whose pure stages run in parallel and whose writing stages run on one task; pure stage chains fuse; `restart: .OneForOne(max:, within:)` is a field on the tree or worker line and `set_restart` is removed.\n\nDepends on the typed channels card. Research: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.6.",
+      "title": "Service supervision: one Service record, readiness, bounded restarts, a declared restart policy, and pipeline values",
+      "body": "Destination: a service tree is supervised from declared data. One Service record (D-SERVICE-WORD1=A) covers the beginner run form and the expert fields; the supervisor separates start from readiness and bounds every restart and watch loop; restart policy is a field on the tree or worker line, not the `set_restart` setter (Core/Service/Service.jet); and `tasks.pipeline(source)…` builds a dataflow value whose pure stages run in parallel.\n\nWhy it matters: supervision today is a setter with a tree-wide strategy and no intensity, and Core has no pipeline value.\n\nDecisions: D-SERVICE-WORD1=A. The restart-field and pipeline spellings have no decision yet (owner-gates.tsv).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.6 (card #6513).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -82500,6 +82529,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c1-c4 restated with proofs; pipeline and restart-field criteria added from the body, gated on owner ballots (owner-gates.tsv)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -82574,7 +82608,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:06.066Z",
-      "updated": "2026-11-15T03:44:32.138Z",
+      "updated": "2026-11-15T03:44:53.825Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 7
     },
@@ -87340,7 +87374,7 @@
     {
       "id": "c04pj0wn",
       "num": 6624,
-      "title": "core.compute tensors and GPU backends",
+      "title": "core.compute correctness: CPU-oracle parity, checked failures, SIMD kernels and kernel helpers",
       "body": "core.compute data integration, tensor meaning, failure checks and CPU-differential proof. Moved out of #5454 by owner ruling 2026-11-06.",
       "kind": "task",
       "track": "epoch",
@@ -87355,6 +87389,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: criteria restated with proofs; c4 now names the failing compute_autodiff golden."
+        },
         {
           "at": "2026-11-10",
           "by": "Main",
@@ -87425,7 +87464,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:15.413Z",
-      "updated": "2026-11-15T03:44:37.445Z",
+      "updated": "2026-11-15T03:44:54.721Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 8
     },
@@ -91545,6 +91584,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:03:21.446Z"
+        },
+        {
+          "n": 11,
+          "text": "Every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in core.math. Proof: a census #Test in Core/Math lists the C23 names and fails on any missing one (`jet test Core/Math`).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:12.246Z"
+        },
+        {
+          "n": 12,
+          "text": "The inputs where musl 1.2.5 differs from the correctly rounded result are listed in Docs, with documented musl bugs named (such as acosh of large negative inputs returning a number instead of NaN). Proof: `git ls-files Docs | grep -i musl` names the list and each entry cites its input and both results.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:13.243Z"
         }
       ],
       "refs": [
@@ -91560,9 +91617,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-15T03:03:21.446Z",
+      "updated": "2026-11-15T03:46:13.243Z",
       "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 10
+      "criteriaLastN": 12
     },
     {
       "id": "c0l39twq",
@@ -93947,6 +94004,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c5 (token policy) moved to the auth package card #6448, since auth leaves Core (D-DB-AUTH-HOME1=A); c6 gated on an RSA owner decision."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner 2026-11-09: the rewrite starts after G1, so it waits on the mbedtls port #6694."
@@ -93992,11 +94054,12 @@
         {
           "n": 5,
           "text": "[#4292] D-AUTH-TOKENPOLICY1, with adversarial auth goldens: • JWT verification requires a named nonempty audience, exp and a matching aud (the auth.jet:89 empty-audience bypass is removed). • HS256 only, with constant-time comparison. • The selected PASETO mode. (was #4268 c16)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:47:18.317Z"
+          "evidence": "Moved to #6448 c13: core.auth leaves Core for the auth package (D-DB-AUTH-HOME1=A), so token policy lives on #6448",
+          "at": "2026-11-15T03:44:44.098Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -94016,7 +94079,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-15T03:44:39.214Z",
+      "updated": "2026-11-15T03:44:55.682Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
@@ -104023,6 +104086,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:16:57.357Z"
+        },
+        {
+          "n": 11,
+          "text": "A lazy map whose callback fails propagates the failure: the prefix witness prints only `visit=1` and `[1]`, the demanded-tail witness returns the callback error on every tier and never prints `[1, 7]` with exit 0, and infallible callbacks, error-as-data and propagating callbacks stay distinct. Proof: `jet test Compiler --profile golden --filter Collections/LazyMapCallbackFailure` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:05.869Z"
         }
       ],
       "refs": [],
@@ -104037,8 +104109,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:16:57.357Z",
-      "updated": "2026-11-15T03:16:57.357Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:46:05.869Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 11
     },
     {
       "id": "c0pdkpef",
@@ -104139,6 +104212,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:19:44.267Z"
+        },
+        {
+          "n": 10,
+          "text": "cbor.to_bytes and cbor.decode<[U8]> round-trip typed records and [U8] with located errors and no internal compiler error. Proof: `jet test Compiler --profile golden --filter Data/Formats/CborRecords` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:06.777Z"
+        },
+        {
+          "n": 11,
+          "text": "Deeply nested XML parses and drops without hitting the typed-drop recursion limit, and numeric character references such as `&#x1F600;` decode fully. Proof: `jet test Compiler --profile cases --filter xml/deep_nesting_and_numeric_refs`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:07.685Z"
+        },
+        {
+          "n": 12,
+          "text": "Core parses HTML by the pinned WHATWG algorithm, with parse_with, elements and text_content (D-HTML-PARSE1=B). Proof: `jet test Compiler --profile golden --filter Data/Formats/HtmlParse` on O0, O1 and O2 over the html5lib tree-construction seeds.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:46:08.634Z"
         }
       ],
       "refs": [],
@@ -104153,8 +104253,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
-      "updated": "2026-11-15T03:19:44.267Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T03:46:08.634Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 12
     },
     {
       "id": "c0v54mn1",
@@ -210590,6 +210691,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:46:20.880Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ct4a0i",
+      "note": "#3: split: Columns<T> to its own criterion; was: Every ratified allocator and SoA surface is implemented natively in Core and the compiler: a user-written allocator backs List, Map and String, and Columns<T> (D-SOA-SITE1 A, which retires #Layout(col"
+    },
+    {
+      "at": "2026-11-15T03:46:19.990Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jd9jl3",
+      "note": "#7: strip debris; proof; was: [#4448] Scoped requested-capacity accounting enforces the encoding max_bytes law exactly on all tiers, including error and Int-growth paths."
+    },
+    {
+      "at": "2026-11-15T03:46:19.075Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0jd9jl3",
+      "note": "#1: strip debris; proof; was: [#4440] D-BINARY-SIGNEXT1=A: sign_extend takes bits: Int(1..64) and stays infallible. Every caller migrates in the same change, with no teaching diagnostic or jet fix rule (owner 2026-11-06)."
+    },
+    {
+      "at": "2026-11-15T03:46:18.126Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l0ygs4",
+      "note": "#15: strip debris; proof; was: [#3281] golden `collections/collection_contracts` shows each shipped family's order, equality, invalidation and ownership contract."
+    },
+    {
+      "at": "2026-11-15T03:46:17.130Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l0ygs4",
+      "note": "#13: absorbs c11; proof; was: The four method tables in Compiler/JetFoundation/Source/Collections.jet are replaced by one authored row set, the generated operation views come from it, and jet check Compiler is clean."
+    },
+    {
+      "at": "2026-11-15T03:46:16.111Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l0ygs4",
+      "note": "#9: strip debris; proof; was: [retarget] Current, proposed and source-only behaviour are distinguishable; LAST ties stay pinned by #2298 and eager defaults stay D-CORE-EAGER1/2=A."
+    },
+    {
+      "at": "2026-11-15T03:46:15.152Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l0ygs4",
+      "note": "#8: strip debris; proof; was: [retarget] Examples cover empty all/any, zero, first failure, strict/short/pad zip and remainder continuation; source errors are not advertised as successes."
+    },
+    {
+      "at": "2026-11-15T03:46:14.234Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0l0ygs4",
+      "note": "#7: strip debris; proof; was: [retarget] Every operation row states receiver/result ownership, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result and required buffering."
+    },
+    {
+      "at": "2026-11-15T03:46:13.243Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#12 The inputs where musl 1.2.5 differs from the correctly round"
+    },
+    {
+      "at": "2026-11-15T03:46:12.246Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#11 Every C23 math.h function (float and double forms, frexp, ld"
+    },
+    {
+      "at": "2026-11-15T03:46:11.288Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0x9xmde",
+      "note": "#5 A decimal literal next to a Complex adopts Float the way an "
+    },
+    {
+      "at": "2026-11-15T03:46:10.418Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0p6h37r",
+      "note": "#6 D-SQL-CLASS1=A is built: ordinary SQL{...} literals carry an"
+    },
+    {
+      "at": "2026-11-15T03:46:09.534Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0ct4a0i",
+      "note": "#12 Columns<T> (D-SOA-SITE1=A, which retires #Layout(columnar)) "
+    },
+    {
+      "at": "2026-11-15T03:46:08.634Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0pdkpef",
+      "note": "#12 Core parses HTML by the pinned WHATWG algorithm, with parse_"
+    },
+    {
+      "at": "2026-11-15T03:46:07.685Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0pdkpef",
+      "note": "#11 Deeply nested XML parses and drops without hitting the typed"
+    },
+    {
+      "at": "2026-11-15T03:46:06.777Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0pdkpef",
+      "note": "#10 cbor.to_bytes and cbor.decode<[U8]> round-trip typed records"
+    },
+    {
+      "at": "2026-11-15T03:46:05.869Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c00zrgpr",
+      "note": "#11 A lazy map whose callback fails propagates the failure: the "
+    },
+    {
+      "at": "2026-11-15T03:44:55.682Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:44:54.721Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c04pj0wn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:44:53.825Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0s9rdnu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:44:52.952Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0mhdm27",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T03:44:51.469Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c04pj0wn",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-15T03:44:49.977Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0s9rdnu",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:44:44.098Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:44:43.083Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0mhdm27",
+      "note": "#2: proof; was: D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1 and D-SERVICE-BATCH1 (all A) are built in core.service: a worker is its function, run once per message in order, and tree.send takes only its messa"
+    },
     {
       "at": "2026-11-15T03:44:41.909Z",
       "by": "TowerKeeper-1",
