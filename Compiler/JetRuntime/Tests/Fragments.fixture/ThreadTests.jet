@@ -33,19 +33,21 @@ thread_test_require: fn(ok: Bool) {
 }
 
 thread_test_identity: fn() {
+    tid := I64{0}
     #Unsafe("gettid verifies identity without trusting the TCB under test") {
-        tid: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        thread_test_require(sync_load(thread_base() + I64{8}) == tid)
+        tid = os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+    thread_test_require(sync_load(thread_base() + I64{8}) == tid)
 }
 
 #Export(c) jet_rt_thread_fixture_parent: fn() -> I64 { thread_base() }
 
 #Export(c) jet_rt_thread_fixture_inherited_base: fn(scratch: I64, expected: I64) {
+    status := I64{0}
     #Unsafe("ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced") {
-        status: os_syscall_i64(I64{158}, I64{4100}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-        thread_test_require(status == I64{0} && sync_load(scratch) == expected)
+        status = os_syscall_i64(I64{158}, I64{4100}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
+    thread_test_require(status == I64{0} && sync_load(scratch) == expected)
 }
 
 #Export(c) jet_rt_thread_fixture_attached_child: fn(parent: I64) -> I64 {

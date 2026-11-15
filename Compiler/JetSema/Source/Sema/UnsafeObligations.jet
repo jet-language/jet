@@ -15,6 +15,27 @@ SemaGateModule: struct {
     // single program, Core, compiler-private sources); empty: no kernel file.
     memory_kernel: [String]?{None}
     expert: Bool?{None}
+    // The owning package's loader identity ("" for none); the kernel address
+    // rule reads it (sema_unsafe_runtime_package).
+    package_identity: String{""}
+    // A composed runtime unit's sources (sema_unsafe_unit_map): the kernel
+    // rule reads each operation's own source path, not the unit's.
+    unit: SemaUnitMap?{None}
+}
+
+// One source of a composed unit: its path as its `// [unit source: PATH]`
+// mark names it, the byte offset where its first line starts, and that
+// line's number in the unit.
+SemaUnitSource: struct {
+    path: String
+    start: Int
+    line: Int
+}
+
+SemaUnitMap: struct {
+    sources: [SemaUnitSource]
+    // The byte offset each unit line starts at.
+    line_starts: [Int]
 }
 
 UnsafeInspection: struct {
@@ -60,6 +81,103 @@ SemaUnsafeOperation: struct {
     address: [String]{[String]{}}
 }
 
+// How a raw memory operation is written: a method on any receiver
+// (`pointer.offset(1)`, `mem.alloc_raw(…)`), a `core.mem` call only
+// (`mem.copy(…)`), or a direct call of one of the runtime's raw intrinsics
+// (JetBackend Source/OS/Linux.jet).
+SEMA_RAW_METHOD: "method"
+SEMA_RAW_MEM: "mem"
+SEMA_RAW_CALL: "call"
+
+// One raw memory operation: the name it is written with (every name it
+// starts when `prefix`), its form, the kind an operation of it reports (the
+// written name when empty), the obligations its gate proves, and for a
+// call, how many leading arguments are addresses. A system call row counts
+// only when its first argument is one of `syscalls`: a number or an
+// `OS_SYS_` constant of the memory family.
+SemaRawOperation: struct {
+    name: String
+    form: String
+    prefix: Bool
+    kind: String
+    required: [String]
+    pointers: Int
+    syscalls: [String]
+}
+
+// Every raw memory operation sema reads: the obligation pass discharges the
+// rows with obligations, and the memory kernel rule (E3113) refuses each row
+// outside a package's kernel files. Docs/spec/safety.md's ratchet spots the
+// same families in text.
+SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
+    {name: "volatile_read", form: SEMA_RAW_METHOD, prefix: false, kind: "volatile_read", required: [String]{"valid_ptr", "aligned"}, pointers: 0, syscalls: [String]{}},
+    {name: "volatile_write", form: SEMA_RAW_METHOD, prefix: false, kind: "volatile_write", required: [String]{"valid_ptr", "aligned", "no_alias"}, pointers: 0, syscalls: [String]{}},
+    {name: "cast_ptr", form: SEMA_RAW_METHOD, prefix: false, kind: "pointer_cast", required: [String]{"valid_ptr", "aligned"}, pointers: 0, syscalls: [String]{}},
+    {name: "alloc_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "free_raw", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "byte_offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "fill", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "window", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "address_of", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    // Raw reads and writes, byte copies and moves, atomic words.
+    {name: "os_load_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_store_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_copy", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 2, syscalls: [String]{}},
+    {name: "os_move_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 2, syscalls: [String]{}},
+    {name: "os_fill_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_cas_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_swap_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_fetch_", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    // A call of a native code address.
+    {name: "os_call", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    // Mappings: the wrappers, and a raw system call of the memory family
+    // (mmap 9, mprotect 10, munmap 11, mremap 25, madvise 28, memfd_create 319).
+    {name: "os_map", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "os_unmap", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_protect", form: SEMA_RAW_CALL, prefix: false, kind: "", required: [String]{}, pointers: 1, syscalls: [String]{}},
+    {name: "os_syscall", form: SEMA_RAW_CALL, prefix: true, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{"9", "10", "11", "25", "28", "319", "OS_SYS_MMAP", "OS_SYS_MPROTECT", "OS_SYS_MUNMAP", "OS_SYS_MREMAP", "OS_SYS_MADVISE", "OS_SYS_MEMFD_CREATE", "OS_SYS_BRK"}},
+}
+
+// The operation of SEMA_UNSAFE_RAW_OPERATIONS the method call
+// `receiver.method(args)` performs, pushed to `out`; nothing for any other.
+sema_unsafe_method_operation: fn(method: String, receiver: Expr, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+    loop row in SEMA_UNSAFE_RAW_OPERATIONS {
+        if row.form == SEMA_RAW_CALL || method != row.name -> next
+        if row.form == SEMA_RAW_MEM && !sema_unsafe_mem_receiver(receiver) -> next
+        out.push(SemaUnsafeOperation{kind: if row.kind == "" -> method else -> row.kind, span: span, required: row.required, address: sema_unsafe_operation_roots(method, receiver, args)})
+        return
+    }
+}
+
+// The operation of SEMA_UNSAFE_RAW_OPERATIONS the direct call `name(args)`
+// performs, pushed to `out` with the roots of its leading address arguments;
+// nothing for any other call.
+sema_unsafe_call_operation: fn(name: String, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+    loop row in SEMA_UNSAFE_RAW_OPERATIONS {
+        if row.form != SEMA_RAW_CALL -> next
+        if !(if row.prefix -> name.starts_with(row.name) else -> name == row.name) -> next
+        if row.syscalls.len() > 0 && (args.len() == 0 || !row.syscalls.contains(sema_unsafe_syscall_name(args[0].expr))) -> next
+        roots := [String]{}
+        loop index in 0..<row.pointers {
+            if index < args.len() -> sema_unsafe_address_roots(args[index].expr, roots)
+        }
+        out.push(SemaUnsafeOperation{kind: if row.kind == "" -> name else -> row.kind, span: span, required: row.required, address: roots})
+        return
+    }
+}
+
+// A system call's number as written: a literal, `I64{n}`, or an `OS_SYS_`
+// constant; empty for any other expression.
+sema_unsafe_syscall_name: fn(expression: Expr) -> String Never! {
+    if expression == .Int(value, _, _, _, _) -> return "{value}"
+    if expression == .Ident(name, _, _) -> return name
+    if expression == .Paren(inner, _, _) -> return sema_unsafe_syscall_name(inner)
+    if expression == .TypedLit(_, .Value(inner), _, _) -> return sema_unsafe_syscall_name(inner)
+    ""
+}
+
 sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspection Never! {
     result := UnsafeInspection{gates: [], diagnostics: []}
     loop row in modules {
@@ -91,15 +209,21 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
             }
         }
         if row.memory_kernel == .Val(kernel) {
-            within: sema_unsafe_path_within(path, kernel)
-            if within {
-                loop item in row.program.items -> sema_unsafe_kernel_item(item, row.program, row.source, result)
-            }
-            if !within {
-                loop gate in result.gates {
-                    if gate.source != row.source -> next
-                    loop operation in gate.operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span)
-                    loop operation in gate.memory_operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span)
+            if row.unit == .Val(unit) -> sema_unsafe_unit_kernel(row, unit, path, kernel, result) else {
+                within: sema_unsafe_path_within(path, kernel)
+                // The runtime's address API (its word, byte, sync and
+                // allocator leaves) is the memory internals the runtime's
+                // own review vets; until it hands out owners and views, the
+                // kernel address rule (E3114) holds for every other package.
+                if within && !sema_unsafe_runtime_package(row.package_identity) {
+                    loop item in row.program.items -> sema_unsafe_kernel_item(item, row.program, row.source, result)
+                }
+                if !within {
+                    loop gate in result.gates {
+                        if gate.source != row.source -> next
+                        loop operation in gate.operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                        loop operation in gate.memory_operations -> sema_unsafe_memory_refusal(result, row.source, path, kernel.len() == 0, operation.kind, operation.span, "")
+                    }
                 }
             }
         }
@@ -124,11 +248,88 @@ sema_unsafe_path_within: fn(path: String, prefixes: [String]) -> Bool Never! {
 }
 
 // A raw memory operation in a package file `policy.memory` does not name: the
-// fix names the safe type that replaces it, then the kernel field.
-sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span) Never! {
+// fix names the safe type that replaces it, then the kernel field. `at` names
+// the operation's own source and line in the headline when the file is a
+// composed unit, whose location is the unit's.
+sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span, at: String) Never! {
     safe: if kind == "alloc_raw" || kind == "free_raw" -> "hold the memory in a `[T]` list or an owner a kernel file hands out" else -> "read and write through a `[T]` list or a `View<T>` a kernel owner hands out"
     field: if no_kernel -> "name the package's kernel files in `package.jet`: `policy: {{ memory: .Kernel([\"{path}\"]) }}`" else -> "add `{path}` to `policy.memory` in `package.jet`"
-    sema_unsafe_diagnostic(result, source, "E3113", Val(span), "`{kind}` is a raw memory operation outside the package's memory kernel", "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.", "Outside the kernel, {safe}; to make `{path}` a kernel file, {field}.")
+    site: if at == "" -> "" else -> " at {at}"
+    result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional("E3113", Val(span), "`{kind}`{site} is a raw memory operation outside the package's memory kernel", "Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.", "Outside the kernel, {safe}; to make `{path}` a kernel file, {field}.")})
+}
+
+// The `// [unit source: PATH]` line a composed runtime unit
+// (Toolchain/RuntimePack.jet compose_unit, Tools/agent/LaneCheck.jet
+// assemble_runtime) writes before each source it holds. The composer keeps
+// every line of a source, a dropped import as an empty line, so a source's
+// line numbers count from the line after its mark.
+SEMA_UNSAFE_UNIT_SOURCE_MARK: "// [unit source: "
+
+// True for the runtime's own packages (SEMA_GUEST_RUNTIME_PACKAGES), the
+// only ones whose unit marks name sources and whose kernels keep an address
+// API.
+sema_unsafe_runtime_package: fn(package_identity: String) -> Bool Never! {
+    loop prefix in SEMA_GUEST_RUNTIME_PACKAGES {
+        if package_identity.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// The unit map of a runtime package file whose `text` carries unit source
+// marks; None for any other file, so no other package's comment can rename
+// where its operations stand.
+sema_unsafe_unit_map: fn(package_identity: String, text: String) -> SemaUnitMap? Never! {
+    if !sema_unsafe_runtime_package(package_identity) || !text.contains(SEMA_UNSAFE_UNIT_SOURCE_MARK) -> return None
+    unit := SemaUnitMap{sources: [SemaUnitSource]{}, line_starts: [Int]{}}
+    offset := 0
+    loop line in text.split("\n") {
+        unit.line_starts.push(offset)
+        offset += line.count_bytes() + 1
+        if line.starts_with(SEMA_UNSAFE_UNIT_SOURCE_MARK) && line.ends_with("]") {
+            unit.sources.push(SemaUnitSource{path: line.removeprefix(SEMA_UNSAFE_UNIT_SOURCE_MARK).removesuffix("]"), start: offset, line: unit.line_starts.len() + 1})
+        }
+    }
+    Val(unit)
+}
+
+// The index of the last entry of `starts` at or before `offset`; None before
+// the first.
+sema_unsafe_last_at: fn(starts: [Int], offset: Int) -> Int? Never! {
+    low := 0
+    high := starts.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if starts[middle] <= offset -> low = middle + 1 else -> high = middle
+    }
+    if low == 0 -> return None
+    Val(low - 1)
+}
+
+// A composed unit holds many sources: each raw operation answers to the
+// source it stands in, and a refusal names that source and its line. Only a
+// runtime package composes units, so the kernel address rule never reads one.
+sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String, kernel: [String], result: &UnsafeInspection) Never! {
+    starts: loop source in unit.sources -> source.start
+    loop gate in result.gates {
+        if gate.source != row.source -> next
+        loop operation in gate.operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+        loop operation in gate.memory_operations -> sema_unsafe_unit_refusal(result, row.source, unit, starts, path, kernel, operation.kind, operation.span)
+    }
+}
+
+// E3113 for a raw operation of a composed unit whose own source is no kernel
+// file, naming that source and line; one in the unit's import header answers
+// to the unit's own `path`.
+sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: SemaUnitMap, starts: [Int], path: String, kernel: [String], kind: String, span: Span) Never! {
+    index: sema_unsafe_last_at(starts, span.start) ?? -1
+    if index < 0 {
+        sema_unsafe_memory_refusal(result, source, path, kernel.len() == 0, kind, span, "")
+        return
+    }
+    owner: unit.sources[index]
+    if sema_unsafe_path_within(owner.path, kernel) -> return
+    line: (sema_unsafe_last_at(unit.line_starts, span.start) ?? 0) + 2 - owner.line
+    sema_unsafe_memory_refusal(result, source, owner.path, kernel.len() == 0, kind, span, "{owner.path}:{line}")
 }
 
 // A kernel file hands out owners and views, never raw addresses. Code outside
@@ -780,30 +981,12 @@ sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) N
             sema_unsafe_expr_operations(inner, out)
         }
         .MethodCall(receiver, method, span, _, _, args, _) -> {
-            if method == {
-                "volatile_read" -> {
-                    out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"], address: sema_unsafe_operation_roots(method, receiver, args)})
-                }
-                "volatile_write" -> {
-                    out.push(SemaUnsafeOperation{kind: "volatile_write", span: span, required: ["valid_ptr", "aligned", "no_alias"], address: sema_unsafe_operation_roots(method, receiver, args)})
-                }
-                "cast_ptr" -> {
-                    out.push(SemaUnsafeOperation{kind: "pointer_cast", span: span, required: ["valid_ptr", "aligned"], address: sema_unsafe_operation_roots(method, receiver, args)})
-                }
-                "alloc_raw" | "free_raw" | "offset" | "byte_offset" -> {
-                    out.push(SemaUnsafeOperation{kind: method, span: span, required: [String]{}, address: sema_unsafe_operation_roots(method, receiver, args)})
-                }
-                "copy" | "fill" | "window" | "address_of" -> {
-                    if receiver == .Ident(alias, _, _) {
-                        if alias == "mem" -> out.push(SemaUnsafeOperation{kind: method, span: span, required: [String]{}, address: sema_unsafe_operation_roots(method, receiver, args)})
-                    }
-                }
-                else -> {}
-            }
+            sema_unsafe_method_operation(method, receiver, args, span, out)
             sema_unsafe_expr_operations(receiver, out)
             loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
         }
         .Call(call, _) -> {
+            sema_unsafe_call_operation(call.name, call.args, call.name_span, out)
             loop argument in call.args -> sema_unsafe_expr_operations(argument.expr, out)
         }
         .Str(parts, _, _) -> {

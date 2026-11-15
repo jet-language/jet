@@ -79,6 +79,9 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.file(b.host(bare), flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
         runtime.reads("JetFoundation/Source/Registry/RuntimeInterface.jet")
+        // The backend's package.jet beside its JetBackend/Source tree: its
+        // `policy.memory` is the kernel of the backend sources the unit holds.
+        runtime.reads("JetBackend/package.jet")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("{RUNTIME_DIR}/IDENTITY", flag: "--identity=")

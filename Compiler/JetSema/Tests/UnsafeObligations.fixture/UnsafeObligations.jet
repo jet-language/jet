@@ -1,7 +1,7 @@
 // Unsafe obligations over the compiler's own sources.
 use jet_foundation.[AST_NODE_GENERATED, Expr, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Type]
 use jet_parser.[parse_source]
-use jet_sema.[SemaGateModule, SemaUnsafeOperation, UnsafeInspection, sema_unsafe_expr_operations, sema_unsafe_inspect]
+use jet_sema.[SemaGateModule, SemaUnsafeOperation, UnsafeInspection, sema_unsafe_expr_operations, sema_unsafe_inspect, sema_unsafe_unit_map]
 
 unsafe_test_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("UnsafeObligations: {message}")
@@ -54,6 +54,25 @@ run: fn() Never! {
     unsafe_test_require(no_kernel.diagnostics.len() == 2 && no_kernel.diagnostics[0].diagnostic.code == "E3113", "a package naming no kernel refuses raw pointers")
     single_program: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("app.jet")}], GateSet{})
     unsafe_test_require(single_program.diagnostics.len() == 0, "a single program is its own kernel")
+    // The runtime's raw intrinsics are raw memory operations too, a system
+    // call only when it maps memory (mmap is 9, exit 231).
+    intrinsics: parse_source("run: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p)\nos_store_u8(p, I64{{1}})\n_ := os_syscall_i64(I64{{9}}, I64{{0}})\n_ := os_syscall_i64(I64{{231}}, I64{{1}})\nos_copy_ascending_i64(p, q, n) }} }}".bytes())
+    os_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(os_refused.diagnostics.len() == 4, "each raw intrinsic outside the kernel is refused: {os_refused.diagnostics:Debug}")
+    loop refused in os_refused.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3113", "raw intrinsic refusal code")
+    unsafe_test_require(os_refused.diagnostics[0].diagnostic.what.contains("`os_load_i64`") && os_refused.diagnostics[2].diagnostic.what.contains("`os_syscall_i64`"), "the intrinsic is named")
+    os_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: intrinsics.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(os_kernel.diagnostics.len() == 0, "a kernel file holds raw intrinsics")
+    // A composed runtime unit answers per source: its marks name each
+    // source, and a refusal names the source's own path and line.
+    unit_text: "\n// [unit source: R/Kernel.jet]\nkeep: fn() {{ #Unsafe(\"live\") {{ x := os_load_i64(p) }} }}\n// [unit source: R/Host.jet]\n\nrun: fn() {{ #Unsafe(\"live\") {{ y := os_load_i64(p) }} }}\n"
+    unit_parsed: parse_source(unit_text.bytes())
+    unit_map: sema_unsafe_unit_map("package:11:jet_runtime:", unit_text) ?? panic("UnsafeObligations: a runtime unit maps its sources")
+    unsafe_test_require(unit_map.sources.len() == 2 && unit_map.sources[1].path == "R/Host.jet" && unit_map.sources[1].line == 5, "unit sources and their first lines")
+    unsafe_test_require(sema_unsafe_unit_map("package:3:app:", unit_text) == None, "another package's marks rename nothing")
+    unit_refused: sema_unsafe_inspect([SemaGateModule{source: "unit.jet", program: unit_parsed.program, policy_path: Val("unit.jet"), memory_kernel: Val([String]{"R/Kernel.jet"}), unit: Val(unit_map)}], GateSet{})
+    unsafe_test_require(unit_refused.diagnostics.len() == 1 && unit_refused.diagnostics[0].diagnostic.code == "E3113", "only the non-kernel source is refused: {unit_refused.diagnostics:Debug}")
+    unsafe_test_require(unit_refused.diagnostics[0].diagnostic.what.starts_with("`os_load_i64` at R/Host.jet:2 is") && unit_refused.diagnostics[0].diagnostic.fix.contains("`R/Host.jet`"), "the refusal names the source and line: {unit_refused.diagnostics:Debug}")
     // A kernel file's public function may not carry a caller's address to a
     // raw operation, nor may a kernel record's public field; a `priv` function,
     // a `priv` field and an `#Unsafe` function may.
@@ -63,6 +82,13 @@ run: fn() Never! {
     unsafe_test_require(boundary.diagnostics.len() == 2, "one refusal per caller-chosen address: {boundary.diagnostics:Debug}")
     loop refused in boundary.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3114", "kernel address refusal code")
     unsafe_test_require(boundary.diagnostics[0].diagnostic.what.contains("`peek`") && boundary.diagnostics[1].diagnostic.what.contains("`Cell.base`"), "the parameter and the public field are named")
+    // The runtime package's kernel is the address API itself: its public
+    // functions take caller addresses by design, so only its sources answer
+    // E3113; another package's same file still answers E3114.
+    runtime_kernel: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"}), package_identity: "package:11:jet_runtime:0.0.1"}], GateSet{})
+    unsafe_test_require(runtime_kernel.diagnostics.len() == 0, "the runtime package's kernel takes caller addresses: {runtime_kernel.diagnostics:Debug}")
+    other_kernel: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"}), package_identity: "package:3:app:0.0.1"}], GateSet{})
+    unsafe_test_require(other_kernel.diagnostics.len() == 2 && other_kernel.diagnostics[0].diagnostic.code == "E3114", "another package's kernel answers E3114: {other_kernel.diagnostics:Debug}")
     invocation: GateSet{allowed: [PolicyKey.Unsafe]}
     declaration: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}
     refusal: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], invocation)

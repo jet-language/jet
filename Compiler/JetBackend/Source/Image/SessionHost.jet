@@ -53,7 +53,10 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     // command, reply, output, errors: [read end, write end] each.
     pipes := [Int]{}
     loop _ in 0..<4 {
-        ends: x64_comptime_pipe(scratch)
+        ends := [Int]{}
+        #Unsafe("the scratch mapping is the child's own, made above") {
+            ends = x64_comptime_pipe(scratch)
+        }
         if ends.len() != 2 {
             loop fd in pipes -> x64_comptime_close_fd(fd)
             x64_comptime_close(child)
@@ -150,14 +153,10 @@ x64_comptime_end_text: fn(child: X64ComptimeChild, when: String) -> String Never
     "the comptime child ended {when} (wait status {child.status})"
 }
 
-x64_comptime_pipe: fn(scratch: Int) -> [Int] {
-    result := 0
-    #Unsafe("pipe2 writes two descriptors into our scratch page") {
-        result = os_syscall(293, scratch, 524288, 0, 0, 0, 0)
-    }
+#Unsafe("pipe2 writes two descriptors into the first word of the caller's scratch page") x64_comptime_pipe: fn(scratch: Int) -> [Int] {
+    result: os_syscall(293, scratch, 524288, 0, 0, 0, 0)
     if os_failed(result) -> return [Int]{}
-    packed := 0
-    #Unsafe("pipe2 wrote the scratch page's first word") { packed = os_load_word(scratch) }
+    packed: os_load_word(scratch)
     ends := [Int]{}
     lows: [Int]{packed.bit_and(4294967295), (packed >> 32).bit_and(4294967295)}
     loop low in lows {
@@ -180,7 +179,7 @@ x64_comptime_close_fd: fn(fd: Int) {
 
 // Writes all of `bytes` to `fd` through the `size`-byte buffer at `buffer`;
 // 0 or a failed call's result.
-x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
+#Unsafe("the caller owns the `size` bytes at `buffer`, a multiple of 8") x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
     at := 0
     loop at < bytes.len() {
         count: if bytes.len() - at < size -> bytes.len() - at else -> size
@@ -200,9 +199,12 @@ x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int 
 // Sends one frame and its payload.
 x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bool {
     if child.pid <= 0 -> return false
-    error := x64_comptime_write_all(child.command, frame, child.scratch + 4096, X64_COMPTIME_BUFFER)
-    if error == 0 && payload.len() > 0 {
-        error = x64_comptime_write_all(child.command, payload, child.scratch + 4096, X64_COMPTIME_BUFFER)
+    error := 0
+    #Unsafe("the buffer is the child's scratch mapping past its first page") {
+        error = x64_comptime_write_all(child.command, frame, child.scratch + 4096, X64_COMPTIME_BUFFER)
+        if error == 0 && payload.len() > 0 {
+            error = x64_comptime_write_all(child.command, payload, child.scratch + 4096, X64_COMPTIME_BUFFER)
+        }
     }
     if error == 0 -> return true
     // The child is gone; its end is what its exit says.
@@ -222,19 +224,17 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
     poll: child.scratch
     loop bytes.len() < count {
         // pollfd {fd: i32, events: POLLIN, revents}; a closed (-1) output is skipped.
-        #Unsafe("the poll set is our scratch page's first three entries") {
+        ready := 0
+        #Unsafe("the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them") {
             os_store_word(poll, child.reply.bit_and(4294967295).bit_or(1 << 32))
             os_store_word(poll + 8, child.output.bit_and(4294967295).bit_or(1 << 32))
             os_store_word(poll + 16, child.errors.bit_and(4294967295).bit_or(1 << 32))
-        }
-        started: x64_comptime_clock(child.scratch)
-        ready := 0
-        #Unsafe("poll reads and writes the three entries of our scratch page") {
+            started: x64_comptime_clock(child.scratch)
             ready = os_syscall(7, poll, 3, child.budget, 0, 0, 0)
-        }
-        if child.budget >= 0 {
-            spent: x64_comptime_clock(child.scratch) - started
-            child.budget = if child.budget > spent -> child.budget - spent else -> 0
+            if child.budget >= 0 {
+                spent: x64_comptime_clock(child.scratch) - started
+                child.budget = if child.budget > spent -> child.budget - spent else -> 0
+            }
         }
         if ready == -4 -> next
         if os_failed(ready) {
@@ -265,7 +265,9 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
                 x64_comptime_reap(child, false)
                 return None
             }
-            x64_comptime_take(child.scratch + 4096, moved, bytes)
+            #Unsafe("os_read just wrote `moved` bytes past the scratch page's first page") {
+                x64_comptime_take(child.scratch + 4096, moved, bytes)
+            }
         }
     }
     Val(bytes)
@@ -312,10 +314,12 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
         }
         return false
     }
-    if errors {
-        x64_comptime_take(child.scratch + 4096, moved, child.stderr)
-    } else {
-        x64_comptime_take(child.scratch + 4096, moved, child.stdout)
+    #Unsafe("os_read just wrote `moved` bytes past the scratch page's first page") {
+        if errors {
+            x64_comptime_take(child.scratch + 4096, moved, child.stderr)
+        } else {
+            x64_comptime_take(child.scratch + 4096, moved, child.stdout)
+        }
     }
     true
 }
@@ -323,20 +327,14 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
 // Appends the `count` bytes at `address` (in our mapping) to `bytes`, a
 // byte at a time: shifting bytes out of a loaded word costs Int arithmetic
 // past the inline range on every word whose top bit is set.
-x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
-    #Unsafe("the bytes lie in our scratch mapping") {
-        loop at in 0..<count -> bytes.push(U8{os_load_byte(address + at).bit_and(255)})
-    }
+#Unsafe("the caller's `count` bytes at `address` lie in our mapping") x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
+    loop at in 0..<count -> bytes.push(U8{os_load_byte(address + at).bit_and(255)})
 }
 
 // Monotonic milliseconds.
-x64_comptime_clock: fn(scratch: Int) -> Int {
-    time := 0
-    #Unsafe("clock_gettime writes two words at scratch + 64, past the poll set") {
-        _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
-        time = os_load_word(scratch + 64) * 1000 + os_load_word(scratch + 72) /% 1000000
-    }
-    time
+#Unsafe("clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page") x64_comptime_clock: fn(scratch: Int) -> Int {
+    _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
+    os_load_word(scratch + 64) * 1000 + os_load_word(scratch + 72) /% 1000000
 }
 
 // Waits for the child (killing it first when `kill`), collecting what it

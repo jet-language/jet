@@ -3,7 +3,7 @@
 // no CLI reader re-scans source text to discover an unsafe operation.
 use {
     jet_foundation.[GateLedger, Diagnostic, Item, Program, ast_program, compiler_transfer_rows, diagnostic_with_source_path, gate_ledger_sort]
-    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect]
+    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, SemaUnitMap, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect, sema_unsafe_unit_map]
 }
 
 jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
@@ -12,7 +12,7 @@ jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraph
         index: doc.name_module_index
         if index < 0 || index >= graph.programs.len() || index >= registration.modules.len() -> next
         owner: registration.modules[index].package_identity
-        row := SemaGateModule{source: doc.path, program: graph.programs[index]}
+        row := SemaGateModule{source: doc.path, program: graph.programs[index], package_identity: owner}
         loop package in packages {
             if package.identity == owner {
                 row.policy_path = Val(jet_driver_display_path(package.root_path, doc.physical_path))
@@ -83,10 +83,11 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
     JetDriverGateQueryResult{source: source, ledger: ledger, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
 }
 
-// A module gate row's package display path and `policy.unsafe` /
+// A module gate row's package identity, display path and `policy.unsafe` /
 // `policy.expert` / `policy.memory` surface, then any host-supplied gate
 // policy for the package.
 jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
+    row.package_identity = package_identity
     loop package in packages {
         if package.identity != package_identity -> next
         row.policy_path = Val(jet_driver_display_path(package.root_path, physical_path))
@@ -110,8 +111,9 @@ jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompil
 // registration. Compiler-owned Core sources carry no package policy and
 // are not inspected. A row is keyed by the file's physical path, which its
 // refusals name as the gate's site; each diagnostic is reported against the
-// unit's own path. Each program's items move into its row for the read and
-// back after it.
+// unit's own path. A composed runtime unit's row also maps its sources, so
+// the memory kernel rule reads each operation's own file. Each program's
+// items move into its row for the read and back after it.
 jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
     modules := [SemaGateModule]{}
     owners := [Int]{}
@@ -123,8 +125,11 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
         physical := source
         root_index: load.source_units[unit_index].root_index
         file_index: load.source_units[unit_index].file_index
+        unit := SemaUnitMap?{None}
         if load.source_units[unit_index].source_origin == SemaSourceOrigin.Snapshot && root_index >= 0 && file_index >= 0 {
-            physical = request.authorized_sources.roots[root_index].files[file_index].path
+            file: request.authorized_sources.roots[root_index].files[file_index]
+            physical = file.path
+            unit = sema_unsafe_unit_map(load.modules[index].package_identity, file.source)
         }
         unit_paths[physical] = source
         program := ast_program()
@@ -134,6 +139,7 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
         program.no_prelude = load.modules[index].program.no_prelude
         row := SemaGateModule{source: physical, program: program.move()}
         jet_driver_gate_module_policy(row, request, load.packages, load.modules[index].package_identity, physical)
+        row.unit = unit.move()
         modules.push(row)
         owners.push(index)
     }

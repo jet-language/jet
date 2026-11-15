@@ -1,0 +1,8 @@
+Error [jet.RawMemoryOutsideKernel]: `os_load_i64` at Compiler/JetRuntime/Source/Host.jet:4 is a raw memory operation outside the package's memory kernel
+  --> tests/ui/E3113_runtime_unit_source_outside_kernel/run.jet:19:16
+    |
+ 19 |         return os_load_i64(address)
+    |                ^^^^^^^^^^^
+ Why: Raw memory operations stand only in the kernel files `policy.memory` names, so the package's memory safety is audited in one place.
+ Fix: Outside the kernel, read and write through a `[T]` list or a `View<T>` a kernel owner hands out; to make `Compiler/JetRuntime/Source/Host.jet` a kernel file, add `Compiler/JetRuntime/Source/Host.jet` to `policy.memory` in `package.jet`.
+More: jet-lang.dev/e/E3113

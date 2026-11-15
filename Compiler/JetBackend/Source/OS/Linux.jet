@@ -172,18 +172,16 @@ os_store_byte: fn(address: Int, value: Int) {
 // Copy `bytes` to `address`, then zero bytes up to the next multiple of 8,
 // so the destination must hold `bytes.len()` rounded up to 8 bytes (a
 // page-rounded mapping always does).
-os_copy_in: fn(address: Int, bytes: [U8]) {
+#Unsafe("the caller owns `bytes.len()` rounded up to 8 bytes at `address`") os_copy_in: fn(address: Int, bytes: [U8]) {
     os_copy_in_range(address, bytes, 0, bytes.len())
 }
 
 // Like os_copy_in, but borrowing one range avoids allocating image chunks.
 // A byte at a time: a whole word whose top bit is set is Int arithmetic past
 // the inline range.
-os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
-    #Unsafe("the caller owns the destination words") {
-        loop at in 0..<count -> os_store_byte(address + at, Int{bytes[start + at]})
-        loop at in count..<((count + 7) /% 8 * 8) -> os_store_byte(address + at, 0)
-    }
+#Unsafe("the caller owns `count` rounded up to 8 bytes at `address`") os_copy_in_range: fn(address: Int, bytes: [U8], start: Int, count: Int) {
+    loop at in 0..<count -> os_store_byte(address + at, Int{bytes[start + at]})
+    loop at in count..<((count + 7) /% 8 * 8) -> os_store_byte(address + at, 0)
 }
 
 // The call-code-address primitive: call the System V function at `address`

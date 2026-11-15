@@ -80,7 +80,11 @@ RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
 DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
 // The runtime's folder; every other `--tree` folder is its producer's.
 RUNTIME_TREE: "JetRuntime"
+// JetSema's unit map (UnsafeObligations.jet) reads this mark too.
 UNIT_SOURCE_MARK: "// [unit source: "
+// A package.jet's `policy: { memory: .Kernel([...]) }` list, and each path in it.
+MEMORY_KERNEL_FIELD: Regex{"\bmemory\s*:\s*\.\s*Kernel\s*\(\s*\[([^\]]*)\]"}
+QUOTED_PATH: Regex{"\"([^\"]*)\""}
 
 InventoryFile: struct {
     path: String
@@ -352,7 +356,10 @@ pack: fn(args: [String]) {
     tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{built_version(jet)}", out: absolute(flag(flags, "out"))}
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources := runtime_sources(manifest)
+    // Each source's package.jet names its memory kernel, which the unit's
+    // check reads (unit_kernel), so it is part of the pack's source.
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
+    loop directory in unit_packages(root, sources) -> source_paths.push("{directory}/package.jet")
     source_paths.extend(sources.move())
     in_package: fn(path: String) -> String { at(root, path) }
     source: inventory(source_paths, in_package)
@@ -582,15 +589,18 @@ core_import: fn(spec: String) -> Bool {
     target.starts_with("core.")
 }
 
-// The unit text of one source: its lines without imports. Each Core import
-// (a `use` line, or a row of a top-level `use { … }` block) not yet in
-// `uses` is added to it.
+// The unit text of one source: its lines with each import line left empty,
+// so a line of the source keeps its number counted from the unit source mark
+// (JetSema's unit map reads a raw operation's source line that way). Each
+// Core import (a `use` line, or a row of a top-level `use { … }` block) not
+// yet in `uses` is added to it.
 unit_body: fn(text: String, uses: &[String]) -> String {
     kept := [String]{}
     block := false
     depth := 0
     loop line in text.split("\n") {
         if block {
+            kept.push("")
             if depth == 0 && line.trim_end() == "}}" {
                 block = false
                 next
@@ -607,10 +617,12 @@ unit_body: fn(text: String, uses: &[String]) -> String {
             next
         }
         if depth > 0 {
+            kept.push("")
             if line.contains("]") -> depth = 0
             next
         }
         if line.starts_with("use ") {
+            kept.push("")
             if line.trim_end() == "use {{" {
                 block = true
                 next
@@ -622,6 +634,55 @@ unit_body: fn(text: String, uses: &[String]) -> String {
         kept.push(line.copy())
     }
     kept.join("\n")
+}
+
+// The package folder of each of `paths`: the folder of the package.jet
+// nearest above it inside the Compiler package, in first-seen order. A source
+// with none fails, so a step that cannot see a source's package.jet never
+// drops that package's memory kernel.
+unit_packages: fn(root: String, paths: [String]) -> [String] {
+    packages := [String]{}
+    loop path in paths {
+        directory := path.rpartition("/").head
+        loop directory != "" && directory != PACKAGE && !files.exists(at(root, "{directory}/package.jet")) -> directory = directory.rpartition("/").head
+        if directory == "" || directory == PACKAGE -> fail("`{path}` has no package.jet above it inside {PACKAGE}, so its memory kernel cannot be read")
+        if !packages.contains(directory) -> packages.push(directory.move())
+    }
+    packages
+}
+
+// The memory kernel of a unit of `paths`: every file `policy.memory` names
+// in each path's package.jet (unit_packages), by checkout path. A unit is one
+// file, so its kernel rule reads each raw operation's own source from the
+// unit source marks against this list.
+unit_kernel: fn(root: String, paths: [String]) -> [String] {
+    kernel := [String]{}
+    loop directory in unit_packages(root, paths) {
+        manifest: files.read(at(root, "{directory}/package.jet")) ?? fail("`{directory}/package.jet` cannot be read: {err}")
+        field: MEMORY_KERNEL_FIELD.match(manifest) ?? next
+        loop found in QUOTED_PATH.matches(field.groups[0]) {
+            entry: found.groups[0].removeprefix("./").removesuffix("/")
+            kernel.push("{directory}/{entry}")
+        }
+    }
+    kernel
+}
+
+// `manifest` with its one-line `policy.memory` field naming `kernel`
+// instead, or with a policy block naming it when it has none.
+unit_manifest: fn(manifest: String, kernel: [String]) -> String {
+    quoted: loop path in kernel -> "\"{path}\""
+    memory: "memory: .Kernel([{quoted.join(", ")}])"
+    lines := manifest.split("\n").to_list()
+    replaced := false
+    loop at in 0..<lines.len() {
+        field: lines[at].partition("memory:")
+        if field.sep == "" || !field.tail.contains(".Kernel(") -> next
+        lines[at] = "{field.head}{memory}{field.tail.partition("])").tail}"
+        replaced = true
+    }
+    if replaced -> return lines.join("\n")
+    "{manifest.trim_end()}\npolicy: {{\n    {memory}\n}}\n"
 }
 
 // A test unit's package.jet: the one language edition the driver accepts.
@@ -648,8 +709,10 @@ compose_unit: fn(root: String, out: String, fragments: [String]) -> String {
         text: files.read(at(root, path)) ?? fail("`{path}` cannot be read: {err}")
         bodies.push("{UNIT_SOURCE_MARK}{path}]\n{unit_body(text, uses)}")
     }
-    // Any fragment makes a test package.
-    package: if fragments.len() > 0 -> test_package(root) else -> files.read(at(root, RUNTIME_PACKAGE)) ?? fail("`{RUNTIME_PACKAGE}` cannot be read: {err}")
+    // Any fragment makes a test package; either answers to its sources'
+    // memory kernels.
+    manifest: if fragments.len() > 0 -> test_package(root) else -> files.read(at(root, RUNTIME_PACKAGE)) ?? fail("`{RUNTIME_PACKAGE}` cannot be read: {err}")
+    package: unit_manifest(manifest, unit_kernel(root, paths))
     files.create_dir_all(out) ?? fail("`{out}` cannot be created: {err}")
     unit := uses.move()
     unit.push("")
@@ -776,11 +839,11 @@ run: fn() {
     assert(unit_tests([String]{"out", "--tests", "World"}) == None)
 }
 
-#Test("a unit gathers each Core import once and drops the others") {
+#Test("a unit gathers each Core import once and blanks every import line") {
     uses := [String]{"use core.files"}
     body: unit_body("use core.files\nuse m: core.math\nuse jet_lexer.[\n    lex,\n]\nuse {{\n    core.sys\n    fs: core.files\n    jet_ir.[\n        Block,\n    ]\n}}\nmain: fn() {{}}\n", uses)
     assert_eq(uses, [String]{"use core.files", "use m: core.math", "use core.sys", "use fs: core.files"})
-    assert_eq(body, "main: fn() {{}}\n")
+    assert_eq(body, "\n\n\n\n\n\n\n\n\n\n\n\nmain: fn() {{}}\n")
     assert(core_import("core.text.[Text, Rune]"))
     assert(!core_import("jet_lexer.[lex]"))
     assert(!core_import("pub: jet.x"))
@@ -831,6 +894,25 @@ elf_with_symbols: fn(names: [String]) -> [U8] {
     put(b, shoff + 128 + 24, 8, 64)
     put(b, shoff + 128 + 32, 8, strings.len())
     b
+}
+
+#Test("a unit's package names its sources' memory kernels") {
+    kernel: [String]{"Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetBackend/Source/OS/Linux.jet"}
+    assert_eq(unit_manifest("name: \"jet_runtime\"\npolicy: {{\n    memory: .Kernel([\"Source/Alloc.jet\"]),\n}}\n", kernel), "name: \"jet_runtime\"\npolicy: {{\n    memory: .Kernel([\"Compiler/JetRuntime/Source/Alloc.jet\", \"Compiler/JetBackend/Source/OS/Linux.jet\"]),\n}}\n")
+    assert_eq(unit_manifest("name: \"jet_runtime_tests\"\n", kernel), "name: \"jet_runtime_tests\"\npolicy: {{\n    memory: .Kernel([\"Compiler/JetRuntime/Source/Alloc.jet\", \"Compiler/JetBackend/Source/OS/Linux.jet\"])\n}}\n")
+}
+
+#Test("a unit's kernel reads each source's own package, not the Compiler package") {
+    root: files.mkdtemp("runtime-pack-kernel") ?? panic("scratch: {err}")
+    files.create_dir_all(files.join(root, "JetRuntime/Source")) ?? panic("runtime folder: {err}")
+    files.create_dir_all(files.join(root, "JetBackend/Source/OS")) ?? panic("backend folder: {err}")
+    files.write(files.join(root, "package.jet"), "name: \"compiler\"\n") ?? panic("compiler manifest: {err}")
+    files.write(files.join(root, "JetRuntime/package.jet"), "name: \"jet_runtime\"\npolicy: {{\n    memory: .Kernel([\"Source/Alloc.jet\"]),\n}}\n") ?? panic("runtime manifest: {err}")
+    files.write(files.join(root, "JetBackend/package.jet"), "name: \"jet_backend\"\npolicy: {{\n    memory: .Kernel([\"./Source/OS/\"]),\n}}\n") ?? panic("backend manifest: {err}")
+    paths: [String]{"Compiler/JetBackend/Source/OS/Linux.jet", "Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/Host.jet"}
+    assert_eq(unit_packages(root, paths), [String]{"Compiler/JetBackend", "Compiler/JetRuntime"})
+    assert_eq(unit_kernel(root, paths), [String]{"Compiler/JetBackend/Source/OS", "Compiler/JetRuntime/Source/Alloc.jet"})
+    files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
 #Test("the Rust check reads ELF symbol tables itself") {

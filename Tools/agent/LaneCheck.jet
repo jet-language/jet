@@ -680,7 +680,7 @@ runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
 }
 
 // The runtime unit Compiler/Toolchain/RuntimePack.jet `unit` assembles: each listed source with its
-// `use` lines (and a multi-line `use x.[` continuation) dropped behind a
+// `use` lines (and a multi-line `use x.[` continuation) left empty behind a
 // `// [unit source: PATH]` line, after the distinct Core imports they named
 // and one blank line.
 assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
@@ -695,16 +695,13 @@ assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
         number := 0
         loop line in unblock_uses(texts[index]).split("\n") {
             number += 1
+            dropped: importing || line.starts_with("use ")
+            if importing && line.contains("]") -> importing = false
             if line.starts_with("use ") {
                 if core_use(line) && !uses.contains(line) -> uses.push(line.copy())
                 importing = line.contains("[") && !line.contains("]")
-                next
             }
-            if importing {
-                if line.contains("]") -> importing = false
-                next
-            }
-            body.push(line.copy())
+            body.push(if dropped -> "" else -> line.copy())
             origins.push(UnitLine{path: path.copy(), line: number})
         }
     }
@@ -779,12 +776,57 @@ runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, I
     dir: "{scratch}/runtime-unit.{sys.pid()}"
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
     manifest: files.read("{repo}/{RUNTIME_PACKAGE}") ?? return Ran{code: 1, text: "lane-check: cannot read {RUNTIME_PACKAGE}: {err}\n"}
-    files.write("{dir}/package.jet", manifest) ?? return Ran{code: 1, text: "lane-check: cannot write {dir}/package.jet: {err}\n"}
+    files.write("{dir}/package.jet", runtime_manifest(repo, manifest, unit.lines)) ?? return Ran{code: 1, text: "lane-check: cannot write {dir}/package.jet: {err}\n"}
     path: "{dir}/unit.jet"
     files.write(path, unit.text) ?? return Ran{code: 1, text: "lane-check: cannot write {path}: {err}\n"}
     term.eprint("lane-check: assembled runtime unit: {path}")
     ran: run_check(repo, jet, [String]{"check", path}, scratch)
     Ran{code: ran.code, text: runtime_locations(ran.text, path, unit.lines)}
+}
+
+// The runtime unit's package.jet, as Compiler/Toolchain/RuntimePack.jet
+// `unit_manifest` writes it: the runtime's `manifest` with its
+// `policy.memory` naming, by checkout path, the kernel files of the package
+// nearest above each of the unit's sources, so its kernel rule reads each
+// source's own policy.
+runtime_manifest: fn(repo: String, manifest: String, lines: [UnitLine]) -[FS]> String Never! {
+    kernel := [String]{}
+    seen := [String]{}
+    source := ""
+    loop origin in lines {
+        if origin.path == source -> next
+        source = origin.path.copy()
+        directory := source.rpartition("/").head
+        loop directory != "" && !files.exists("{repo}/{directory}/package.jet") -> directory = directory.rpartition("/").head
+        if directory == "" || seen.contains(directory) -> next
+        seen.push(directory.copy())
+        text: files.read("{repo}/{directory}/package.jet") ?? next
+        loop entry in kernel_entries(text) -> kernel.push("{directory}/{entry}")
+    }
+    quoted: loop path in kernel -> "\"{path}\""
+    memory: "memory: .Kernel([{quoted.join(", ")}])"
+    rows := [String]{}
+    replaced := false
+    loop line in manifest.split("\n") {
+        field: line.partition("memory:")
+        kernel_field: field.sep != "" && field.tail.contains(".Kernel(")
+        rows.push(if kernel_field -> "{field.head}{memory}{field.tail.partition("])").tail}" else -> line.copy())
+        if kernel_field -> replaced = true
+    }
+    if replaced -> return rows.join("\n")
+    "{manifest.trim_end()}\npolicy: {{\n    {memory}\n}}\n"
+}
+
+// The paths of a package.jet's one-line `memory: .Kernel([...])` field,
+// without a leading `./` or a trailing `/`.
+kernel_entries: fn(text: String) -> [String] Never! {
+    loop line in text.split("\n") {
+        if !line.trim_start().starts_with("memory:") || !line.contains(".Kernel(") -> next
+        parts: line.split("\"").to_list()
+        entries: loop at in 0..<(parts.len() /% 2) -> parts[2 * at + 1].removeprefix("./").removesuffix("/")
+        return entries
+    }
+    [String]{}
 }
 
 // The compiler output with each `--> unit.jet:LINE:COL` naming the listed
@@ -1109,17 +1151,17 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     files.remove_all(dir) ?? ()
 }
 
-#Test("the runtime unit drops imports behind source markers and maps locations back") {
+#Test("the runtime unit blanks imports behind source markers and maps locations back") {
     alloc: "use core.mem\nuse {{\n    jet_backend.[\n        os_store_i64,\n    ]\n    m: core.mem\n}}\nalloc: fn() {{}}\n"
     text: "use core.mem\nuse jet_runtime.Alloc\ntext: fn() {{}}\n"
     unit: assemble_runtime([String]{"R/Alloc.jet", "R/Text.jet"}, [String]{alloc, text})
-    assert_eq(unit.text, "use core.mem\nuse m: core.mem\n\n// [unit source: R/Alloc.jet]\n     \n \nalloc: fn() {{}}\n\n// [unit source: R/Text.jet]\ntext: fn() {{}}\n")
-    assert_eq(unit.lines.len(), 11)
-    assert_eq(unit.lines[6].path, "R/Alloc.jet")
-    assert_eq(unit.lines[6].line, 8)
-    assert_eq(unit.lines[9].line, 3)
+    assert_eq(unit.text, "use core.mem\nuse m: core.mem\n\n// [unit source: R/Alloc.jet]\n\n     \n\n\n\n\n \nalloc: fn() {{}}\n\n// [unit source: R/Text.jet]\n\n\ntext: fn() {{}}\n")
+    assert_eq(unit.lines.len(), 18)
+    assert_eq(unit.lines[11].path, "R/Alloc.jet")
+    assert_eq(unit.lines[11].line, 8)
+    assert_eq(unit.lines[16].line, 3)
     assert(core_use("use core.files") && core_use("use cf: core.files") && !core_use("use jet_backend.x") && !core_use("use a b: core.x"))
-    moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:10:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
+    moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:17:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
     assert_eq(moved, "Error [jet.UnknownFunction]: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
 }
 
