@@ -13,6 +13,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
+    core_identity_is,
 ]
 
 SemaNetworkHandleSpec: struct {
@@ -190,8 +191,8 @@ sema_network_handle_nominal_owner: fn(ty: Type) -> String? {
 // Rust `core_net_handle_dispatch_name`: the canonical `core.net` TCP handle
 // identities and their bare spellings project onto the method table.
 sema_network_handle_dispatch_name: fn(name: String) -> String? Never! {
-    if name == "TCPStream" || name == "<corelib>/core.net::TCPStream" -> return Val("TCPStream")
-    if name == "TCPListener" || name == "<corelib>/core.net::TCPListener" -> return Val("TCPListener")
+    if name == "TCPStream" || core_identity_is(name, "core.net", "TCPStream") -> return Val("TCPStream")
+    if name == "TCPListener" || core_identity_is(name, "core.net", "TCPListener") -> return Val("TCPListener")
     None
 }
 

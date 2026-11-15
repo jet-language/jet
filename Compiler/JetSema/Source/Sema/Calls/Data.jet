@@ -47,7 +47,7 @@ sema_data_source_type_name: fn(environment: SemaScopeEnvironment, program: SemaP
 }
 
 // The checked name of the type `leaf` that Core module `module_name`
-// declares (`<corelib>/core.data::DataJoin`); just `leaf` for a
+// declares (the identity of `core.data::DataJoin`); just `leaf` for a
 // compiler-owned row, or when the load holds no such declaration.
 sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
@@ -1028,7 +1028,7 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
         }
         return sema_data_check_encode(args[0].expr, value, [CallArg]{}, [Type]{}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    private_number: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0 && environment.module_name == "__core_encoding_stream"
+    private_number: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0
     if !private_number && !sema_data_literal_variant_valid(ty, variant) {
         diagnostics.push(sema_error("E0304", span, "`{type_name(ty)}` has no variant `{variant}`", "Dyn exposes closed compiler-owned literal variants", "check the variant name"))
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)

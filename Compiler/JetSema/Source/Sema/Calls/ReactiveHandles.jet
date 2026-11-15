@@ -15,6 +15,8 @@ use jet_foundation.[
     Type,
     expr_span,
     type_name,
+    core_identity_module,
+    core_record_leaf,
 ]
 
 sema_reactive_unit_type: fn() -> Type Never! {
@@ -233,12 +235,11 @@ sema_call_try_reactive_core_call: fn(module_name: String, member: String, args: 
 }
 
 // The handle owner a receiver names: the bare runtime handle, or the leaf of
-// its `core.reactive` declaration (`<corelib>/core.reactive::Signal`, the
-// type a written `Signal<Int>` resolves to).
+// its `core.reactive` declaration (the identity of `core.reactive::Signal`,
+// the type a written `Signal<Int>` resolves to).
 sema_reactive_type_name: fn(ty: Type) -> String Never! {
     owner: sema_expr_type_base_name(ty) ?? type_name(ty)
-    prefix: "<corelib>/core.reactive::"
-    if owner.starts_with(prefix) -> return owner.slice(prefix.len(), owner.len())
+    if core_identity_module(owner) == Val("core.reactive") -> return core_record_leaf(owner)
     owner
 }
 

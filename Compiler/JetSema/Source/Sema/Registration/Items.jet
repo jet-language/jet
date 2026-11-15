@@ -2815,7 +2815,7 @@ sema_registration_impl_on_trait: fn(definition: ImplDef) -> Diagnostic {
 sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     if !module_is_core(module_row.module_identity) -> return false
     loop row in CORE_SOURCE_OWNED_ROWS {
-        if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+        if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias -> next
         if sema_registration_core_handle_owner(row.module_name, name) -> return true
         if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
         loop owner in row.impl_types {
@@ -2841,7 +2841,7 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
         module_row: graph.modules[module_index]
         if !module_is_core(module_row.module_identity) -> next
         loop row in CORE_SOURCE_OWNED_ROWS {
-            if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+            if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias -> next
             row_owners := row.impl_types.copy()
             loop implementation in module_row.impls {
                 if sema_registration_core_handle_owner(row.module_name, implementation.target_type_name) && !row_owners.contains(implementation.target_type_name) -> row_owners.push(implementation.target_type_name.copy())

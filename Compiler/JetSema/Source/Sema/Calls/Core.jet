@@ -492,7 +492,7 @@ sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: S
     loop module_row_index in 0..<graph.modules.len() {
         if graph.modules[module_row_index].module_name != module_name || !module_is_core(graph.modules[module_row_index].module_identity) -> next
         loop owner in CORE_SOURCE_OWNED_ROWS {
-            if owner.module_name == module_name && owner.alias == graph.modules[module_row_index].core_source_alias && graph.modules[module_row_index].source_file == "<corelib>/{owner.path}" -> return Val(graph.modules[module_row_index].module_identity)
+            if owner.module_name == module_name && owner.alias == graph.modules[module_row_index].core_source_alias -> return Val(graph.modules[module_row_index].module_identity)
         }
     }
     return None
@@ -1501,11 +1501,9 @@ sema_call_core_shared_reject: fn(member: String, span: Span, diagnostics: &[Diag
 // The trusted Core body supplies a side-effect-free constructor. Ordinary
 // zero-argument call checking owns its failure/effect facts; this node only
 // changes the storage lifetime and preserves its declared Shared payload type.
+// A package's source cannot spell these members: the lexer refuses every
+// double-underscore name there (E0067), so no caller-module test is kept here.
 sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !module_is_core(environment.module_identity) {
-        diagnostics.push(sema_error("E0067", span, "`{member}` is reserved for Jet", "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "Rename it without the second leading underscore"))
-        return None
-    }
     if args.len() != 1 || type_args.len() != 0 -> return sema_call_core_shared_reject(member, span, diagnostics)
     if args[0].label != None || args[0].spread -> return sema_call_core_shared_reject(member, span, diagnostics)
     name: if args[0].expr == {

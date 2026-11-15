@@ -4085,7 +4085,9 @@ Text never implicitly decodes as an integer, float, or Boolean, except in
 text-native sources: environment variables, CSV cells, route and query
 parameters. `Dyn.Int` owns its exact integer even beyond machine range.
 `Dyn.Number` retains a parsed number's spelling; `.int()`, `.float()` and
-typed decoding check the destination range when reading it. `==` compares two
+typed decoding check the destination range when reading it. Any package,
+Core included, builds one directly only inside an audited `#Unsafe` region
+that vouches the text is a valid JSON number. `==` compares two
 `Dyn.Number` spellings exactly, while `equal_unordered` compares them by exact
 decimal value at any precision, never through binary64, so `1.0` equals
 `1.00`, `1e400` equals `10e399` and `-0.0` equals `0.0`, and a `Number` never
