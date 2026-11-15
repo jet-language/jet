@@ -3225,8 +3225,9 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // The local file read of `core.files.data.read`: the file's bytes become the
 // pending payload the next `snapshot` commits. An offline loader that holds a
 // last-good snapshot keeps it and reads nothing; a failed read is recorded in
-// the loader status.
-__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS]> [U8] Err!) DataError! -[FS]> {
+// the loader status. `read` only reads, so a program reaches `FS.Read`
+// through it and no other FS capability.
+__read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) DataError! -[FS.Read]> {
     if loader.cancelled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before read")))
     }

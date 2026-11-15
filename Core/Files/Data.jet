@@ -24,7 +24,7 @@ use {
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
 /// parses and commits it. A failed read is recorded in the loader status.
-read: fn<T>(loader: &DataLoader<T>) DataError! -[FS]> {
+read: fn<T>(loader: &DataLoader<T>) DataError! -[FS.Read]> {
     core.data.__read_file<T>(loader, fn(path) { Ok(files.read_bytes(path) ?? return Err("{err}")) })
 }
 

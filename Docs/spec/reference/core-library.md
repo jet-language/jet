@@ -4519,7 +4519,7 @@ file.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `read<T>(loader)` | `Unit DataError! -[FS]` | Read a local file loader's file under its limits and bind the bytes for the next `snapshot`; an offline loader with a last-good snapshot reads nothing. A missing file is an `IO` error. |
+| `read<T>(loader)` | `Unit DataError! -[FS.Read]` | Read a local file loader's file under its limits and bind the bytes for the next `snapshot`; an offline loader with a last-good snapshot reads nothing. A missing file is an `IO` error. |
 | `csv_reader<T>(reader, limits)` / `json_reader<T>(reader, limits)` | `DataStream<T> DataError!` | Decode a typed reader over a `FileReader` under limits. |
 | `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
 | `require_bridge(provider)` | `Unit DataError! -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
