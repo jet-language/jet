@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1454,
+  "total": 1471,
   "counts": {
     "Compiler": 656,
     "Core": 178,
     "Docs": 10,
     "Examples": 45,
     "Jetpack": 8,
-    "Tools": 11,
+    "Tools": 28,
     "tests": 546
   },
   "regions": [
@@ -5466,168 +5466,168 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 36,
+      "line": 38,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 40,
+      "line": 43,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 44,
+      "line": 47,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 51,
+      "line": 54,
       "column": 1,
       "reason": "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 57,
+      "line": 60,
       "column": 1,
       "reason": "`to` names `count` live, aligned, writable `T`s that hold no value to drop"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 67,
+      "line": 70,
       "column": 1,
       "reason": "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 75,
+      "line": 78,
       "column": 1,
       "reason": "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 83,
+      "line": 86,
       "column": 1,
       "reason": "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 89,
+      "line": 92,
       "column": 1,
       "reason": "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 101,
+      "line": 104,
       "column": 1,
       "reason": "`address` starts a mapping of `bytes` that the caller just made and alone owns"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 105,
+      "line": 108,
       "column": 1,
       "reason": "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 116,
+      "line": 119,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 124,
+      "line": 127,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 164,
+      "line": 167,
       "column": 1,
       "reason": "`pointer` and the T `count` elements past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 168,
+      "line": 171,
       "column": 1,
       "reason": "`pointer` and the address `bytes` past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 177,
+      "line": 180,
       "column": 1,
       "reason": "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 181,
+      "line": 184,
       "column": 1,
       "reason": "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 201,
+      "line": 204,
       "column": 9,
       "reason": "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 210,
+      "line": 213,
       "column": 5,
       "reason": "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 241,
+      "line": 244,
       "column": 13,
       "reason": "the region mapped these pages at reserve, and no block of it is used after close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 275,
+      "line": 278,
       "column": 9,
       "reason": "`next`'s bytes now belong to this block, so its release duty is this block's"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 304,
+      "line": 307,
       "column": 5,
       "reason": "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 309,
+      "line": 312,
       "column": 9,
       "reason": "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 360,
+      "line": 363,
       "column": 9,
       "reason": "the block's bytes went back to the allocator that served them"
     },
@@ -6603,6 +6603,125 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 56,
       "column": 5,
       "reason": "every append reads the first `op.size` of the 64 bytes `source` holds, and `source` neither grows nor drops while the appends run"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/direct/main.jet",
+      "line": 23,
+      "column": 9,
+      "reason": "each index is checked against the block's `count` words, and the block is released once, at the end of the turn"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/direct/main.jet",
+      "line": 45,
+      "column": 5,
+      "reason": "each index is checked against the block's `count` words, and each block is released once"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/direct/main.jet",
+      "line": 74,
+      "column": 5,
+      "reason": "both blocks hold WORDS words, each index is below WORDS, and each block is released once, at the end"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/direct/main.jet",
+      "line": 131,
+      "column": 9,
+      "reason": "each index is checked against the mapping's `count` words, and the region stays mapped until its close"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/direct/main.jet",
+      "line": 156,
+      "column": 5,
+      "reason": "the block holds `count` words, each index is below `count`, and the block is released once, at the end"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 14,
+      "column": 9,
+      "reason": "the block is used only through this owner, which releases it once, at close"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 24,
+      "column": 9,
+      "reason": "`at` is one of the owner's live words"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 31,
+      "column": 9,
+      "reason": "`at` is one of the owner's live words"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 38,
+      "column": 9,
+      "reason": "the owner keeps its `count` words alive while the View lives"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 45,
+      "column": 9,
+      "reason": "the owner's words are live I64s, which own nothing"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 53,
+      "column": 9,
+      "reason": "both owners hold at least `count` live I64s"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 61,
+      "column": 9,
+      "reason": "both owners hold `count` live I64s"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 74,
+      "column": 9,
+      "reason": "the fresh block takes the owner's words, and the old block is released once, here"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 88,
+      "column": 13,
+      "reason": "`base` came from `alloc_raw` at `claim` or `grow`, and the owner is spent here"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 122,
+      "column": 9,
+      "reason": "the region's pages stay mapped, private and writable until the owner closes it"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 132,
+      "column": 9,
+      "reason": "`at` is one of the mapping's words"
+    },
+    {
+      "package": "Tools",
+      "file": "Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet",
+      "line": 139,
+      "column": 9,
+      "reason": "`at` is one of the mapping's words"
     },
     {
       "package": "tests",
@@ -10439,9 +10558,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 10 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tools | 11 |
+| Tools | 28 |
 | tests | 546 |
-| **total** | **1454** |
+| **total** | **1471** |
 
 ### Regions
 
@@ -11192,30 +11311,30 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Jobs/Jobs.jet | 255:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
 | Core | Core/Jobs/Jobs.jet | 543:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
 | Core | Core/Jobs/Jobs.jet | 558:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
-| Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
-| Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
-| Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| Core | Core/Mem/Mem.jet | 51:1 | "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy" |
-| Core | Core/Mem/Mem.jet | 57:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
-| Core | Core/Mem/Mem.jet | 67:1 | "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append" |
-| Core | Core/Mem/Mem.jet | 75:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy" |
-| Core | Core/Mem/Mem.jet | 83:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
-| Core | Core/Mem/Mem.jet | 89:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
-| Core | Core/Mem/Mem.jet | 101:1 | "`address` starts a mapping of `bytes` that the caller just made and alone owns" |
-| Core | Core/Mem/Mem.jet | 105:1 | "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after" |
-| Core | Core/Mem/Mem.jet | 116:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
-| Core | Core/Mem/Mem.jet | 124:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
-| Core | Core/Mem/Mem.jet | 164:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 168:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 177:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
-| Core | Core/Mem/Mem.jet | 181:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
-| Core | Core/Mem/Mem.jet | 201:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
-| Core | Core/Mem/Mem.jet | 210:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
-| Core | Core/Mem/Mem.jet | 241:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
-| Core | Core/Mem/Mem.jet | 275:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
-| Core | Core/Mem/Mem.jet | 304:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
-| Core | Core/Mem/Mem.jet | 309:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
-| Core | Core/Mem/Mem.jet | 360:9 | "the block's bytes went back to the allocator that served them" |
+| Core | Core/Mem/Mem.jet | 38:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
+| Core | Core/Mem/Mem.jet | 43:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 47:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 54:1 | "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy" |
+| Core | Core/Mem/Mem.jet | 60:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
+| Core | Core/Mem/Mem.jet | 70:1 | "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append" |
+| Core | Core/Mem/Mem.jet | 78:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy" |
+| Core | Core/Mem/Mem.jet | 86:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
+| Core | Core/Mem/Mem.jet | 92:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
+| Core | Core/Mem/Mem.jet | 104:1 | "`address` starts a mapping of `bytes` that the caller just made and alone owns" |
+| Core | Core/Mem/Mem.jet | 108:1 | "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after" |
+| Core | Core/Mem/Mem.jet | 119:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
+| Core | Core/Mem/Mem.jet | 127:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
+| Core | Core/Mem/Mem.jet | 167:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 171:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 180:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
+| Core | Core/Mem/Mem.jet | 184:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
+| Core | Core/Mem/Mem.jet | 204:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
+| Core | Core/Mem/Mem.jet | 213:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
+| Core | Core/Mem/Mem.jet | 244:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
+| Core | Core/Mem/Mem.jet | 278:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
+| Core | Core/Mem/Mem.jet | 307:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
+| Core | Core/Mem/Mem.jet | 312:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
+| Core | Core/Mem/Mem.jet | 363:9 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 172:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 178:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
 | Core | Core/Net/Net.jet | 184:5 | "read the native IP address discriminant" |
@@ -11355,6 +11474,23 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tools | Tools/perf/asm-parity/memfill/run.jet | 54:5 | "the block holds LARGEST bytes and their room, every fill stays inside it, and the block is freed once after the passes" |
 | Tools | Tools/perf/asm-parity/rawword/run.jet | 47:5 | "the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes" |
 | Tools | Tools/perf/asm-parity/resize/run.jet | 56:5 | "every append reads the first `op.size` of the 64 bytes `source` holds, and `source` neither grows nor drops while the appends run" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/direct/main.jet | 23:9 | "each index is checked against the block's `count` words, and the block is released once, at the end of the turn" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/direct/main.jet | 45:5 | "each index is checked against the block's `count` words, and each block is released once" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/direct/main.jet | 74:5 | "both blocks hold WORDS words, each index is below WORDS, and each block is released once, at the end" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/direct/main.jet | 131:9 | "each index is checked against the mapping's `count` words, and the region stays mapped until its close" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/direct/main.jet | 156:5 | "the block holds `count` words, each index is below `count`, and the block is released once, at the end" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 14:9 | "the block is used only through this owner, which releases it once, at close" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 24:9 | "`at` is one of the owner's live words" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 31:9 | "`at` is one of the owner's live words" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 38:9 | "the owner keeps its `count` words alive while the View lives" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 45:9 | "the owner's words are live I64s, which own nothing" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 53:9 | "both owners hold at least `count` live I64s" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 61:9 | "both owners hold `count` live I64s" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 74:9 | "the fresh block takes the owner's words, and the old block is released once, here" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 88:13 | "`base` came from `alloc_raw` at `claim` or `grow`, and the owner is spent here" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 122:9 | "the region's pages stay mapped, private and writable until the owner closes it" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 132:9 | "`at` is one of the mapping's words" |
+| Tools | Tools/perf/codegen-ceiling/zero-cost/kernel/kernel.jet | 139:9 | "`at` is one of the mapping's words" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
