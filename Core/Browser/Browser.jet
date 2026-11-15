@@ -240,7 +240,7 @@ priv BrowserEngine: struct {
 
 // The id and closed fact of one BiDi resource (user context, browsing
 // context, frame, or intercept), shared by every copy of its handle.
-__BrowserScope: struct {
+priv BrowserScope: struct {
     id: String
     closed: Bool
 }
@@ -370,7 +370,7 @@ Browser: struct {
 
 BrowserContext: struct {
     __browser: Browser
-    __scope: Shared<__BrowserScope>
+    __scope: Shared<BrowserScope>
 
     page: fn(self) -[Net, Time]> BrowserPage BrowserError! { context_create_tab(self) }
 
@@ -394,8 +394,8 @@ BrowserContext: struct {
 
 BrowserPage: struct {
     __browser: Browser
-    __context: Shared<__BrowserScope>
-    __scope: Shared<__BrowserScope>
+    __context: Shared<BrowserScope>
+    __scope: Shared<BrowserScope>
 
     goto: fn(self, url: String) BrowserError! -[Env, Net, Time]> {
         page_live(self)
@@ -560,9 +560,9 @@ BrowserPage: struct {
 // A browsing-context frame (main or child). Listing frames never closes them.
 BrowserFrame: struct {
     __browser: Browser
-    __context: Shared<__BrowserScope>
-    __page: Shared<__BrowserScope>
-    __scope: Shared<__BrowserScope>
+    __context: Shared<BrowserScope>
+    __page: Shared<BrowserScope>
+    __scope: Shared<BrowserScope>
 
     close: fn(self) BrowserError! -[Net, Time]> {
         if scope_closed(self.__scope) -> return Ok()
@@ -581,8 +581,8 @@ BrowserFrame: struct {
 // A semantic BiDi locator: `accessibility`, `css`, or `innerText`.
 BrowserLocator: struct {
     __browser: Browser
-    __context: Shared<__BrowserScope>
-    __page: Shared<__BrowserScope>
+    __context: Shared<BrowserScope>
+    __page: Shared<BrowserScope>
     __kind: String
     __role: String
     __name: String
@@ -673,7 +673,7 @@ BrowserLocator: struct {
 
 BrowserIntercept: struct {
     __browser: Browser
-    __scope: Shared<__BrowserScope>
+    __scope: Shared<BrowserScope>
 
     remove: fn(self) BrowserError! -[Net, Time]> {
         if scope_closed(self.__scope) -> return Ok()
@@ -693,10 +693,10 @@ BrowserIntercept: struct {
 BrowserProtocol: struct {
     __browser: Browser
     __kind: String
-    __context: Shared<__BrowserScope>
-    __page: Shared<__BrowserScope>
+    __context: Shared<BrowserScope>
+    __page: Shared<BrowserScope>
     // The page's CDP session, asked of the driver on first use.
-    __session: Shared<__BrowserScope>
+    __session: Shared<BrowserScope>
 
     send: fn(self, method: String, params_json: String) -[Net, Time]> String BrowserError! {
         params: json.parse(params_json) ?? return Err(BrowserError{kind: "protocol"})
@@ -1647,26 +1647,26 @@ cdp_method_ok: fn(method: String) -> Bool Never! {
 
 // ---- Scopes, pages, and locators --------------------------------------------
 
-new_scope: fn(id: String) -> Shared<__BrowserScope> Never! {
-    Shared{__BrowserScope{id: id, closed: false}}
+new_scope: fn(id: String) -> Shared<BrowserScope> Never! {
+    Shared{BrowserScope{id: id, closed: false}}
 }
 
-scope_id: fn(scope: Shared<__BrowserScope>) -> String Never! {
+scope_id: fn(scope: Shared<BrowserScope>) -> String Never! {
     guard: scope.guard_read()
     guard.value.id
 }
 
-scope_closed: fn(scope: Shared<__BrowserScope>) -> Bool Never! {
+scope_closed: fn(scope: Shared<BrowserScope>) -> Bool Never! {
     guard: scope.guard_read()
     guard.value.closed
 }
 
-scope_close: fn(scope: Shared<__BrowserScope>) Never! {
+scope_close: fn(scope: Shared<BrowserScope>) Never! {
     guard := scope.guard_edit()
     guard.value.closed = true
 }
 
-priv scope_set_id: fn(scope: Shared<__BrowserScope>, id: String) Never! {
+priv scope_set_id: fn(scope: Shared<BrowserScope>, id: String) Never! {
     guard := scope.guard_edit()
     guard.value.id = id
 }

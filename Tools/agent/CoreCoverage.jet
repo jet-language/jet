@@ -57,6 +57,8 @@ EMBEDDED_PROGRAM: Regex{"\b\w+:\s*fn\b|\buse\s+(?:\x7B\s*)?(?:\w+\s*:\s*)?(?:cor
 
 PRIVATE_MODULE: "priv module"
 
+PRIVATE_TYPE: "priv type"
+
 // The token the lexer ends each interpolation expression with: no source token
 // holds a space, and the value an interpolation ends with is displayed.
 INTERPOLATION_END: "interpolation end"
@@ -643,9 +645,14 @@ compound_end: fn(tokens: [Token], start: Int) -> Int Never! {
 
 inside_private: fn(scopes: [Owner]) -> Bool Never! {
     loop scope in scopes {
-        if scope.kind == PRIVATE_MODULE -> return true
+        if scope.kind == PRIVATE_MODULE || scope.kind == PRIVATE_TYPE -> return true
     }
     false
+}
+
+// Whether the declaration named at `name` is `priv` or `priv(scope)`.
+declared_priv: fn(tokens: [Token], name: Int) -> Bool Never! {
+    token(tokens, name - 1) == "priv" || (token(tokens, name - 1) == ")" && token(tokens, name - 4) == "priv")
 }
 
 is_owner_kind: fn(value: String) -> Bool Never! {
@@ -663,19 +670,22 @@ paren_step: fn(value: String) -> Int Never! {
 
 bytes_between: fn(source: [U8], start: Int, end: Int) -> [U8] Never! { source[start..<end] }
 
-// Every declaration is public (D-VIS-MODULE1) unless it is `priv` or inside a `priv module`:
-// top-level functions, methods of structs, enums and impls, and the members of
-// a public inline module. Function types (`fn(Int) -> Int`), trait signatures
-// and functions local to a body are not inventoried.
+// Every declaration is public (D-VIS-MODULE1) unless it is `priv`, inside a
+// `priv module`, or a member of a `priv` type (its body and its impls in the
+// file): top-level functions, methods of structs, enums and impls, and the
+// members of a public inline module. Function types (`fn(Int) -> Int`), trait
+// signatures and functions local to a body are not inventoried.
 public_functions: fn(path: String, source_text: String) -> [Function] Never! {
     unit: module_name(path)
     source: source_text.bytes()
     tokens: lex(source)
     lines: newlines(source)
     local_types := [String:Bool]{}
+    private_types := [String:Bool]{}
     loop index in 0..<tokens.len() {
         if is_owner_kind(tokens[index].value) && token(tokens, index - 1) == ":" {
             local_types[token(tokens, index - 2)] = true
+            if declared_priv(tokens, index - 2) -> private_types[token(tokens, index - 2)] = true
         }
     }
     rows := [Function]{}
@@ -687,7 +697,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         value: tokens[i].value
         parens += paren_step(value)
         if is_owner_kind(value) && token(tokens, i - 1) == ":" {
-            pending = Owner{name: token(tokens, i - 2), kind: value.copy()}
+            pending = Owner{name: token(tokens, i - 2), kind: if private_types.has_key(token(tokens, i - 2)) -> PRIVATE_TYPE else -> value.copy()}
         }
         if value == {
             // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
@@ -705,7 +715,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
                 if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") {
                     owner = "{owner}.{token(tokens, i + 3)}"
                 }
-                pending = Owner{name: owner.copy(), kind: "impl"}
+                pending = Owner{name: owner.copy(), kind: if private_types.has_key(token(tokens, i + 1)) -> PRIVATE_TYPE else -> "impl"}
             }
             // `priv name: module {` or `priv(scope) name: module {`; the name may be dotted.
             "module" -> {
@@ -713,8 +723,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
                 loop token(tokens, start - 1) == "." && is_identifier(token(tokens, start - 2)) {
                     start -= 2
                 }
-                qualified: token(tokens, start - 1) == ")" && token(tokens, start - 4) == "priv"
-                pending = if token(tokens, start - 1) == "priv" || qualified -> Owner{name: "", kind: PRIVATE_MODULE} else -> Owner{name: "", kind: "module"}
+                pending = if declared_priv(tokens, start) -> Owner{name: "", kind: PRIVATE_MODULE} else -> Owner{name: "", kind: "module"}
             }
             "{{" -> {
                 scopes.push(pending.copy())
@@ -734,9 +743,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         if opener != "(" && opener != "<" -> next
         if inside_private(scopes) -> next
         // A `priv` or `priv(scope)` declaration is no user-callable surface.
-        if token(tokens, i - 3) == "priv" || (token(tokens, i - 3) == ")" && token(tokens, i - 6) == "priv") {
-            next
-        }
+        if declared_priv(tokens, i - 2) -> next
         owner := ""
         if scopes.len() > 0 {
             scope: scopes[scopes.len() - 1]
@@ -1874,6 +1881,11 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
     found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(&self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.__Cursor.next", "core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
     assert_eq(found.map(fn(row) { outside_surface(row) }), [Bool]{true, false, true, false})
+}
+
+#Test("a priv type's methods, in its body and its impls, are no surface") {
+    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n  ")
+    assert_eq(function_ids(found), [String]{"core.demo.Reader.open"})
 }
 
 #Test("return types preserve builtin, prelude and compound spellings") {

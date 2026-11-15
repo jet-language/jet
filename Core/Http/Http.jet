@@ -514,15 +514,15 @@ HTTPBodyChunks: struct {
     __live: Shared<provider.LiveBody>?{None}
 
     impl Iterable {
-        Iter: __HTTPBodyCursor
+        Iter: HTTPBodyCursor
 
-        iter: fn(&&self) -> __HTTPBodyCursor {
-            __HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false, live: self.__live}
+        iter: fn(&&self) -> HTTPBodyCursor {
+            HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false, live: self.__live}
         }
     }
 }
 
-__HTTPBodyCursor: struct {
+priv HTTPBodyCursor: struct {
     bytes: [U8]
     max: Int
     at: Int

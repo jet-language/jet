@@ -206,7 +206,7 @@ __handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) 
     HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
 }
 
-__HTTPSegment: enum {
+priv HTTPSegment: enum {
     Static(String)
     Param(String)
     CatchAll(String)
@@ -215,7 +215,7 @@ __HTTPSegment: enum {
 priv HTTPRoute: struct {
     method: String
     pattern: String
-    segments: [__HTTPSegment]
+    segments: [HTTPSegment]
     handler: HTTPHandler
     // The compiler-checked endpoint contract an `app.get(…)`-style
     // registration carries ("" for Core's own static and page routes);
@@ -226,7 +226,7 @@ priv HTTPRoute: struct {
 }
 
 priv HTTPParsedRoute: struct {
-    segments: [__HTTPSegment]
+    segments: [HTTPSegment]
     problem: String
 }
 
@@ -288,7 +288,7 @@ priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPH
     guard.value.layers.push(Shared{HTTPLayerCell{wrap: layer.move()}})
 }
 
-priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     shape: route_shape(segments)
     loop existing in mux_routes(mux) {
         if existing.method == method && route_shape(existing.segments) == shape {
@@ -1152,7 +1152,7 @@ priv comma_items: fn(list: String) -> [String] Never! {
 // `*name` catch-all.
 
 priv route_problem: fn(problem: String) -> HTTPParsedRoute Never! {
-    HTTPParsedRoute{segments: [__HTTPSegment]{}, problem: problem}
+    HTTPParsedRoute{segments: [HTTPSegment]{}, problem: problem}
 }
 
 priv route_name_ok: fn(name: [U8]) -> Bool Never! {
@@ -1169,7 +1169,7 @@ priv route_name_ok: fn(name: [U8]) -> Bool Never! {
 priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
     raw: pattern.bytes()
     if raw.len() == 0 || raw[0] != (U8{47}) -> return route_problem("a route starts with `/`")
-    segments := [__HTTPSegment]{}
+    segments := [HTTPSegment]{}
     if raw.len() == 1 -> return HTTPParsedRoute{segments: segments, problem: ""}
     names := [String]{}
     closed := false
@@ -1194,13 +1194,13 @@ priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
                     return route_problem("parameter `{name}` appears twice")
                 }
                 names.push(name.copy())
-                if first == 58 -> segments.push(__HTTPSegment.Param(name)) else {
-                    segments.push(__HTTPSegment.CatchAll(name))
+                if first == 58 -> segments.push(HTTPSegment.Param(name)) else {
+                    segments.push(HTTPSegment.CatchAll(name))
                     closed = true
                 }
             } else {
                 text: segment_decode(piece) ?? return route_problem("invalid static segment")
-                segments.push(__HTTPSegment.Static(text))
+                segments.push(HTTPSegment.Static(text))
             }
             start = i + 1
         }
@@ -1209,7 +1209,7 @@ priv route_parse: fn(pattern: String) -> HTTPParsedRoute Never! {
     HTTPParsedRoute{segments: segments, problem: ""}
 }
 
-priv route_shape: fn(segments: [__HTTPSegment]) -> String Never! {
+priv route_shape: fn(segments: [HTTPSegment]) -> String Never! {
     out := ""
     loop segment in segments {
         piece: if segment == {
@@ -1224,7 +1224,7 @@ priv route_shape: fn(segments: [__HTTPSegment]) -> String Never! {
 
 // The OpenAPI path of a parsed route: static segments percent-encoded,
 // parameters as `{name}` (jet_http_route_openapi_path).
-priv route_openapi_path: fn(segments: [__HTTPSegment]) -> String Never! {
+priv route_openapi_path: fn(segments: [HTTPSegment]) -> String Never! {
     path := "/"
     loop (index, segment) in segments {
         if index > 0 -> path = "{path}/"
@@ -1241,7 +1241,7 @@ priv route_openapi_path: fn(segments: [__HTTPSegment]) -> String Never! {
 // (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
 // its path inputs from the pattern registered, and a run-time custom method's
 // (`"method":""`) gets that method.
-priv route_contract: fn(method: String, pattern: String, segments: [__HTTPSegment], contract: String, at: SourceLocation) -> String Never! {
+priv route_contract: fn(method: String, pattern: String, segments: [HTTPSegment], contract: String, at: SourceLocation) -> String Never! {
     completed: if contract.contains("\"pattern\":\"\"") || contract.contains("\"method\":\"\"") -> route_complete_contract(method, pattern, segments, contract) else -> contract
     route_require_contract(method, pattern, completed, at)
     completed
@@ -1276,7 +1276,7 @@ priv contract_set: fn(fields: [(key: String, value: Dyn)], name: String, value: 
     out
 }
 
-priv route_complete_contract: fn(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
+priv route_complete_contract: fn(method: String, pattern: String, segments: [HTTPSegment], contract: String) -> String Never! {
     parsed: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
     fields := if parsed == {
         .Object(members) -> members
@@ -1432,7 +1432,7 @@ priv segment_decode: fn(raw: [U8]) -> String? Never! {
     Val(text)
 }
 
-priv route_matches: fn(pattern: [__HTTPSegment], path: [String]) -> Bool Never! {
+priv route_matches: fn(pattern: [HTTPSegment], path: [String]) -> Bool Never! {
     loop i in 0..<pattern.len() {
         if pattern[i] == {
             .Static(text) -> {
@@ -1447,7 +1447,7 @@ priv route_matches: fn(pattern: [__HTTPSegment], path: [String]) -> Bool Never! 
     pattern.len() == path.len()
 }
 
-priv route_params: fn(pattern: [__HTTPSegment], path: [String]) -> [Header] Never! {
+priv route_params: fn(pattern: [HTTPSegment], path: [String]) -> [Header] Never! {
     out := [Header]{}
     loop i in 0..<pattern.len() {
         if pattern[i] == {
@@ -1463,7 +1463,7 @@ priv route_params: fn(pattern: [__HTTPSegment], path: [String]) -> [Header] Neve
     out
 }
 
-priv segment_rank: fn(segment: __HTTPSegment) -> Int Never! {
+priv segment_rank: fn(segment: HTTPSegment) -> Int Never! {
     if segment == {
         .Static(_) -> 2
         .Param(_) -> 1
@@ -1473,7 +1473,7 @@ priv segment_rank: fn(segment: __HTTPSegment) -> Int Never! {
 
 // Static beats parameter beats catch-all, segment by segment; then the
 // shorter pattern; a full tie keeps the earlier registration.
-priv route_better: fn(candidate: [__HTTPSegment], current: [__HTTPSegment]) -> Bool Never! {
+priv route_better: fn(candidate: [HTTPSegment], current: [HTTPSegment]) -> Bool Never! {
     shared_len: if candidate.len() < current.len() -> candidate.len() else -> current.len()
     loop i in 0..<shared_len {
         a: segment_rank(candidate[i])

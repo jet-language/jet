@@ -6513,7 +6513,7 @@ identity. Pool `max` remains a required labeled argument. Transaction and
 migration retain both `DB` and `Time.Wait`, including at the provider boundary.
 
 The existing registered Rust SQLite bridge remains the raw host boundary under
-the Jet source policy until runtime cutover. The separate CFFI `__Driver`
+the Jet source policy until runtime cutover. The separate CFFI `DBDriver`
 adapter is held; it is not part of this source-owned Core integration.
 
 ### `core.db.sql` — pure SQL grammar and row selection

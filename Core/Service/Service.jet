@@ -160,7 +160,7 @@ authority_hex_digit: fn(value: Int) -> Int? Never! {
 // Exact policy order from ServiceAuthority::jet_services_authority_validate:
 // missing-key identity fallback, newer unpartitioned fallback; for an exact
 // row, tree/worker mismatch, partition, generation, then stopped/newer-started.
-authority_validate_snapshot: fn(identity: ServiceEndpoint, exact: __EndpointState?, candidates: [__EndpointState]) ServiceError! {
+authority_validate_snapshot: fn(identity: ServiceEndpoint, exact: EndpointState?, candidates: [EndpointState]) ServiceError! {
     if exact == {
         .None -> {
             loop candidate in candidates {
@@ -201,14 +201,14 @@ authority_validate_snapshot: fn(identity: ServiceEndpoint, exact: __EndpointStat
     }
 }
 
-endpoint_state_fixture: fn(authority: String, tree: String, worker: String, generation: Int, started: Bool, partitioned: Bool) -> __EndpointState Never! {
-    __EndpointState{tree: tree, worker: worker, authority: authority, generation: generation, started: started, draining: false, partitioned: partitioned, store: None, store_generation: 0, channel: None}
+endpoint_state_fixture: fn(authority: String, tree: String, worker: String, generation: Int, started: Bool, partitioned: Bool) -> EndpointState Never! {
+    EndpointState{tree: tree, worker: worker, authority: authority, generation: generation, started: started, draining: false, partitioned: partitioned, store: None, store_generation: 0, channel: None}
 }
 
 #Test("endpoint snapshot preserves mismatch partition stale and stopped priorities") {
     token: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     identity: ServiceEndpoint{tree: "tree", worker: "worker", generation: 2, authority: token}
-    empty: [__EndpointState]{}
+    empty: [EndpointState]{}
     wrong_tree: endpoint_state_fixture(token, "other", "worker", 1, false, true)
     wrong_worker: endpoint_state_fixture(token, "tree", "other", 1, false, true)
     partitioned: endpoint_state_fixture(token, "tree", "worker", 1, false, true)
@@ -244,7 +244,7 @@ endpoint_state_fixture: fn(authority: String, tree: String, worker: String, gene
             .Ok(_) | .Err(_) -> false
         },
     )
-    peers := [__EndpointState]{}
+    peers := [EndpointState]{}
     peers.push(endpoint_state_fixture(token, "tree", "worker", 3, true, false))
     assert(
         if authority_validate_snapshot(identity, Val(stopped), peers) == {
@@ -364,7 +364,7 @@ set_state_empty: fn(tree: &ServiceTree) ServiceError! {
     if tree.snapshot != None || tree.event_log.len() != 0 {
         return Err(ServiceError.Policy("cannot discard state records while selecting Empty state adapter"))
     }
-    tree.state_adapter = __TreeStateAdapter.Empty
+    tree.state_adapter = TreeStateAdapter.Empty
     tree.state_authority = None
 }
 
@@ -394,9 +394,9 @@ select_state_adapter: fn(tree: &ServiceTree, store: ServiceStateStore, schema: S
     if version < 1 {
         return Err(ServiceError.Policy("service state schema version must be positive"))
     }
-    adapter: if event_log -> __TreeStateAdapter.EventLog else -> __TreeStateAdapter.Snapshot
+    adapter: if event_log -> TreeStateAdapter.EventLog else -> TreeStateAdapter.Snapshot
     tree.state_adapter = adapter
-    tree.state_authority = Val(__TreeStateAuthority{store: store.path, schema: schema, version: version, migration: migration, adapter: adapter})
+    tree.state_authority = Val(TreeStateAuthority{store: store.path, schema: schema, version: version, migration: migration, adapter: adapter})
 }
 
 valid_service_text: fn(text: String, limit: Int) -> Bool Never! {
@@ -415,7 +415,7 @@ valid_service_text: fn(text: String, limit: Int) -> Bool Never! {
 
 restore_snapshot: fn(tree: ServiceTree) -> String ServiceError! {
     authority: tree.state_authority ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
-    records: state_load(authority, __TreeStateAdapter.Snapshot)
+    records: state_load(authority, TreeStateAdapter.Snapshot)
     if records.len() == 0 -> return Err(ServiceError.Policy("no snapshot committed"))
     read_state_record("v{authority.version}:", records[0])
 }
@@ -620,11 +620,11 @@ ServiceTree: struct {
     priv restart: ServiceRestart
     priv budget_max: Int
     priv budget_per_ms: Int
-    priv workers: [__TreeWorker]
-    priv groups: [__TreeGroup]
+    priv workers: [TreeWorker]
+    priv groups: [TreeGroup]
     priv started: Bool
-    priv state_adapter: __TreeStateAdapter
-    priv state_authority: __TreeStateAuthority?
+    priv state_adapter: TreeStateAdapter
+    priv state_authority: TreeStateAuthority?
     priv snapshot: String?
     priv event_log: [String]
     priv dead_letters: [String]
@@ -632,7 +632,7 @@ ServiceTree: struct {
     priv directory: [DirectoryRecord]
     priv draining: [String]
     priv partitioned: [String]
-    priv workflows: [__TreeWorkflowState]
+    priv workflows: [TreeWorkflowState]
     priv chaos_fails: Int
     priv previous_generation: Int
     priv last_upgrade: ServiceUpgradeReceipt?
@@ -649,17 +649,17 @@ ServiceEndpoint: struct {
 
 // A worker never runs a handler task in-process; the handler identity is
 // checked when the worker is declared and only its name is kept.
-__TreeWorker: struct {
+priv TreeWorker: struct {
     name: String
     handler_name: String
     endpoint: ServiceEndpoint
     capacity: Int
-    channel: Shared<__ServiceChannel>
+    channel: Shared<ServiceChannel>
     restarts: [Int]
     running: Bool
 }
 
-__TreeGroup: struct {
+priv TreeGroup: struct {
     name: String
     restart: ServiceRestart
     budget_max: Int
@@ -667,18 +667,18 @@ __TreeGroup: struct {
     workers: [String]
 }
 
-__TreeStateAdapter: enum {
+priv TreeStateAdapter: enum {
     Empty
     Snapshot
     EventLog
 }
 
-__TreeStateAuthority: struct {
+priv TreeStateAuthority: struct {
     store: String
     schema: String
     version: Int
     migration: String
-    adapter: __TreeStateAdapter
+    adapter: TreeStateAdapter
 }
 
 priv IdempotencyRecord: struct {
@@ -729,10 +729,10 @@ tree: fn(name: String) -> ServiceTree Never! {
         restart: ServiceRestart.OneForOne,
         budget_max: 5,
         budget_per_ms: 60000,
-        workers: [__TreeWorker]{},
-        groups: [__TreeGroup]{},
+        workers: [TreeWorker]{},
+        groups: [TreeGroup]{},
         started: false,
-        state_adapter: __TreeStateAdapter.Empty,
+        state_adapter: TreeStateAdapter.Empty,
         state_authority: None,
         snapshot: None,
         event_log: [String]{},
@@ -741,7 +741,7 @@ tree: fn(name: String) -> ServiceTree Never! {
         directory: [DirectoryRecord]{},
         draining: [String]{},
         partitioned: [String]{},
-        workflows: [__TreeWorkflowState]{},
+        workflows: [TreeWorkflowState]{},
         chaos_fails: 0,
         previous_generation: 0,
         last_upgrade: None,
@@ -750,41 +750,41 @@ tree: fn(name: String) -> ServiceTree Never! {
 
 // Bounded FIFO shared by an endpoint's registry entry and its tree mailbox.
 // `head` indexes the oldest value; consumed slots are compacted lazily.
-__ServiceChannel: struct {
+priv ServiceChannel: struct {
     capacity: Int
     values: [String]
     head: Int
     closed: Bool
 }
 
-__ChannelSend: enum {
+priv ChannelSend: enum {
     Sent
     Full
     Closed
 }
 
-__ChannelReceive: enum {
+priv ChannelReceive: enum {
     Value(String)
     Empty
     Closed
 }
 
-channel_new: fn(capacity: Int, values: [String]) -> Shared<__ServiceChannel>? Never! {
+channel_new: fn(capacity: Int, values: [String]) -> Shared<ServiceChannel>? Never! {
     if capacity < 1 || values.len() > capacity -> return None
-    Val(Shared{__ServiceChannel{capacity: capacity, values: values, head: 0, closed: false}})
+    Val(Shared{ServiceChannel{capacity: capacity, values: values, head: 0, closed: false}})
 }
 
-channel_try_send: fn(channel: Shared<__ServiceChannel>, value: String) -> __ChannelSend Never! {
+channel_try_send: fn(channel: Shared<ServiceChannel>, value: String) -> ChannelSend Never! {
     guard := channel.guard_edit()
-    if guard.value.closed -> return __ChannelSend.Closed
+    if guard.value.closed -> return ChannelSend.Closed
     if guard.value.values.len() - guard.value.head >= guard.value.capacity {
-        return __ChannelSend.Full
+        return ChannelSend.Full
     }
     guard.value.values.push(value.copy())
-    __ChannelSend.Sent
+    ChannelSend.Sent
 }
 
-channel_try_receive: fn(channel: Shared<__ServiceChannel>) -> __ChannelReceive Never! {
+channel_try_receive: fn(channel: Shared<ServiceChannel>) -> ChannelReceive Never! {
     guard := channel.guard_edit()
     head: guard.value.head
     if head < guard.value.values.len() {
@@ -797,29 +797,29 @@ channel_try_receive: fn(channel: Shared<__ServiceChannel>) -> __ChannelReceive N
             guard.value.values = guard.value.values.slice(guard.value.head, guard.value.values.len())
             guard.value.head = 0
         }
-        return __ChannelReceive.Value(value)
+        return ChannelReceive.Value(value)
     }
-    if guard.value.closed -> return __ChannelReceive.Closed
-    __ChannelReceive.Empty
+    if guard.value.closed -> return ChannelReceive.Closed
+    ChannelReceive.Empty
 }
 
-channel_snapshot: fn(channel: Shared<__ServiceChannel>) -> [String] Never! {
+channel_snapshot: fn(channel: Shared<ServiceChannel>) -> [String] Never! {
     guard: channel.guard_read()
     guard.value.values.slice(guard.value.head, guard.value.values.len())
 }
 
-channel_depth: fn(channel: Shared<__ServiceChannel>) -> Int Never! {
+channel_depth: fn(channel: Shared<ServiceChannel>) -> Int Never! {
     guard: channel.guard_read()
     guard.value.values.len() - guard.value.head
 }
 
-channel_clear: fn(channel: Shared<__ServiceChannel>) Never! {
+channel_clear: fn(channel: Shared<ServiceChannel>) Never! {
     guard := channel.guard_edit()
     guard.value.values.clear()
     guard.value.head = 0
 }
 
-channel_close: fn(channel: Shared<__ServiceChannel>) Never! {
+channel_close: fn(channel: Shared<ServiceChannel>) Never! {
     guard := channel.guard_edit()
     guard.value.closed = true
 }
@@ -828,15 +828,15 @@ channel_close: fn(channel: Shared<__ServiceChannel>) Never! {
     assert(channel_new(0, [String]{}) == None)
     assert(channel_new(1, [String]{"a", "b"}) == None)
     channel: channel_new(2, [String]{"a"}) ?? panic("channel")
-    assert(channel_try_send(channel, "b") == __ChannelSend.Sent)
-    assert(channel_try_send(channel, "c") == __ChannelSend.Full)
+    assert(channel_try_send(channel, "b") == ChannelSend.Sent)
+    assert(channel_try_send(channel, "c") == ChannelSend.Full)
     assert(channel_snapshot(channel) == [String]{"a", "b"})
-    assert(channel_try_receive(channel) == __ChannelReceive.Value("a"))
+    assert(channel_try_receive(channel) == ChannelReceive.Value("a"))
     assert(channel_depth(channel) == 1)
     channel_close(channel)
-    assert(channel_try_send(channel, "d") == __ChannelSend.Closed)
-    assert(channel_try_receive(channel) == __ChannelReceive.Value("b"))
-    assert(channel_try_receive(channel) == __ChannelReceive.Closed)
+    assert(channel_try_send(channel, "d") == ChannelSend.Closed)
+    assert(channel_try_receive(channel) == ChannelReceive.Value("b"))
+    assert(channel_try_receive(channel) == ChannelReceive.Closed)
 }
 
 // Host leaves. Each is one existing runtime primitive with no service policy.
@@ -1003,7 +1003,7 @@ authority_validate_runtime: fn(runtime: ServiceRuntime) ServiceError! {
 // (0600) holding its creation time in milliseconds. A lock older than two
 // minutes is abandoned and removed; waiting past 30 seconds fails closed.
 // An empty path holds nothing: a tree without a state store has no journal.
-__ServiceFileLock: struct {
+priv ServiceFileLock: struct {
     path: String
 
     impl Close {
@@ -1016,7 +1016,7 @@ __ServiceFileLock: struct {
     }
 }
 
-authority_file_lock: fn(store: String, suffix: String) -> __ServiceFileLock ServiceError! {
+authority_file_lock: fn(store: String, suffix: String) -> ServiceFileLock ServiceError! {
     authority_validate_store_path(store)
     path: "{store}.{suffix}.lock"
     if state_parent_lex(path, false) == {
@@ -1033,7 +1033,7 @@ authority_file_lock: fn(store: String, suffix: String) -> __ServiceFileLock Serv
     started: service_now()
     loop {
         if service_create_private(path, "{service_now()}".bytes()) == {
-            .Ok(_) -> return Ok(__ServiceFileLock{path: path})
+            .Ok(_) -> return Ok(ServiceFileLock{path: path})
             .Err(.AlreadyExists(_)) -> {
                 now: service_now()
                 if authority_lock_stale(path, now) {
@@ -1057,7 +1057,7 @@ authority_lock_stale: fn(path: String, now: Int) -> Bool Never! {
     now - modified_ms >= 120000
 }
 
-authority_operation_lock: fn(runtime: ServiceRuntime, operation: String) -> __ServiceFileLock ServiceError! {
+authority_operation_lock: fn(runtime: ServiceRuntime, operation: String) -> ServiceFileLock ServiceError! {
     digest: service_crypto.sha256(delivery_signature_payload([String]{authority_store_identity(runtime.store), operation})).bytes
     authority_file_lock(runtime.store, "op-{service_encoding.bytes_to_hex(digest)}")
 }
@@ -1070,7 +1070,7 @@ authority_retention_deadline: fn(now: Int, retention_ms: Int) -> Int Never! {
 
 // Process endpoint registry. One row per issued (authority, worker,
 // generation); the row owns the authoritative route facts and the channel.
-__EndpointState: struct {
+priv EndpointState: struct {
     tree: String
     worker: String
     authority: String
@@ -1080,14 +1080,14 @@ __EndpointState: struct {
     partitioned: Bool
     store: String?
     store_generation: Int
-    channel: Shared<__ServiceChannel>?
+    channel: Shared<ServiceChannel>?
 }
 
-__ServiceRegistry: struct {
-    endpoints: [__EndpointState]
+priv ServiceRegistry: struct {
+    endpoints: [EndpointState]
 }
 
-__PendingEntry: struct {
+priv PendingEntry: struct {
     id: String
     message: String
     store: String
@@ -1098,42 +1098,42 @@ priv PendingQueue: struct {
     authority: String
     worker: String
     generation: Int
-    entries: [__PendingEntry]
+    entries: [PendingEntry]
 }
 
-__PendingRegistry: struct {
+priv PendingRegistry: struct {
     queues: [PendingQueue]
 }
 
 // In-process serialization of durable authority store work; the file locks
 // serialize the same work across processes.
-__AuthorityGate: struct {
+priv AuthorityGate: struct {
     entered: Int
 }
 
-init_service_registry: fn() -> Shared<__ServiceRegistry> Never! {
-    Shared{__ServiceRegistry{endpoints: [__EndpointState]{}}}
+init_service_registry: fn() -> Shared<ServiceRegistry> Never! {
+    Shared{ServiceRegistry{endpoints: [EndpointState]{}}}
 }
 
-init_pending_registry: fn() -> Shared<__PendingRegistry> Never! {
-    Shared{__PendingRegistry{queues: [PendingQueue]{}}}
+init_pending_registry: fn() -> Shared<PendingRegistry> Never! {
+    Shared{PendingRegistry{queues: [PendingQueue]{}}}
 }
 
-init_authority_gate: fn() -> Shared<__AuthorityGate> Never! { Shared{__AuthorityGate{entered: 0}} }
+init_authority_gate: fn() -> Shared<AuthorityGate> Never! { Shared{AuthorityGate{entered: 0}} }
 
-service_registry: fn() -> Shared<__ServiceRegistry> Never! {
+service_registry: fn() -> Shared<ServiceRegistry> Never! {
     core.mem.__process_shared(init_service_registry)
 }
 
-pending_registry: fn() -> Shared<__PendingRegistry> Never! {
+pending_registry: fn() -> Shared<PendingRegistry> Never! {
     core.mem.__process_shared(init_pending_registry)
 }
 
-authority_gate: fn() -> Shared<__AuthorityGate> Never! {
+authority_gate: fn() -> Shared<AuthorityGate> Never! {
     core.mem.__process_shared(init_authority_gate)
 }
 
-registry_index: fn(endpoints: [__EndpointState], authority: String, worker: String, generation: Int) -> Int Never! {
+registry_index: fn(endpoints: [EndpointState], authority: String, worker: String, generation: Int) -> Int Never! {
     loop index in 0..<endpoints.len() {
         state: endpoints[index]
         if state.authority == authority && state.worker == worker && state.generation == generation {
@@ -1148,7 +1148,7 @@ endpoint_new: fn(tree: String, worker: String, generation: Int, authority: Strin
     Ok(ServiceEndpoint{tree: tree, worker: worker, generation: generation, authority: authority})
 }
 
-authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<__ServiceChannel>?) ServiceError! {
+authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<ServiceChannel>?) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
     registry := service_registry().guard_edit()
     index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
@@ -1159,7 +1159,7 @@ authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared
             }
         }
         registry.value.endpoints.push(
-            __EndpointState{
+            EndpointState{
                 tree: endpoint.tree.copy(),  // copy: the registry row outlives the borrowed endpoint
                 worker: endpoint.worker.copy(),  // copy: as above
                 authority: endpoint.authority.copy(),  // copy: as above
@@ -1184,7 +1184,7 @@ authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared
     registry_write_generation(registry.value.endpoints[index], endpoint.generation, started, channel)
 }
 
-registry_write_generation: fn(state: &__EndpointState, generation: Int, started: Bool, channel: Shared<__ServiceChannel>?) Never! {
+registry_write_generation: fn(state: &EndpointState, generation: Int, started: Bool, channel: Shared<ServiceChannel>?) Never! {
     if state.generation != generation {
         state.store = None
         state.draining = false
@@ -1196,7 +1196,7 @@ registry_write_generation: fn(state: &__EndpointState, generation: Int, started:
 
 // Locate the registered row for `endpoint`; missing is Partitioned and a
 // tree/worker mismatch is Revoked, as every registry mutation requires.
-registry_row: fn(endpoints: [__EndpointState], endpoint: ServiceEndpoint) -> Int ServiceError! {
+registry_row: fn(endpoints: [EndpointState], endpoint: ServiceEndpoint) -> Int ServiceError! {
     index: registry_index(endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
     if index < 0 {
         return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
@@ -1208,7 +1208,7 @@ registry_row: fn(endpoints: [__EndpointState], endpoint: ServiceEndpoint) -> Int
     Ok(index)
 }
 
-authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<__ServiceChannel>?) ServiceError! {
+authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<ServiceChannel>?) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
     registry := service_registry().guard_edit()
     index: registry_row(registry.value.endpoints, endpoint)
@@ -1266,13 +1266,13 @@ __authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
 }
 
 // Route facts read under the registry: started, draining and the channel.
-__EndpointRoute: struct {
+priv EndpointRoute: struct {
     started: Bool
     draining: Bool
-    channel: Shared<__ServiceChannel>
+    channel: Shared<ServiceChannel>
 }
 
-authority_channel: fn(endpoint: ServiceEndpoint) -> __EndpointRoute ServiceError! {
+authority_channel: fn(endpoint: ServiceEndpoint) -> EndpointRoute ServiceError! {
     __authority_validate(endpoint)
     registry: service_registry().guard_read()
     index: registry_row(registry.value.endpoints, endpoint)
@@ -1281,7 +1281,7 @@ authority_channel: fn(endpoint: ServiceEndpoint) -> __EndpointRoute ServiceError
         return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
     }
     channel: state.channel ?? return Err(ServiceError.Partitioned("service endpoint mailbox is not connected"))
-    Ok(__EndpointRoute{started: state.started, draining: state.draining, channel: channel})
+    Ok(EndpointRoute{started: state.started, draining: state.draining, channel: channel})
 }
 
 // The registry guard is the one linearization point for drain, partition,
@@ -1494,7 +1494,7 @@ authority_adopt_alias: fn(source: ServiceEndpoint, authority: String) -> Service
 // caller observes the old endpoint or the new one, never both live. The old
 // row stays registered but stopped, so a stale endpoint fails closed. The
 // new row takes `channel`, or the old row's channel when none is given.
-authority_rotate: fn(old: ServiceEndpoint, next: ServiceEndpoint, started: Bool, draining: Bool, channel: Shared<__ServiceChannel>?) ServiceError! {
+authority_rotate: fn(old: ServiceEndpoint, next: ServiceEndpoint, started: Bool, draining: Bool, channel: Shared<ServiceChannel>?) ServiceError! {
     validate_endpoint_identity(old.authority, old.tree, old.worker, old.generation)
     validate_endpoint_identity(next.authority, next.tree, next.worker, next.generation)
     if old.tree != next.tree || old.worker != next.worker || old.authority != next.authority || old.generation == next.generation {
@@ -1525,7 +1525,7 @@ authority_rotate: fn(old: ServiceEndpoint, next: ServiceEndpoint, started: Bool,
     registry.value.endpoints[old_index].draining = false
     if next_index < 0 {
         registry.value.endpoints.push(
-            __EndpointState{
+            EndpointState{
                 tree: next.tree,
                 worker: next.worker,
                 authority: next.authority,
@@ -1833,7 +1833,7 @@ state_prefix: fn(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
 }
 
 // Durable state store: a versioned header, then length-framed records.
-state_adapter_name: fn(adapter: __TreeStateAdapter) -> String Never! {
+state_adapter_name: fn(adapter: TreeStateAdapter) -> String Never! {
     if adapter == {
         .Empty -> "empty"
         .Snapshot -> "snapshot"
@@ -1845,8 +1845,8 @@ state_record: fn(prefix: String, payload: String) -> String Never! {
     "{prefix}{workflow_frame(payload)}"
 }
 
-state_encode: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, records: [String]) -> [U8] ServiceError! {
-    if records.len() > 100000 || (adapter == __TreeStateAdapter.Snapshot && records.len() > 1) {
+state_encode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, records: [String]) -> [U8] ServiceError! {
+    if records.len() > 100000 || (adapter == TreeStateAdapter.Snapshot && records.len() > 1) {
         return Err(ServiceError.Policy("service state record limit exceeded"))
     }
     prefix: "v{authority.version}:"
@@ -1868,7 +1868,7 @@ state_encode: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, r
     Ok(parts.join("").bytes())
 }
 
-__StateCursor: struct {
+priv StateCursor: struct {
     bytes: [U8]
     offset: Int
 }
@@ -1879,7 +1879,7 @@ service_parse_count: fn(text: String) -> Int? Never! {
     workflow_i64(text)
 }
 
-state_read_line: fn(cursor: &__StateCursor, label: String) -> String ServiceError! {
+state_read_line: fn(cursor: &StateCursor, label: String) -> String ServiceError! {
     if cursor.offset > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
     end := cursor.offset
     loop end < cursor.bytes.len() && cursor.bytes[end] != (U8{10}) -> end += 1
@@ -1889,7 +1889,7 @@ state_read_line: fn(cursor: &__StateCursor, label: String) -> String ServiceErro
     Ok(line)
 }
 
-state_read_frame: fn(cursor: &__StateCursor, label: String) -> String ServiceError! {
+state_read_frame: fn(cursor: &StateCursor, label: String) -> String ServiceError! {
     start: cursor.offset
     if start > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
     colon := start
@@ -1905,11 +1905,11 @@ state_read_frame: fn(cursor: &__StateCursor, label: String) -> String ServiceErr
     Ok(value)
 }
 
-state_decode: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, bytes: [U8]) -> [String] ServiceError! {
+state_decode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, bytes: [U8]) -> [String] ServiceError! {
     if bytes.len() > 134217728 {
         return Err(state_error("service state store exceeds its byte limit"))
     }
-    cursor := __StateCursor{bytes: bytes, offset: 0}
+    cursor := StateCursor{bytes: bytes, offset: 0}
     if state_read_line(cursor, "state magic") != "JET-SERVICE-STATE/1" {
         return Err(state_error("service state magic is invalid"))
     }
@@ -1956,7 +1956,7 @@ state_decode: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, b
         read_state_record(prefix, record)
         records.push(record)
     }
-    if adapter == __TreeStateAdapter.Snapshot && records.len() > 1 {
+    if adapter == TreeStateAdapter.Snapshot && records.len() > 1 {
         return Err(state_error("snapshot store contains more than one record"))
     }
     Ok(records)
@@ -1993,7 +1993,7 @@ state_validate_path: fn(path: String) ServiceError! {
     }
 }
 
-state_read_unlocked: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter) -> [String] ServiceError! {
+state_read_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [String] ServiceError! {
     state_validate_path(authority.store)
     row := [Int]{}
     if service_stat(authority.store) == {
@@ -2006,17 +2006,17 @@ state_read_unlocked: fn(authority: __TreeStateAuthority, adapter: __TreeStateAda
     state_decode(authority, adapter, bytes)
 }
 
-state_load: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter) -> [String] ServiceError! {
+state_load: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [String] ServiceError! {
     gate := authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
     state_read_unlocked(authority, adapter)
 }
 
-__StateSequence: struct {
+priv StateSequence: struct {
     next: Int
 }
 
-init_state_sequence: fn() -> Shared<__StateSequence> Never! { Shared{__StateSequence{next: 0}} }
+init_state_sequence: fn() -> Shared<StateSequence> Never! { Shared{StateSequence{next: 0}} }
 
 state_temp_sequence: fn() -> Int Never! {
     sequence := core.mem.__process_shared(init_state_sequence).guard_edit()
@@ -2025,7 +2025,7 @@ state_temp_sequence: fn() -> Int Never! {
     value
 }
 
-state_write_unlocked: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, records: [String]) ServiceError! {
+state_write_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, records: [String]) ServiceError! {
     bytes: state_encode(authority, adapter, records)
     state_validate_path(authority.store)
     state_create_parent(authority.store, "state")
@@ -2062,20 +2062,20 @@ state_publish: fn(path: String, temporary: String, bytes: [U8], label: String) S
     }
 }
 
-state_write: fn(authority: __TreeStateAuthority, adapter: __TreeStateAdapter, records: [String]) ServiceError! {
+state_write: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, records: [String]) ServiceError! {
     lock: authority_file_lock(authority.store, "state")
     state_write_unlocked(authority, adapter, records)
 }
 
-state_append: fn(authority: __TreeStateAuthority, record: String) ServiceError! {
+state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
     gate := authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
-    records: state_read_unlocked(authority, __TreeStateAdapter.EventLog)
+    records: state_read_unlocked(authority, TreeStateAdapter.EventLog)
     if records.len() >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
     row := [Int]{}
     if service_stat(authority.store) == {
         .Ok(value) -> row = value
-        .Err(.NotFound(_)) -> return state_write_unlocked(authority, __TreeStateAdapter.EventLog, [String]{record})
+        .Err(.NotFound(_)) -> return state_write_unlocked(authority, TreeStateAdapter.EventLog, [String]{record})
         .Err(error) -> return Err(state_error("cannot inspect service state store before append: {error}"))
     }
     frame: workflow_frame(record).bytes()
@@ -2106,7 +2106,7 @@ priv RolloutDirectory: struct {
     generation: Int
 }
 
-__RolloutState: struct {
+priv RolloutState: struct {
     generation: Int
     previous_generation: Int
     last_upgrade: ServiceUpgradeReceipt?
@@ -2116,7 +2116,7 @@ __RolloutState: struct {
     directory: [RolloutDirectory]
 }
 
-rollout_snapshot: fn(tree: ServiceTree) -> __RolloutState Never! {
+rollout_snapshot: fn(tree: ServiceTree) -> RolloutState Never! {
     workers := [RolloutWorker]{}
     loop worker in tree.workers {
         workers.push(RolloutWorker{name: worker.name, generation: worker.endpoint.generation})
@@ -2125,7 +2125,7 @@ rollout_snapshot: fn(tree: ServiceTree) -> __RolloutState Never! {
     loop record in tree.directory {
         directory.push(RolloutDirectory{name: record.name, worker: record.endpoint.worker, generation: record.endpoint.generation})
     }
-    __RolloutState{generation: tree.generation, previous_generation: tree.previous_generation, last_upgrade: tree.last_upgrade, workers: workers, draining: tree.draining, partitioned: tree.partitioned, directory: directory}
+    RolloutState{generation: tree.generation, previous_generation: tree.previous_generation, last_upgrade: tree.last_upgrade, workers: workers, draining: tree.draining, partitioned: tree.partitioned, directory: directory}
 }
 
 rollout_scalar: fn(lines: &[String], label: String, value: String) Never! {
@@ -2139,7 +2139,7 @@ rollout_frame: fn(lines: &[String], label: String, value: String) ServiceError! 
     lines.push("{label}:{workflow_frame(value)}\n")
 }
 
-rollout_encode: fn(tree_name: String, state: __RolloutState) -> [U8] ServiceError! {
+rollout_encode: fn(tree_name: String, state: RolloutState) -> [U8] ServiceError! {
     lines := [String]{"JET-SERVICE-ROLLOUT/1\n"}
     rollout_frame(lines, "tree", tree_name)
     rollout_scalar(lines, "generation", "{state.generation}")
@@ -2180,12 +2180,12 @@ rollout_encode: fn(tree_name: String, state: __RolloutState) -> [U8] ServiceErro
 }
 
 // Text lines as Rust `str::lines` yields them: a trailing `\r` is dropped.
-__RolloutLines: struct {
+priv RolloutLines: struct {
     lines: [String]
     next: Int
 }
 
-rollout_read_line: fn(lines: &__RolloutLines, label: String) -> String ServiceError! {
+rollout_read_line: fn(lines: &RolloutLines, label: String) -> String ServiceError! {
     if lines.next >= lines.lines.len() {
         return Err(state_error("rollout journal {label} is truncated"))
     }
@@ -2196,26 +2196,26 @@ rollout_read_line: fn(lines: &__RolloutLines, label: String) -> String ServiceEr
     Ok(line.removeprefix(prefix))
 }
 
-rollout_read_scalar: fn(lines: &__RolloutLines, label: String) -> Int ServiceError! {
+rollout_read_scalar: fn(lines: &RolloutLines, label: String) -> Int ServiceError! {
     text: rollout_read_line(lines, label)
     workflow_i64(text) ?? return Err(state_error("rollout journal {label} is invalid"))
 }
 
-rollout_read_count: fn(lines: &__RolloutLines, label: String) -> Int ServiceError! {
+rollout_read_count: fn(lines: &RolloutLines, label: String) -> Int ServiceError! {
     text: rollout_read_line(lines, label)
     count: service_parse_count(text) ?? return Err(state_error("rollout journal {label} is invalid"))
     if count > 4096 -> return Err(state_error("rollout journal {label} exceeds the worker limit"))
     Ok(count)
 }
 
-rollout_read_bool: fn(lines: &__RolloutLines, label: String) -> Bool ServiceError! {
+rollout_read_bool: fn(lines: &RolloutLines, label: String) -> Bool ServiceError! {
     text: rollout_read_line(lines, label)
     if text == "0" -> return Ok(false)
     if text == "1" -> return Ok(true)
     Err(state_error("rollout journal {label} is invalid"))
 }
 
-rollout_read_frame: fn(lines: &__RolloutLines, label: String) -> String ServiceError! {
+rollout_read_frame: fn(lines: &RolloutLines, label: String) -> String ServiceError! {
     value: rollout_read_line(lines, label)
     parts: value.split_once(":") ?? return Err(state_error("rollout journal {label} length is missing"))
     length: service_parse_count(parts.before) ?? return Err(state_error("rollout journal {label} length is invalid"))
@@ -2253,7 +2253,7 @@ rollout_names_contain: fn(names: [String], name: String) -> Bool Never! {
     worker_contains(names, name)
 }
 
-rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceError! {
+rollout_decode: fn(tree_name: String, bytes: [U8]) -> RolloutState ServiceError! {
     if bytes.len() > 4194304 || bytes.len() == 0 || bytes[bytes.len() - 1] != (U8{10}) {
         return Err(state_error("rollout journal exceeds its byte limit or is not newline terminated"))
     }
@@ -2278,7 +2278,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
         piece: pieces[index]
         collected.push(if piece.ends_with("\r") -> piece.removesuffix("\r") else -> piece)
     }
-    lines := __RolloutLines{lines: collected, next: 0}
+    lines := RolloutLines{lines: collected, next: 0}
     if lines.lines.len() == 0 || lines.lines[0] != "JET-SERVICE-ROLLOUT/1" {
         return Err(state_error("rollout journal magic is invalid"))
     }
@@ -2385,34 +2385,34 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
     if lines.next < lines.lines.len() {
         return Err(state_error("rollout journal has trailing records"))
     }
-    Ok(__RolloutState{generation: generation, previous_generation: previous, last_upgrade: last_upgrade, workers: workers, draining: draining, partitioned: partitioned, directory: directory})
+    Ok(RolloutState{generation: generation, previous_generation: previous, last_upgrade: last_upgrade, workers: workers, draining: draining, partitioned: partitioned, directory: directory})
 }
 
-rollout_path: fn(authority: __TreeStateAuthority) -> String ServiceError! {
+rollout_path: fn(authority: TreeStateAuthority) -> String ServiceError! {
     path: "{authority.store}.rollout"
     authority_validate_text(path, "service rollout journal", 4096, false)
     state_validate_path(path)
     Ok(path)
 }
 
-rollback_store_path: fn(authority: __TreeStateAuthority, generation: Int) -> String ServiceError! {
+rollback_store_path: fn(authority: TreeStateAuthority, generation: Int) -> String ServiceError! {
     path: "{authority.store}.rollback-g{generation}"
     authority_validate_text(path, "service rollback store", 4096, false)
     Ok(path)
 }
 
 // The state authority with its store moved to `store`.
-state_authority_at: fn(authority: __TreeStateAuthority, store: String) -> __TreeStateAuthority Never! {
-    __TreeStateAuthority{store: store, schema: authority.schema, version: authority.version, migration: authority.migration, adapter: authority.adapter}
+state_authority_at: fn(authority: TreeStateAuthority, store: String) -> TreeStateAuthority Never! {
+    TreeStateAuthority{store: store, schema: authority.schema, version: authority.version, migration: authority.migration, adapter: authority.adapter}
 }
 
 // Serializes lifecycle operations across controllers of one state store.
-rollout_operation_lock: fn(tree: ServiceTree) -> __ServiceFileLock ServiceError! {
-    authority: tree.state_authority ?? return Ok(__ServiceFileLock{path: ""})
+rollout_operation_lock: fn(tree: ServiceTree) -> ServiceFileLock ServiceError! {
+    authority: tree.state_authority ?? return Ok(ServiceFileLock{path: ""})
     authority_file_lock(authority.store, "rollout-operation")
 }
 
-rollout_store_load: fn(tree: ServiceTree) -> __RolloutState? ServiceError! {
+rollout_store_load: fn(tree: ServiceTree) -> RolloutState? ServiceError! {
     authority: tree.state_authority ?? return Ok(None)
     path: rollout_path(authority)
     gate := authority_gate().guard_edit()
@@ -2529,12 +2529,12 @@ restore_rollout_state: fn(tree: &ServiceTree) ServiceError! {
 
 // Workflows. The durable `{store}.workflows` event log is the source of
 // truth; the tree's copy carries only a runtime replay cursor on top.
-__ActivityOutcome: struct {
+priv ActivityOutcome: struct {
     key: String
     outcome: TaskOutcome
 }
 
-__TreeWorkflowState: struct {
+priv TreeWorkflowState: struct {
     id: String
     run_id: Int
     version: Int
@@ -2542,7 +2542,7 @@ __TreeWorkflowState: struct {
     history: [String]
     replay_cursor: Int
     status: TaskStatus
-    activity_outcomes: [__ActivityOutcome]
+    activity_outcomes: [ActivityOutcome]
     outcome: TaskOutcome?
 }
 
@@ -2550,8 +2550,8 @@ __TreeWorkflowState: struct {
 // durable log under the workflow file lock.
 ServiceWorkflow: struct {
     priv run_id: Int
-    priv authority: __TreeStateAuthority
-    priv state: Shared<__TreeWorkflowState>
+    priv authority: TreeStateAuthority
+    priv state: Shared<TreeWorkflowState>
 
     impl Display {
         display: fn(self) -> String { "{self.run_id}" }
@@ -2566,11 +2566,11 @@ workflow_run_id: fn(run: Int | ServiceWorkflow) -> Int Never! {
     }
 }
 
-workflow_authority: fn(tree: ServiceTree) -> __TreeStateAuthority ServiceError! {
+workflow_authority: fn(tree: ServiceTree) -> TreeStateAuthority ServiceError! {
     authority: tree.state_authority ?? return Err(ServiceError.Policy("durable workflow history needs the injected service state authority"))
     store: "{authority.store}.workflows"
     authority_validate_text(store, "service workflow store", 4096, false)
-    Ok(__TreeStateAuthority{store: store, schema: authority.schema, version: authority.version, migration: authority.migration, adapter: __TreeStateAdapter.EventLog})
+    Ok(TreeStateAuthority{store: store, schema: authority.schema, version: authority.version, migration: authority.migration, adapter: TreeStateAdapter.EventLog})
 }
 
 workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceError! {
@@ -2581,7 +2581,7 @@ workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceEr
                 ServiceWorkflow{
                     run_id: run_id,
                     authority: authority,
-                    state: Shared{__TreeWorkflowState{
+                    state: Shared{TreeWorkflowState{
                         id: workflow.id,
                         run_id: workflow.run_id,
                         version: workflow.version,
@@ -2599,16 +2599,16 @@ workflow_handle: fn(tree: ServiceTree, run_id: Int) -> ServiceWorkflow ServiceEr
     Err(ServiceError.Unknown("workflow run {run_id} not found"))
 }
 
-workflow_replay_authority: fn(authority: __TreeStateAuthority) -> [__TreeWorkflowState] ServiceError! {
-    records: state_load(authority, __TreeStateAdapter.EventLog)
+workflow_replay_authority: fn(authority: TreeStateAuthority) -> [TreeWorkflowState] ServiceError! {
+    records: state_load(authority, TreeStateAdapter.EventLog)
     prefix: "v{authority.version}:"
-    workflows := [__TreeWorkflowState]{}
+    workflows := [TreeWorkflowState]{}
     loop record in records { workflow_apply(workflows, read_state_record(prefix, record)) }
     if workflows.len() > 100000 -> return Err(state_error("workflow run limit exceeded"))
     Ok(workflows)
 }
 
-workflow_replay: fn(tree: ServiceTree) -> [__TreeWorkflowState] ServiceError! {
+workflow_replay: fn(tree: ServiceTree) -> [TreeWorkflowState] ServiceError! {
     workflow_replay_authority(workflow_authority(tree))
 }
 
@@ -2621,7 +2621,7 @@ workflow_sync_tree: fn(tree: &ServiceTree) ServiceError! {
     tree.workflows = workflows
 }
 
-workflow_cursor: fn(workflows: [__TreeWorkflowState], run_id: Int) -> Int Never! {
+workflow_cursor: fn(workflows: [TreeWorkflowState], run_id: Int) -> Int Never! {
     loop workflow in workflows {
         if workflow.run_id == run_id -> return workflow.replay_cursor
     }
@@ -2638,14 +2638,14 @@ workflow_field: fn(input: String, label: String) -> String ServiceError! {
     Ok(parts.after)
 }
 
-__WorkflowField: struct {
+priv WorkflowField: struct {
     value: String
     rest: String
 }
 
 // `{length}:{value}{rest}`; the length is in bytes and must end on a
 // character boundary.
-workflow_take_field: fn(input: String, label: String) -> __WorkflowField ServiceError! {
+workflow_take_field: fn(input: String, label: String) -> WorkflowField ServiceError! {
     parts: input.split_once(":") ?? return Err(state_error("workflow {label} length is missing"))
     length: service_parse_count(parts.before) ?? return Err(state_error("workflow {label} length is invalid"))
     raw: parts.after.bytes()
@@ -2657,7 +2657,7 @@ workflow_take_field: fn(input: String, label: String) -> __WorkflowField Service
     if !workflow_visible(value, 9223372036854775807) {
         return Err(state_error("workflow {label} contains control characters"))
     }
-    Ok(__WorkflowField{value: value, rest: rest})
+    Ok(WorkflowField{value: value, rest: rest})
 }
 
 workflow_token_valid: fn(text: String) -> Bool Never! {
@@ -2683,16 +2683,16 @@ workflow_step_valid: fn(step: String) -> Bool Never! {
     true
 }
 
-workflow_split: fn(text: String, label: String) -> __WorkflowField ServiceError! {
+workflow_split: fn(text: String, label: String) -> WorkflowField ServiceError! {
     parts: text.split_once(":") ?? return Err(state_error("workflow {label} is missing"))
-    Ok(__WorkflowField{value: parts.before, rest: parts.after})
+    Ok(WorkflowField{value: parts.before, rest: parts.after})
 }
 
 workflow_parse_int: fn(text: String, label: String) -> Int ServiceError! {
     workflow_i64(text) ?? return Err(state_error("workflow {label} is invalid"))
 }
 
-workflow_index_of: fn(workflows: [__TreeWorkflowState], run_id: Int, label: String) -> Int ServiceError! {
+workflow_index_of: fn(workflows: [TreeWorkflowState], run_id: Int, label: String) -> Int ServiceError! {
     loop index in 0..<workflows.len() {
         if workflows[index].run_id == run_id -> return Ok(index)
     }
@@ -2701,7 +2701,7 @@ workflow_index_of: fn(workflows: [__TreeWorkflowState], run_id: Int, label: Stri
 
 // After every activity has completed, the first failed activity outcome is
 // the run's outcome, otherwise Finished.
-workflow_refresh_outcome: fn(workflow: &__TreeWorkflowState) Never! {
+workflow_refresh_outcome: fn(workflow: &TreeWorkflowState) Never! {
     keys := 0
     loop step in workflow.steps {
         definition: workflow_activity_parts(step) ?? next
@@ -2726,7 +2726,7 @@ workflow_refresh_outcome: fn(workflow: &__TreeWorkflowState) Never! {
 
 // The one reader of a workflow record. Writers reach the in-memory history
 // only through it, so a record that cannot be replayed is never written.
-workflow_apply: fn(workflows: &[__TreeWorkflowState], payload: String) ServiceError! {
+workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceError! {
     if payload.starts_with("workflow-start:") {
         run: workflow_split(payload.removeprefix("workflow-start:"), "start run id")
         run_id: workflow_parse_int(run.value, "start run id")
@@ -2741,7 +2741,7 @@ workflow_apply: fn(workflows: &[__TreeWorkflowState], payload: String) ServiceEr
                 return Err(state_error("workflow log contains a duplicate start record"))
             }
         }
-        workflows.push(__TreeWorkflowState{id: id, run_id: run_id, version: version, steps: [String]{}, history: [String]{"start@v{version}"}, replay_cursor: 0, status: TaskStatus.Running, activity_outcomes: [__ActivityOutcome]{}, outcome: None})
+        workflows.push(TreeWorkflowState{id: id, run_id: run_id, version: version, steps: [String]{}, history: [String]{"start@v{version}"}, replay_cursor: 0, status: TaskStatus.Running, activity_outcomes: [ActivityOutcome]{}, outcome: None})
     } else if payload.starts_with("workflow-step:") {
         run: workflow_split(payload.removeprefix("workflow-step:"), "step run id")
         run_id: workflow_parse_int(run.value, "step run id")
@@ -2890,7 +2890,7 @@ workflow_apply: fn(workflows: &[__TreeWorkflowState], payload: String) ServiceEr
         }
         workflows[index].history.push("activity-done:{key.value}")
         workflows[index].history.push("activity-result:{task_outcome_show(outcome)}")
-        workflows[index].activity_outcomes.push(__ActivityOutcome{key: key.value, outcome: outcome})
+        workflows[index].activity_outcomes.push(ActivityOutcome{key: key.value, outcome: outcome})
         workflow_refresh_outcome(workflows[index])
     } else { return Err(state_error("workflow log contains an unknown record")) }
     // One bound for every record kind: history carries the start entry and
@@ -3021,7 +3021,7 @@ workflow_append_handle: fn(workflow: ServiceWorkflow, payload: String) ServiceEr
     state.value.replay_cursor = state.value.history.len()
 }
 
-workflow_find_run: fn(workflows: [__TreeWorkflowState], run_id: Int) -> Int? Never! {
+workflow_find_run: fn(workflows: [TreeWorkflowState], run_id: Int) -> Int? Never! {
     loop index in 0..<workflows.len() {
         if workflows[index].run_id == run_id -> return Val(index)
     }
@@ -3278,7 +3278,7 @@ workflow_activity_parts: fn(step: String) -> WorkflowActivityDefinition? Never! 
     Val(WorkflowActivityDefinition{index: 0, activity: fields[1], key: fields[2], attempt: attempt, max_attempts: maximum})
 }
 
-workflow_activity_definition: fn(workflow: __TreeWorkflowState, key: String) -> WorkflowActivityDefinition? Never! {
+workflow_activity_definition: fn(workflow: TreeWorkflowState, key: String) -> WorkflowActivityDefinition? Never! {
     loop step_index in 0..<workflow.steps.len() {
         definition := workflow_activity_parts(workflow.steps[step_index]) ?? next
         if definition.key == key {
@@ -3289,7 +3289,7 @@ workflow_activity_definition: fn(workflow: __TreeWorkflowState, key: String) -> 
     None
 }
 
-workflow_activity_outcome: fn(outcomes: [__ActivityOutcome], key: String) -> TaskOutcome? Never! {
+workflow_activity_outcome: fn(outcomes: [ActivityOutcome], key: String) -> TaskOutcome? Never! {
     loop pair in outcomes {
         if pair.key == key -> return Val(pair.outcome)
     }
@@ -3360,7 +3360,7 @@ group: fn(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
     groups := [(name: String, workers: [String])]{}
     loop existing in tree.groups -> groups.push((name: existing.name, workers: existing.workers))
     validate_group(name, workers, known, groups)
-    tree.groups.push(__TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, workers: workers})
+    tree.groups.push(TreeGroup{name: name, restart: tree.restart, budget_max: tree.budget_max, budget_per_ms: tree.budget_per_ms, workers: workers})
 }
 
 validate_group: fn(name: String, workers: [String], known: [String], groups: [(name: String, workers: [String])]) ServiceError! {
@@ -3419,7 +3419,7 @@ chaos_fail: fn(tree: &ServiceTree) -> Int ServiceError! {
 // The durable append precedes the in-memory push.
 append_event: fn(tree: &ServiceTree, event: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
-    if tree.state_adapter != __TreeStateAdapter.EventLog {
+    if tree.state_adapter != TreeStateAdapter.EventLog {
         return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
     }
     authority: tree.state_authority ?? return Err(ServiceError.Policy("EventLog state has no injected authority"))
@@ -3436,7 +3436,7 @@ append_event: fn(tree: &ServiceTree, event: String) ServiceError! {
 
 commit_snapshot: fn(tree: &ServiceTree, payload: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
-    if tree.state_adapter != __TreeStateAdapter.Snapshot {
+    if tree.state_adapter != TreeStateAdapter.Snapshot {
         return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
     }
     authority: tree.state_authority ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
@@ -3445,7 +3445,7 @@ commit_snapshot: fn(tree: &ServiceTree, payload: String) ServiceError! {
     }
     record: state_record("v{authority.version}:", payload)
     gate := authority_gate().guard_edit()
-    state_write(authority, __TreeStateAdapter.Snapshot, [String]{record})
+    state_write(authority, TreeStateAdapter.Snapshot, [String]{record})
     tree.snapshot = Val(record)
 }
 
@@ -3693,12 +3693,12 @@ full_tree_mailbox: fn(worker: String, capacity: Int) -> ServiceError Never! {
 
 // Durable delivery authority log. A line is an operation letter followed by
 // `|{byte length}:{hex}` per field; entries are a pure replay of the log.
-__DeliveryRecord: struct {
+priv DeliveryRecord: struct {
     op: String
     fields: [String]
 }
 
-__DeliveryEntry: struct {
+priv DeliveryEntry: struct {
     id: String
     key: String
     tree: String
@@ -3750,7 +3750,7 @@ authority_unhex: fn(text: String) -> [U8]? Never! {
     Val(bytes)
 }
 
-authority_parse_record: fn(line: String) -> __DeliveryRecord ServiceError! {
+authority_parse_record: fn(line: String) -> DeliveryRecord ServiceError! {
     parts: line.split("|").to_list()
     head: parts[0].bytes()
     if head.len() == 0 -> return Err(authority_error("service authority record has no operation"))
@@ -3767,12 +3767,12 @@ authority_parse_record: fn(line: String) -> __DeliveryRecord ServiceError! {
         value: String.from_bytes(bytes) ?? return Err(authority_error("service authority field is not UTF-8"))
         fields.push(value)
     }
-    Ok(__DeliveryRecord{op: op, fields: fields})
+    Ok(DeliveryRecord{op: op, fields: fields})
 }
 
 // One line without its terminator; a trailing carriage return is not part
 // of the record.
-authority_parse_line: fn(raw: [U8]) -> __DeliveryRecord ServiceError! {
+authority_parse_line: fn(raw: [U8]) -> DeliveryRecord ServiceError! {
     end := raw.len()
     if end > 0 && raw[end - 1] == (U8{13}) -> end -= 1
     line: String.from_bytes(raw.slice(0, end)) ?? return Err(authority_error("service authority field is not UTF-8"))
@@ -3805,13 +3805,13 @@ authority_tail_is_record: fn(bytes: [U8], complete_end: Int) -> Bool Never! {
     }
 }
 
-authority_read: fn(runtime: ServiceRuntime) -> [__DeliveryRecord] ServiceError! {
+authority_read: fn(runtime: ServiceRuntime) -> [DeliveryRecord] ServiceError! {
     authority_validate_store_path(runtime.store)
     lock: authority_file_lock(runtime.store, "store")
     row := [Int]{}
     if service_stat(runtime.store) == {
         .Ok(value) -> row = value
-        .Err(.NotFound(_)) -> return Ok([__DeliveryRecord]{})
+        .Err(.NotFound(_)) -> return Ok([DeliveryRecord]{})
         .Err(error) -> return Err(authority_error("could not open service store: {error}"))
     }
     if row[1] > 134217728 {
@@ -3831,7 +3831,7 @@ authority_read: fn(runtime: ServiceRuntime) -> [__DeliveryRecord] ServiceError! 
     if authority_tail_is_record(bytes, complete_end) {
         return Err(authority_error("service authority log ends with a truncated record"))
     }
-    records := [__DeliveryRecord]{}
+    records := [DeliveryRecord]{}
     if complete_end == 0 -> return Ok(records)
     // Lines of the complete prefix without its final newline; a last empty
     // line before that newline is not a record.
@@ -3902,7 +3902,7 @@ authority_delivery_id: fn(store: String, tree: String, worker: String, message: 
     "svc-{service_encoding.bytes_to_hex(digest)}"
 }
 
-delivery_transition_allowed: fn(entry: __DeliveryEntry, state: DeliveryState, attempts: Int) ServiceError! {
+delivery_transition_allowed: fn(entry: DeliveryEntry, state: DeliveryState, attempts: Int) ServiceError! {
     if attempts < entry.attempts {
         return Err(authority_error("delivery event attempts move backwards"))
     }
@@ -3924,7 +3924,7 @@ delivery_acceptance_signature: fn(authority: String, generation: Int, id: String
     Ok(service_crypto.hmac_sha256(signing_key, delivery_signature_payload(fields)))
 }
 
-delivery_retention_signature: fn(entry: __DeliveryEntry, retained_until: Int) -> [U8] ServiceError! {
+delivery_retention_signature: fn(entry: DeliveryEntry, retained_until: Int) -> [U8] ServiceError! {
     signing_key: delivery_generation_key(entry.authority, entry.generation)
     fields: [String]{"jet-service-delivery-retention-v1", entry.id, "{retained_until}"}
     Ok(service_crypto.hmac_sha256(signing_key, delivery_signature_payload(fields)))
@@ -3937,7 +3937,7 @@ delivery_signature_matches: fn(expected: [U8], supplied: String, malformed: Stri
     }
 }
 
-delivery_entry_index: fn(entries: [__DeliveryEntry], id: String) -> Int? Never! {
+delivery_entry_index: fn(entries: [DeliveryEntry], id: String) -> Int? Never! {
     loop index in 0..<entries.len() {
         if entries[index].id == id -> return Val(index)
     }
@@ -3946,8 +3946,8 @@ delivery_entry_index: fn(entries: [__DeliveryEntry], id: String) -> Int? Never! 
 
 // Replay the log: acceptances, retention extensions and signed lifecycle
 // events, each validated before it changes an entry.
-authority_entries: fn(runtime: ServiceRuntime, records: [__DeliveryRecord]) -> [__DeliveryEntry] ServiceError! {
-    entries := [__DeliveryEntry]{}
+authority_entries: fn(runtime: ServiceRuntime, records: [DeliveryRecord]) -> [DeliveryEntry] ServiceError! {
+    entries := [DeliveryEntry]{}
     loop record in records {
         fields: record.fields
         if record.op == "S" && fields.len() == 10 {
@@ -3972,7 +3972,7 @@ authority_entries: fn(runtime: ServiceRuntime, records: [__DeliveryRecord]) -> [
                     return Err(authority_error("service authority log contains duplicate idempotency work"))
                 }
             }
-            entries.push(__DeliveryEntry{id: fields[0], key: fields[1], tree: fields[3], worker: fields[4], authority: fields[2], generation: generation, message: fields[6], created: created, expires: expires, retained_until: None, attempts: 0, state: DeliveryState.Accepted, event_sequence: 1, delivered_to_worker: false, delivered: false, dead: false})
+            entries.push(DeliveryEntry{id: fields[0], key: fields[1], tree: fields[3], worker: fields[4], authority: fields[2], generation: generation, message: fields[6], created: created, expires: expires, retained_until: None, attempts: 0, state: DeliveryState.Accepted, event_sequence: 1, delivered_to_worker: false, delivered: false, dead: false})
         } else if record.op == "K" && fields.len() == 3 {
             until: workflow_i64(fields[1]) ?? return Err(authority_error("service retention deadline is malformed"))
             index: delivery_entry_index(entries, fields[0]) ?? return Err(authority_error("service retention references an unknown id"))
@@ -4002,7 +4002,7 @@ authority_entries: fn(runtime: ServiceRuntime, records: [__DeliveryRecord]) -> [
     Ok(entries)
 }
 
-delivery_entry_expired: fn(entry: __DeliveryEntry, now: Int) -> Bool Never! {
+delivery_entry_expired: fn(entry: DeliveryEntry, now: Int) -> Bool Never! {
     if entry.state == DeliveryState.DeadLettered || entry.state == DeliveryState.Cancelled {
         return false
     }
@@ -4012,11 +4012,11 @@ delivery_entry_expired: fn(entry: __DeliveryEntry, now: Int) -> Bool Never! {
     }
 }
 
-delivery_for_entry: fn(runtime: ServiceRuntime, entry: __DeliveryEntry, duplicate: Bool) -> Delivery Never! {
+delivery_for_entry: fn(runtime: ServiceRuntime, entry: DeliveryEntry, duplicate: Bool) -> Delivery Never! {
     Delivery{id: entry.id, store: authority_store_identity(runtime.store), duplicate: duplicate, authority: entry.authority, generation: entry.generation}
 }
 
-authority_append_event: fn(runtime: ServiceRuntime, entry: __DeliveryEntry, state: DeliveryState, attempts: Int, timestamp: Int) ServiceError! {
+authority_append_event: fn(runtime: ServiceRuntime, entry: DeliveryEntry, state: DeliveryState, attempts: Int, timestamp: Int) ServiceError! {
     delivery_transition_allowed(entry, state, attempts)
     sequence: service_saturating_add(entry.event_sequence, 1)
     signature: delivery_event_signature(entry.authority, entry.generation, entry.id, sequence, state, attempts, timestamp)
@@ -4024,7 +4024,7 @@ authority_append_event: fn(runtime: ServiceRuntime, entry: __DeliveryEntry, stat
 }
 
 // Pending delivery queues: one per (store, authority, worker, generation).
-pending_queue_slot: fn(pending: &__PendingRegistry, store: String, endpoint: ServiceEndpoint) -> Int Never! {
+pending_queue_slot: fn(pending: &PendingRegistry, store: String, endpoint: ServiceEndpoint) -> Int Never! {
     identity: authority_store_identity(store)
     loop index in 0..<pending.queues.len() {
         queue: pending.queues[index]
@@ -4032,7 +4032,7 @@ pending_queue_slot: fn(pending: &__PendingRegistry, store: String, endpoint: Ser
             return index
         }
     }
-    pending.queues.push(PendingQueue{store: identity, authority: endpoint.authority, worker: endpoint.worker, generation: endpoint.generation, entries: [__PendingEntry]{}})
+    pending.queues.push(PendingQueue{store: identity, authority: endpoint.authority, worker: endpoint.worker, generation: endpoint.generation, entries: [PendingEntry]{}})
     pending.queues.len() - 1
 }
 
@@ -4040,7 +4040,7 @@ pending_remove: fn(store: String, id: String) Never! {
     identity: authority_store_identity(store)
     pending := pending_registry().guard_edit()
     loop slot in 0..<pending.value.queues.len() {
-        kept := [__PendingEntry]{}
+        kept := [PendingEntry]{}
         loop entry in pending.value.queues[slot].entries {
             if entry.id != id || authority_store_identity(entry.store) != identity {
                 kept.push(entry)
@@ -4050,14 +4050,14 @@ pending_remove: fn(store: String, id: String) Never! {
     }
 }
 
-pending_remove_entry: fn(runtime: ServiceRuntime, entry: __DeliveryEntry) Never! {
+pending_remove_entry: fn(runtime: ServiceRuntime, entry: DeliveryEntry) Never! {
     if entry.authority == "" {
         return
     }
     pending_remove(runtime.store, entry.id)
 }
 
-pending_contains: fn(entries: [__PendingEntry], candidate: __PendingEntry) -> Bool Never! {
+pending_contains: fn(entries: [PendingEntry], candidate: PendingEntry) -> Bool Never! {
     loop entry in entries {
         if entry.id == candidate.id && entry.message == candidate.message && entry.store == candidate.store {
             return true
@@ -4066,7 +4066,7 @@ pending_contains: fn(entries: [__PendingEntry], candidate: __PendingEntry) -> Bo
     false
 }
 
-authority_cleanup_expired: fn(runtime: ServiceRuntime, entries: [__DeliveryEntry], now: Int) -> Bool ServiceError! {
+authority_cleanup_expired: fn(runtime: ServiceRuntime, entries: [DeliveryEntry], now: Int) -> Bool ServiceError! {
     cleaned := false
     loop entry in entries {
         if delivery_entry_expired(entry, now) {
@@ -4079,7 +4079,7 @@ authority_cleanup_expired: fn(runtime: ServiceRuntime, entries: [__DeliveryEntry
 }
 
 // Read and replay the log; an expiry sweep that appended events reads again.
-authority_load: fn(runtime: ServiceRuntime) -> [__DeliveryEntry] ServiceError! {
+authority_load: fn(runtime: ServiceRuntime) -> [DeliveryEntry] ServiceError! {
     entries: authority_entries(runtime, authority_read(runtime))
     if authority_cleanup_expired(runtime, entries, service_now()) {
         return authority_entries(runtime, authority_read(runtime))
@@ -4101,10 +4101,10 @@ authority_enqueue: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, id: St
     if pending.value.queues[slot].entries.len() >= 100000 {
         return Err(ServiceError.Full("service authority pending delivery queue is full"))
     }
-    pending.value.queues[slot].entries.push(__PendingEntry{id: id, message: message, store: store})
+    pending.value.queues[slot].entries.push(PendingEntry{id: id, message: message, store: store})
 }
 
-__RouteCandidate: struct {
+priv RouteCandidate: struct {
     authority: String
     tree: String
     worker: String
@@ -4112,24 +4112,24 @@ __RouteCandidate: struct {
     store: String?
 }
 
-__RouteScan: struct {
-    exact: __RouteCandidate?
-    newer_exact: __RouteCandidate?
-    candidates: [__RouteCandidate]
+priv RouteScan: struct {
+    exact: RouteCandidate?
+    newer_exact: RouteCandidate?
+    candidates: [RouteCandidate]
     exact_stopped: Bool
     newer_generation: Bool
 }
 
 // Registry rows that can carry a receipt for `entry`'s tree and worker.
 // A stopped replacement never revokes a running source generation.
-authority_route_scan: fn(entry: __DeliveryEntry) -> __RouteScan Never! {
+authority_route_scan: fn(entry: DeliveryEntry) -> RouteScan Never! {
     registry: service_registry().guard_read()
-    scan := __RouteScan{exact: None, newer_exact: None, candidates: [__RouteCandidate]{}, exact_stopped: false, newer_generation: false}
+    scan := RouteScan{exact: None, newer_exact: None, candidates: [RouteCandidate]{}, exact_stopped: false, newer_generation: false}
     loop state in registry.value.endpoints {
         if state.tree != entry.tree || state.worker != entry.worker || state.partitioned -> next
         if state.generation > entry.generation && state.started -> scan.newer_generation = true
         bound: if state.store_generation == state.generation -> state.store else -> None
-        candidate: __RouteCandidate{authority: state.authority, tree: state.tree, worker: state.worker, generation: state.generation, store: bound}
+        candidate: RouteCandidate{authority: state.authority, tree: state.tree, worker: state.worker, generation: state.generation, store: bound}
         if state.authority == entry.authority {
             if state.generation == entry.generation {
                 if state.started -> scan.exact = Val(candidate) else -> scan.exact_stopped = true
@@ -4147,7 +4147,7 @@ authority_route_scan: fn(entry: __DeliveryEntry) -> __RouteScan Never! {
     scan
 }
 
-authority_route_select: fn(scan: __RouteScan, store: String, entry: __DeliveryEntry) -> __RouteCandidate ServiceError! {
+authority_route_select: fn(scan: RouteScan, store: String, entry: DeliveryEntry) -> RouteCandidate ServiceError! {
     if scan.exact == {
         .Val(exact) -> return Ok(exact)
         .None -> {}
@@ -4156,7 +4156,7 @@ authority_route_select: fn(scan: __RouteScan, store: String, entry: __DeliveryEn
         .Val(newer) -> return Ok(newer)
         .None -> {}
     }
-    bound := [__RouteCandidate]{}
+    bound := [RouteCandidate]{}
     loop candidate in scan.candidates {
         if candidate.store == {
             .Val(value) -> {
@@ -4184,7 +4184,7 @@ authority_route_select: fn(scan: __RouteScan, store: String, entry: __DeliveryEn
 
 // The live endpoint for a durable receipt. A restarted provider holds a new
 // authority for the same shard; the receipt's authority becomes its alias.
-authority_current_endpoint: fn(runtime: ServiceRuntime, entry: __DeliveryEntry) -> ServiceEndpoint ServiceError! {
+authority_current_endpoint: fn(runtime: ServiceRuntime, entry: DeliveryEntry) -> ServiceEndpoint ServiceError! {
     selected: authority_route_select(authority_route_scan(entry), authority_store_identity(runtime.store), entry)
     endpoint: endpoint_new(selected.tree, selected.worker, selected.generation, selected.authority)
     _: authority_bind_store(runtime, endpoint)
@@ -4194,7 +4194,7 @@ authority_current_endpoint: fn(runtime: ServiceRuntime, entry: __DeliveryEntry) 
     Ok(alias)
 }
 
-delivery_routes_to_endpoint: fn(runtime: ServiceRuntime, entry: __DeliveryEntry, endpoint: ServiceEndpoint) -> Bool Never! {
+delivery_routes_to_endpoint: fn(runtime: ServiceRuntime, entry: DeliveryEntry, endpoint: ServiceEndpoint) -> Bool Never! {
     if entry.tree != endpoint.tree || entry.worker != endpoint.worker -> return false
     if entry.authority == endpoint.authority && entry.generation == endpoint.generation {
         return true
@@ -4205,7 +4205,7 @@ delivery_routes_to_endpoint: fn(runtime: ServiceRuntime, entry: __DeliveryEntry,
     }
 }
 
-authority_enqueue_entry: fn(runtime: ServiceRuntime, entry: __DeliveryEntry) ServiceError! {
+authority_enqueue_entry: fn(runtime: ServiceRuntime, entry: DeliveryEntry) ServiceError! {
     endpoint: authority_current_endpoint(runtime, entry)
     if endpoint.tree != entry.tree || endpoint.worker != entry.worker {
         return Err(ServiceError.Revoked("service receipt endpoint no longer names its worker"))
@@ -4222,11 +4222,11 @@ pending_skipped: fn(skip_ids: [String], id: String) -> Bool Never! {
 
 // Up to `capacity` pending receipts for `endpoint`, after queueing every
 // eligible log entry not yet queued.
-authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [String]) -> [__PendingEntry] ServiceError! {
+authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [String]) -> [PendingEntry] ServiceError! {
     __authority_validate(endpoint)
-    if capacity <= 0 -> return Ok([__PendingEntry]{})
+    if capacity <= 0 -> return Ok([PendingEntry]{})
     bound: authority_bound_store(endpoint)
-    store: bound ?? return Ok([__PendingEntry]{})
+    store: bound ?? return Ok([PendingEntry]{})
     runtime: ServiceRuntime{store: store, retention_ms: 0}
     gate := authority_gate().guard_edit()
     entries: authority_load(runtime)
@@ -4256,10 +4256,10 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
         if pending.value.queues[slot].entries.len() >= 100000 {
             return Err(ServiceError.Full("service authority pending delivery queue is full"))
         }
-        pending.value.queues[slot].entries.push(__PendingEntry{id: entry.id, message: entry.message, store: store})
+        pending.value.queues[slot].entries.push(PendingEntry{id: entry.id, message: entry.message, store: store})
     }
-    selected := [__PendingEntry]{}
-    retained := [__PendingEntry]{}
+    selected := [PendingEntry]{}
+    retained := [PendingEntry]{}
     loop entry in pending.value.queues[slot].entries {
         if selected.len() < capacity && !pending_skipped(skip_ids, entry.id) -> selected.push(entry) else {
             retained.push(entry)
@@ -4271,7 +4271,7 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
 
 // Put undelivered receipts back at the head of the queue after a mailbox
 // boundary rejected a batch.
-authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [__PendingEntry]) ServiceError! {
+authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]) ServiceError! {
     __authority_validate(endpoint)
     if entries.len() == 0 -> return Ok()
     bound: authority_bound_store(endpoint)
@@ -4279,7 +4279,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [__PendingEntr
     runtime: ServiceRuntime{store: store, retention_ms: 0}
     gate := authority_gate().guard_edit()
     receipts: authority_load(runtime)
-    normalized := [__PendingEntry]{}
+    normalized := [PendingEntry]{}
     loop entry in entries {
         authority_validate_text(entry.id, "service id", 1024, false)
         authority_validate_text(entry.message, "service message", 1048576, true)
@@ -4301,7 +4301,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [__PendingEntr
         if delivery_entry_expired(receipt, service_now()) {
             return Err(ServiceError.Expired("service receipt retention expired during delivery rollback"))
         }
-        normalized.push(__PendingEntry{id: entry.id, message: entry.message, store: store})
+        normalized.push(PendingEntry{id: entry.id, message: entry.message, store: store})
     }
     pending := pending_registry().guard_edit()
     slot: pending_queue_slot(pending.value, store, endpoint)
@@ -4309,7 +4309,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [__PendingEntr
     if queue.len() > 100000 - normalized.len() {
         return Err(ServiceError.Full("service authority pending delivery queue is full"))
     }
-    restored := [__PendingEntry]{}
+    restored := [PendingEntry]{}
     loop entry in normalized {
         if !pending_contains(queue, entry) && !pending_contains(restored, entry) {
             restored.push(entry)
@@ -4346,13 +4346,13 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
     }
 }
 
-__DeliveryRead: struct {
-    entry: __DeliveryEntry
-    records: [__DeliveryRecord]
+priv DeliveryRead: struct {
+    entry: DeliveryEntry
+    records: [DeliveryRecord]
 }
 
 // The receipt behind a delivery handle, checked against the handle.
-delivery_entry: fn(delivery: Delivery) -> __DeliveryRead ServiceError! {
+delivery_entry: fn(delivery: Delivery) -> DeliveryRead ServiceError! {
     authority_validate_text(delivery.id, "delivery id", 1024, false)
     runtime: ServiceRuntime{store: delivery.store, retention_ms: 0}
     authority_validate_runtime(runtime)
@@ -4372,7 +4372,7 @@ delivery_entry: fn(delivery: Delivery) -> __DeliveryRead ServiceError! {
     if delivery.generation != entry.generation {
         return Err(ServiceError.Stale("delivery handle generation does not match its receipt"))
     }
-    Ok(__DeliveryRead{entry: entry, records: records})
+    Ok(DeliveryRead{entry: entry, records: records})
 }
 
 delivery_validate_runtime: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceError! {
@@ -4597,7 +4597,7 @@ runtime_commit: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceError! {
     pending_remove_entry(runtime, entry)
 }
 
-delivery_receipt_signature: fn(entry: __DeliveryEntry, duplicate: Bool) -> String ServiceError! {
+delivery_receipt_signature: fn(entry: DeliveryEntry, duplicate: Bool) -> String ServiceError! {
     key: delivery_generation_key(entry.authority, entry.generation)
     fields: [String]{"jet-service-delivery-receipt-v1", entry.id, entry.key, "{duplicate}", entry.tree, entry.worker, entry.message, delivery_state_show(entry.state), "{entry.attempts}", "{entry.expires}", "{entry.retained_until ?? -1}", "{entry.generation}"}
     Ok(service_encoding.bytes_to_hex(service_crypto.hmac_sha256(key, delivery_signature_payload(fields))))
@@ -4660,7 +4660,7 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     authority: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     generation_key: delivery_generation_key(authority, 7) ?? panic("fixed key")
     assert(service_encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
-    entry: __DeliveryEntry{id: "d1", key: "k1", tree: "tree", worker: "worker", authority: authority, generation: 7, message: "λ", created: 0, expires: 1700000000999, retained_until: Val(1700000010000), attempts: 3, state: DeliveryState.Delivered, event_sequence: 4, delivered_to_worker: true, delivered: true, dead: false}
+    entry: DeliveryEntry{id: "d1", key: "k1", tree: "tree", worker: "worker", authority: authority, generation: 7, message: "λ", created: 0, expires: 1700000000999, retained_until: Val(1700000010000), attempts: 3, state: DeliveryState.Delivered, event_sequence: 4, delivered_to_worker: true, delivered: true, dead: false}
     receipt: delivery_receipt_signature(entry, true) ?? panic("receipt vector")
     assert(receipt == "df0bd21f6f2307c792cfb3b56258a633200241a964aca0c5f669853f11883601")
     event: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
@@ -4809,8 +4809,8 @@ receive: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceErro
                 record: pending[i]
                 before: channel_snapshot(tree.workers[target].channel)
                 sent: channel_try_send(tree.workers[target].channel, record.message)
-                if sent != __ChannelSend.Sent {
-                    error: if sent == __ChannelSend.Full -> ServiceError.Policy("service authority delivery exceeded mailbox capacity") else -> ServiceError.NotStarted("service authority worker mailbox is closed")
+                if sent != ChannelSend.Sent {
+                    error: if sent == ChannelSend.Full -> ServiceError.Policy("service authority delivery exceeded mailbox capacity") else -> ServiceError.NotStarted("service authority worker mailbox is closed")
                     return Err(pending_delivery_rollback(tree, endpoint, target, pending.slice(i, pending.len()), before, draining, error))
                 }
                 if authority_mark_delivered(record.store, record.id) == {
@@ -4859,7 +4859,7 @@ worker_exact: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int? Never! {
 
 // Requeue the undelivered suffix, then restore the mailbox; each runs once
 // even when the other fails.
-pending_delivery_rollback: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [__PendingEntry], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+pending_delivery_rollback: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [PendingEntry], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
     authority_error := ServiceError?{None}
     if authority_requeue_pending(endpoint, remaining) == {
         .Err(failure) -> { authority_error = Val(failure) }
@@ -4927,7 +4927,7 @@ worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String
     // The mailbox exists before the endpoint is published, so a failed
     // allocation never leaves a ghost authority in the registry.
     authority_register(endpoint, false, Val(channel))
-    tree.workers.push(__TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, restarts: [Int]{}, running: false})
+    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, restarts: [Int]{}, running: false})
     Ok(endpoint)
 }
 
@@ -5239,9 +5239,9 @@ promote_worker_generation: fn(tree: &ServiceTree, name: String) -> Bool ServiceE
 start_load_state: fn(tree: &ServiceTree) ServiceError! {
     authority: tree.state_authority ?? return Ok()
     records := state_load(authority, tree.state_adapter)
-    if tree.state_adapter == __TreeStateAdapter.Snapshot {
+    if tree.state_adapter == TreeStateAdapter.Snapshot {
         tree.snapshot = if records.len() == 0 -> None else -> Val(records[0])
-    } else if tree.state_adapter == __TreeStateAdapter.EventLog { tree.event_log = records }
+    } else if tree.state_adapter == TreeStateAdapter.EventLog { tree.event_log = records }
     materialized := tree.workflows.copy()  // copy: the comparison must not move the live cursors
     loop index in 0..<materialized.len() -> materialized[index].replay_cursor = 0
     durable := workflow_replay(tree)
@@ -5329,7 +5329,7 @@ start: fn(tree: &ServiceTree) ServiceError! {
 stop: fn(tree: &ServiceTree) ServiceError! {
     lock: rollout_operation_lock(tree)
     preserve: tree.delivery == ServiceDelivery.DurableAtLeastOnce
-    reset: tree.state_adapter == __TreeStateAdapter.Empty
+    reset: tree.state_adapter == TreeStateAdapter.Empty
     first := ServiceError?{None}
     loop index in 0..<tree.workers.len() {
         tree.workers[index].running = false
@@ -5532,21 +5532,21 @@ reconcile_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError
 }
 
 // The pre-handoff state copy a reversible migration can roll back to.
-__RollbackPlan: struct {
+priv RollbackPlan: struct {
     store: String
     available: Bool
     migration: String
 }
 
-prepare_rollback: fn(tree: ServiceTree) -> __RollbackPlan ServiceError! {
-    authority: tree.state_authority ?? return Ok(__RollbackPlan{store: "", available: false, migration: "none"})
+prepare_rollback: fn(tree: ServiceTree) -> RollbackPlan ServiceError! {
+    authority: tree.state_authority ?? return Ok(RollbackPlan{store: "", available: false, migration: "none"})
     if authority.migration == "forward_only" {
-        return Ok(__RollbackPlan{store: "", available: false, migration: authority.migration})
+        return Ok(RollbackPlan{store: "", available: false, migration: authority.migration})
     }
     store: rollback_store_path(authority, tree.generation)
     records: state_load(authority, tree.state_adapter)
     state_write(state_authority_at(authority, store), tree.state_adapter, records)
-    Ok(__RollbackPlan{store: store, available: true, migration: authority.migration})
+    Ok(RollbackPlan{store: store, available: true, migration: authority.migration})
 }
 
 discard_rollback_store: fn(path: String) -> ServiceError? Never! {
@@ -5713,7 +5713,7 @@ rollback_rotate: fn(tree: ServiceTree, index: Int, endpoint: ServiceEndpoint, ru
 }
 
 // Put the pre-handoff state copy back in the live store and retire it.
-restore_rollback: fn(tree: &ServiceTree, from: Int, plan: __RollbackPlan) ServiceError! {
+restore_rollback: fn(tree: &ServiceTree, from: Int, plan: RollbackPlan) ServiceError! {
     if !plan.available -> return Ok()
     authority: tree.state_authority ?? return Err(ServiceError.Policy("upgrade receipt requires a state authority"))
     if plan.store != rollback_store_path(authority, from) {
@@ -5725,9 +5725,9 @@ restore_rollback: fn(tree: &ServiceTree, from: Int, plan: __RollbackPlan) Servic
     }
     records: state_load(state_authority_at(authority, plan.store), tree.state_adapter)
     state_write(authority, tree.state_adapter, records)
-    if tree.state_adapter == __TreeStateAdapter.Snapshot {
+    if tree.state_adapter == TreeStateAdapter.Snapshot {
         tree.snapshot = if records.len() == 0 -> None else -> Val(records[0])
-    } else if tree.state_adapter == __TreeStateAdapter.EventLog { tree.event_log = records }
+    } else if tree.state_adapter == TreeStateAdapter.EventLog { tree.event_log = records }
     if service_remove(plan.store) == {
         .Err(error) -> return Err(state_error("cannot retire service rollback store: {error}"))
         .Ok(_) -> {}
@@ -5751,7 +5751,7 @@ rollback_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
         return Err(ServiceError.Policy("forward-only state migration cannot roll back; publish a forward recovery generation"))
     }
     from: receipt.from_generation
-    plan: __RollbackPlan{store: receipt.rollback_store.copy(), available: receipt.rollback_available, migration: receipt.migration.copy()}  // copy: the receipt is cleared below
+    plan: RollbackPlan{store: receipt.rollback_store.copy(), available: receipt.rollback_available, migration: receipt.migration.copy()}  // copy: the receipt is cleared below
     rollback_endpoints := [ServiceEndpoint]{}
     running := [Bool]{}
     loop worker in tree.workers {

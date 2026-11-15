@@ -68,18 +68,18 @@ unix_ns: fn() -[Time]> Int Never! {
 // deliberately retain the shared state so a caller's later tick remains live.
 // System clocks use the raw host monotonic epoch, not world/replay selection;
 // their labeled state keeps the elapsed sample and millisecond offset distinct.
-__ClockState: enum {
+priv ClockState: enum {
     Manual(Int)
     System(started_ns: Int, offset_ms: Int)
 }
 
 Clock: struct {
-    state: Shared<__ClockState>
+    state: Shared<ClockState>
 
-    new: fn(seed: Int) -> Clock Never! { Clock{state: Shared{__ClockState.Manual(seed)}} }
+    new: fn(seed: Int) -> Clock Never! { Clock{state: Shared{ClockState.Manual(seed)}} }
 
     system: fn() -[Time]> Clock Never! {
-        Clock{state: Shared{__ClockState.System{started_ns: rt.clock_mono_ns(), offset_ms: 0}}}
+        Clock{state: Shared{ClockState.System{started_ns: rt.clock_mono_ns(), offset_ms: 0}}}
     }
 
     now: fn(self) -> Int Never! {
@@ -90,12 +90,12 @@ Clock: struct {
     set: fn(&self, value: Int) Never! {
         guard := self.state.guard_edit()
         if guard.value == {
-            .Manual(_) -> { guard.value = __ClockState.Manual(value) }
+            .Manual(_) -> { guard.value = ClockState.Manual(value) }
             .System(_, _) -> {
                 current: clock_state_now(guard.value)
                 started: rt.clock_mono_ns()
                 offset: if value > current -> value else -> current
-                guard.value = __ClockState.System{started_ns: started, offset_ms: offset}
+                guard.value = ClockState.System{started_ns: started, offset_ms: offset}
             }
         }
     }
@@ -128,7 +128,7 @@ Clock: struct {
             .System(_, _) -> {
                 started: rt.clock_mono_ns()
                 offset: clock_state_now(guard.value)
-                Clock{state: Shared{__ClockState.System{started_ns: started, offset_ms: offset}}}
+                Clock{state: Shared{ClockState.System{started_ns: started, offset_ms: offset}}}
             }
         }
     }
@@ -164,7 +164,7 @@ Clock: struct {
 }
 
 __ClockObserver: struct {
-    state: Shared<__ClockState>
+    state: Shared<ClockState>
 
     now: fn(self) -> Int Never! {
         guard: self.state.guard_read()
@@ -172,7 +172,7 @@ __ClockObserver: struct {
     }
 }
 
-clock_state_now: fn(state: __ClockState) -> Int Never! {
+clock_state_now: fn(state: ClockState) -> Int Never! {
     if state == {
         .Manual(value) -> value
         .System(started_ns, offset_ms) -> {
@@ -260,10 +260,10 @@ priv duration_whole_ms: fn(duration: Duration) -> Int Never! {
     manual: Clock.new(4)
     assert(manual.equal(Clock.new(4)))
     assert(!manual.equal(Clock.new(5)))
-    system: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 4}}}
-    same: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 4}}}
-    later: Clock{state: Shared{__ClockState.System{started_ns: 1, offset_ms: 4}}}
-    shifted: Clock{state: Shared{__ClockState.System{started_ns: 0, offset_ms: 5}}}
+    system: Clock{state: Shared{ClockState.System{started_ns: 0, offset_ms: 4}}}
+    same: Clock{state: Shared{ClockState.System{started_ns: 0, offset_ms: 4}}}
+    later: Clock{state: Shared{ClockState.System{started_ns: 1, offset_ms: 4}}}
+    shifted: Clock{state: Shared{ClockState.System{started_ns: 0, offset_ms: 5}}}
     assert(system.equal(same))
     assert(!system.equal(later))
     assert(!system.equal(shifted))

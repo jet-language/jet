@@ -175,33 +175,33 @@ query_text: fn(path: String) -[FS]> String [FieldError]! {
 }
 
 #Codable
-__QueryTestSale: struct {
+priv QueryTestSale: struct {
     item: String
     cents: Int
 }
 
-__query_test_sales: fn() -> [__QueryTestSale] Never! {
-    [__QueryTestSale]{__QueryTestSale{item: "tools", cents: 125}, __QueryTestSale{item: "core", cents: 40}, __QueryTestSale{item: "apps", cents: 80}, __QueryTestSale{item: "core", cents: 90}}
+__query_test_sales: fn() -> [QueryTestSale] Never! {
+    [QueryTestSale]{QueryTestSale{item: "tools", cents: 125}, QueryTestSale{item: "core", cents: 40}, QueryTestSale{item: "apps", cents: 80}, QueryTestSale{item: "core", cents: 90}}
 }
 
 #Test("SQL row queries bind after parsing and keep typed rows") {
     rows: __query_test_sales()
-    selected: __query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
-    assert_eq(core.data.__query_plan<__QueryTestSale>(selected), [String]{"scan", "sql"})
-    got: core.data.__query_collect<__QueryTestSale>(selected) ?? panic("collect")
+    selected: __query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
+    assert_eq(core.data.__query_plan<QueryTestSale>(selected), [String]{"scan", "sql"})
+    got: core.data.__query_collect<QueryTestSale>(selected) ?? panic("collect")
     assert_eq(got.len(), 3)
     assert_eq(got[0].item, "apps")
     assert_eq(got[1].cents, 90)
-    top: core.data.__query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
+    top: core.data.__query_collect<QueryTestSale>(__query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
     assert_eq(top.len(), 2)
     assert_eq(top[0].cents, 125)
     assert_eq(top[1].cents, 90)
-    quoted: core.data.__query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
+    quoted: core.data.__query_collect<QueryTestSale>(__query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
     assert_eq(quoted.len(), 0)
     refusals: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
     expected: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
     loop index in 0..<refusals.len() {
-        if __query_sql<__QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
+        if __query_sql<QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
             .Ok(_) -> { panic("SQL query should be refused") }
             .Err(errors) -> assert_eq(errors[0].reason, expected[index])
         }

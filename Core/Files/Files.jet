@@ -310,7 +310,7 @@ FileLock: struct {
 // opens, waits and identity checks therefore close without unlinking a name.
 // Close reads the consumed receiver in place. Rebinding it (`held := self.move()`)
 // would make a second owner whose scope-end Close re-enters this one.
-__LockFd: struct {
+priv LockFd: struct {
     fd: Int
 
     impl Close {
@@ -321,7 +321,7 @@ __LockFd: struct {
 // The FileLock becomes the descriptor's one owner: the caller's guard is
 // disarmed in place (-1 closes nothing), so its scope-end Close never closes
 // the descriptor the FileLock now holds.
-lock_owner: fn(path: &&String, fd: &__LockFd) -> FileLock Never! {
+lock_owner: fn(path: &&String, fd: &LockFd) -> FileLock Never! {
     value: fd.fd
     fd.fd = -1
     core.files.__lock_owner(path, value)
@@ -2389,10 +2389,10 @@ lock_errno: fn(path: String, code: Int, platform: Int) -> IOError Never! {
     IOError.Other(context)
 }
 
-lock_open: fn(path: String) -[FS, Env]> __LockFd IOError! {
+lock_open: fn(path: String) -[FS, Env]> LockFd IOError! {
     opened: core.files.__lock_open(path)
     if opened.value < 0 -> return Err(lock_errno(path, opened.errno, opened.platform))
-    fd: __LockFd{fd: opened.value}
+    fd: LockFd{fd: opened.value}
     identity: core.files.__lock_fd_identity(fd.fd)
     if identity.errno != 0 -> return Err(lock_errno(path, identity.errno, identity.platform))
     if !identity.regular || identity.reparse {

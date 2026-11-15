@@ -30,7 +30,7 @@ read: fn<T>(loader: &DataLoader<T>) DataError! -[FS]> {
 
 // The CSV record cursor behind `csv_reader<T>`; the first record is the
 // header and is read on the first pull.
-__CSVRowSource: struct {
+priv CSVRowSource: struct {
     records: CSVReader<FileReader>
     header: [String]
     started: Bool
@@ -39,7 +39,7 @@ __CSVRowSource: struct {
 
 // The JSON event cursor behind `json_reader<T>`; the opening `[` is read on
 // the first pull and the closing `]` ends the stream.
-__JSONRowSource: struct {
+priv JSONRowSource: struct {
     parser: encoding_stream.JSONPull<FileReader>
     array_started: Bool
     array_done: Bool
@@ -53,13 +53,13 @@ __JSONRowSource: struct {
 csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
     records: csv_codec.reader<FileReader>(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state: Shared{__CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
+    state: Shared{CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
     Ok(core.data.__stream_from<T>(fn() { csv_reader_next<T>(state) }, limits))
 }
 
 // One pull of `csv_reader<T>`: the header on the first pull, then one data
 // record decoded to `T`; `None` at end of input.
-csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
+csv_reader_next: fn<T: Decode>(state: Shared<CSVRowSource>) -> T? DataError! {
     cell := state.guard_edit()
     if !cell.value.started {
         cell.value.started = true
@@ -134,13 +134,13 @@ json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> 
     core.data.data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
-    state: Shared{__JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
+    state: Shared{JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
     Ok(core.data.__stream_from<T>(fn() { json_reader_next<T>(state) }, limits))
 }
 
 // One pull of `json_reader<T>`: the opening `[` on the first pull, then one
 // array element decoded to `T`; `None` at the closing `]` or end of input.
-json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! {
+json_reader_next: fn<T: Decode>(state: Shared<JSONRowSource>) -> T? DataError! {
     cell := state.guard_edit()
     if cell.value.array_done -> return Ok(None)
     if !cell.value.array_started {

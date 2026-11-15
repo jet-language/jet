@@ -853,15 +853,15 @@ ProcessChunks: struct {
     __size: Int
 
     impl Iterable {
-        Iter: __ProcessChunkCursor
+        Iter: ProcessChunkCursor
 
-        iter: fn(&&self) -> __ProcessChunkCursor {
-            __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
+        iter: fn(&&self) -> ProcessChunkCursor {
+            ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
         }
     }
 }
 
-__ProcessChunkCursor: struct {
+priv ProcessChunkCursor: struct {
     stdout: ProcessStdoutStream?
     stderr: ProcessStderrStream?
     size: Int

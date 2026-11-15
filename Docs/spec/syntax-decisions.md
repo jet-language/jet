@@ -274,7 +274,7 @@ inside imported signatures and fields resolve in the declaring module's import
 scope. Native private carriers remain nameable only in their owning Core scope;
 this admission does not create a source declaration or a public export.
 The same owner-only rule admits native enum menus such as
-`__TreeStateAdapter` when no source enum is declared. Compiler-owned
+`TreeStateAdapter` when no source enum is declared. Compiler-owned
 `TaskFailure` uses its canonical enum menu, and `Expired{}` uses its empty
 record shape. Source-owned methods (including `Clock.now`) take precedence
 over same-spelled native method tables.
