@@ -452,8 +452,19 @@ SYMBOL_LOCAL_BOUND: 2147483647
 SymbolKeys: struct {
     base: Int
     bound: Int
-    keys: NameTable
+    keys: SymbolKeyRows
     module_identity: ModuleID{module_none()}
+}
+
+// A range's keys, each held once, as its String: a probe compares a key's
+// `name_rows_hash` and then the String, so a lookup copies no bytes and the
+// range keeps no second copy of its keys' bytes.
+SymbolKeyRows: struct {
+    texts: [String]
+    hashes: [Int]
+    // Open-addressing slots: 0 is empty, otherwise the row plus one.
+    slots: [Int]
+    mask: Int
 }
 
 // The run's symbols: ranges in ascending base, and a hash index of the keys
@@ -461,9 +472,9 @@ SymbolKeys: struct {
 // there, and a lookup the closed keys miss reads its own keys.
 SymbolTable: struct {
     ranges: [SymbolKeys]
-    // Open-addressing slots over each closed key's `name_hash`: 0 is empty,
-    // otherwise the key's id plus one. A probe compares the spelling the
-    // id's range holds, so the index stores no key text.
+    // Open-addressing slots over each closed key's `name_rows_hash`: 0 is
+    // empty, otherwise the key's id plus one. A probe compares the String
+    // the id's range holds, so the index stores no key text.
     slots: [Int]{[Int]{0}}
     mask: Int{0}
 }
@@ -487,20 +498,69 @@ symbol_key_text: fn(kind: SymbolKind, module_name: String, owner: String, name: 
 }
 
 symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {
-    SymbolKeys{base: base, bound: bound, keys: name_table()}
+    SymbolKeys{base: base, bound: bound, keys: symbol_key_rows(NAME_TABLE_INITIAL_SLOTS)}
 }
 
 // No range: what a registration row holds once the run's table took its
 // range.
 symbol_keys_empty: fn() -> SymbolKeys Never! {
-    SymbolKeys{base: 0, bound: 0, keys: name_table_sized(2)}
+    SymbolKeys{base: 0, bound: 0, keys: symbol_key_rows(2)}
 }
 
 SYMBOL_LOCAL_INITIAL_SLOTS: 16
 
 // A checking body's own keys: few, so the table starts small.
 symbol_local_keys: fn() -> SymbolKeys Never! {
-    SymbolKeys{base: SYMBOL_LOCAL_BASE, bound: SYMBOL_LOCAL_BOUND, keys: name_table_sized(SYMBOL_LOCAL_INITIAL_SLOTS)}
+    SymbolKeys{base: SYMBOL_LOCAL_BASE, bound: SYMBOL_LOCAL_BOUND, keys: symbol_key_rows(SYMBOL_LOCAL_INITIAL_SLOTS)}
+}
+
+// Rows whose row 0 is the empty key, with at least `slots` slots to start
+// (rounded up to a power of two, so a probe visits every slot); they grow
+// as keys arrive.
+symbol_key_rows: fn(slots: Int) -> SymbolKeyRows Never! {
+    capacity := 2
+    loop capacity < slots -> capacity *= 2
+    rows := SymbolKeyRows{texts: [String]{}, hashes: [Int]{}, slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
+    _ := symbol_key_rows_intern(rows, "")
+    rows
+}
+
+// The row of `key`, whose `name_rows_hash` is `hash`, when `rows` holds it.
+symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Never! {
+    slot := hash.bit_and(rows.mask)
+    loop rows.slots[slot] != 0 {
+        row: rows.slots[slot] - 1
+        if rows.hashes[row] == hash && rows.texts[row] == key -> return Val(row)
+        slot = (slot + 1).bit_and(rows.mask)
+    }
+    None
+}
+
+// The row of `key`, added when it is new.
+symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
+    hash: name_rows_hash(key)
+    if symbol_key_rows_find(rows, key, hash) == .Val(found) -> return found
+    row: rows.texts.len()
+    // copy: the rows keep their own key; `key` stays with the caller.
+    rows.texts.push(key.copy())
+    rows.hashes.push(hash)
+    if (row + 1) * 2 > rows.mask {
+        capacity: (rows.mask + 1) * 2
+        mask: capacity - 1
+        slots := (loop _ in 0..<capacity -> 0)
+        loop index in 0..<rows.texts.len() {
+            slot := rows.hashes[index].bit_and(mask)
+            loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+            slots[slot] = index + 1
+        }
+        rows.slots = slots.move()
+        rows.mask = mask
+        return row
+    }
+    slot := hash.bit_and(rows.mask)
+    loop rows.slots[slot] != 0 -> slot = (slot + 1).bit_and(rows.mask)
+    rows.slots[slot] = row + 1
+    row
 }
 
 // The core builtin owner types (`Task`, `Receiver`, `Sender`): declared by
@@ -572,14 +632,14 @@ symbol_builtin_method: fn(trait_name: String, method: String) -> SymbolID? Never
 
 // The id of `key` in `keys`, interned when it is new.
 symbol_keys_intern: fn(keys: &SymbolKeys, key: String) -> SymbolID Never! {
-    row: name_index(name_intern(keys.keys, key))
+    row: symbol_key_rows_intern(keys.keys, key)
     if row >= keys.bound -> panic("symbol range at {keys.base} is full ({keys.bound} keys)")
     SymbolID{id: checked(U32{keys.base + row}) ?? panic("symbol id out of range")}
 }
 
 symbol_keys_find: fn(keys: SymbolKeys, key: String) -> SymbolID? Never! {
-    name: name_find(keys.keys, key) ?? return None
-    Val(SymbolID{id: checked(U32{keys.base + name_index(name)}) ?? return None})
+    row: symbol_key_rows_find(keys.keys, key, name_rows_hash(key)) ?? return None
+    Val(SymbolID{id: checked(U32{keys.base + row}) ?? return None})
 }
 
 // The key of `id`, which `keys` holds.
@@ -628,7 +688,7 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
             hash: table.ranges[index].keys.hashes[row]
             slot := hash.bit_and(table.mask)
             loop table.slots[slot] != 0 {
-                if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.bytes, name_start(table.ranges[index].keys, row), table.ranges[index].keys.ends[row]) -> panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
+                if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.texts[row]) -> panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
                 slot = (slot + 1).bit_and(table.mask)
             }
             table.slots[slot] = table.ranges[index].base + row + 1
@@ -638,11 +698,12 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
     table
 }
 
-// Whether the key of closed id `id` spells `bytes[start..<end]`, whose
-// `name_hash` is `hash`.
-symbol_table_holds: fn(table: SymbolTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+// Whether the key of closed id `id` is `key`, whose `name_rows_hash` is
+// `hash`.
+symbol_table_holds: fn(table: SymbolTable, id: Int, hash: Int, key: String) -> Bool Never! {
     at: symbol_table_range_of(table, id)
-    name_bytes_equal(table.ranges[at].keys, id - table.ranges[at].base, hash, bytes, start, end)
+    row: id - table.ranges[at].base
+    table.ranges[at].keys.hashes[row] == hash && table.ranges[at].keys.texts[row] == key
 }
 
 // The range `table` holds for the keys of module `identity`.
@@ -656,17 +717,16 @@ symbol_table_module_range: fn(table: SymbolTable, identity: ModuleID) -> Int? Ne
 // The id of `key`, if a range holds it.
 symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
     if key == "" -> return Val(symbol_none())
-    bytes: key.bytes()
-    hash: name_hash(bytes, 0, bytes.len())
+    hash: name_rows_hash(key)
     slot := hash.bit_and(table.mask)
     loop table.slots[slot] != 0 {
         id: table.slots[slot] - 1
-        if symbol_table_holds(table, id, hash, bytes, 0, bytes.len()) -> return Val(SymbolID{id: checked(U32{id}) ?? return None})
+        if symbol_table_holds(table, id, hash, key) -> return Val(SymbolID{id: checked(U32{id}) ?? return None})
         slot = (slot + 1).bit_and(table.mask)
     }
     open: table.ranges.len() - 1
-    name: name_find_bytes(table.ranges[open].keys, bytes, 0, bytes.len()) ?? return None
-    Val(SymbolID{id: checked(U32{table.ranges[open].base + name_index(name)}) ?? return None})
+    row: symbol_key_rows_find(table.ranges[open].keys, key, hash) ?? return None
+    Val(SymbolID{id: checked(U32{table.ranges[open].base + row}) ?? return None})
 }
 
 // The id of `key`, interned in the open range when no range holds it. Only
@@ -681,6 +741,22 @@ symbol_intern: fn(table: &SymbolTable, key: String) -> SymbolID Never! {
 // interned as `symbol_intern` does.
 symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
     symbol_intern(table, symbol_key_text(kind, module_name, owner, name))
+}
+
+#Test("symbol keys intern once, grow past their slots, and resolve across closed and open ranges") {
+    module_keys := SymbolKeys{base: 1000, bound: 100, keys: symbol_key_rows(2)}
+    loop index in 0..<40 -> assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v{index}").id}, 1001 + index)
+    assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v7").id}, 1008)
+    assert_eq(module_keys.keys.texts.len(), 41)
+    assert(symbol_keys_find(module_keys, "local:m:f:v40") == None)
+    table := symbol_table_of([SymbolKeys]{symbol_builtin_keys(), module_keys})
+    assert_eq(Int{(symbol_find(table, "local:m:f:v39") ?? symbol_none()).id}, 1040)
+    assert(symbol_find(table, "") != None)
+    fresh: symbol_mint(table, SymbolKind.Function, "m", "", "g")
+    assert_eq(Int{fresh.id}, 1101)
+    assert(symbol_intern(table, "function:m::g") == fresh)
+    assert_eq(symbol_table_key(table, fresh), "function:m::g")
+    assert_eq(symbol_table_key(table, SymbolID{id: U32{1001}}), "local:m:f:v0")
 }
 
 // The range of `id`: the last one whose base is at most `id`.
@@ -759,9 +835,9 @@ DeclTable: struct {
 
 // Appends `symbol`'s row, a run-wide one; `decl_table_index` keys it.
 decl_table_add: fn(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
-    id: DeclID{row: table.rows.add(DeclRow{symbol: symbol.id, kind: symbol.kind})}
-    table.pending.push(id.copy())
-    id
+    row: table.rows.add(DeclRow{symbol: symbol.id, kind: symbol.kind})
+    table.pending.push(DeclID{row: row})
+    DeclID{row: row}
 }
 
 // Keys the pending rows. They are in row order, so the first row of each
