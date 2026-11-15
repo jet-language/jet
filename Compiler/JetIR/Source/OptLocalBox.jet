@@ -23,9 +23,13 @@
 //   an address is never null, so it becomes that constant;
 // - anything in the Else of an If on the box's unique test: a box nothing
 //   else reaches is always unique, so that arm (the shared owner's release
-//   and its last-owner routine) never runs, on the heap or in the frame.
+//   and its last-owner routine) never runs, on the heap or in the frame;
+// - the Move into its join: a slot written only by such Moves, each right
+//   after its box's allocation (an inlined call's returns, each moving its
+//   own Result box into the call's result). The join is read as its boxes
+//   are, and they live in the frame only together.
 //
-// Any other read (a Move, a Store of the box itself, a Return, a call
+// Any other read (another Move, a Store of the box itself, a Return, a call
 // argument, any other use of a field's address) keeps the heap box: the
 // box could outlive the frame or reach code that reads its block header. A
 // box made inside a Loop gets the same storage each round; only the box's
@@ -58,6 +62,34 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         bytes: ir_opt_const_at(f, facts, f.args[f.b[at]], at) ?? -1
         align: ir_opt_const_at(f, facts, f.args[f.b[at] + 1], at) ?? -1
         if bytes >= 8 && bytes <= IR_FRAME_BOX_BYTES && align == 8 -> size[boxed] = bytes
+    }
+    // A join: a slot whose every write Moves in a candidate box right after
+    // the box's allocation, the way an inlined call's returns each move their
+    // Result box into the call's one result. The join stands for whichever
+    // box it last took, so it is read as a box is read, and it and its boxes
+    // stay candidates only together. Nothing between an allocation and its
+    // Move leaves the straight line, so a round that makes a box also points
+    // the join at it, and the join never names storage a later round reused.
+    join := [Int]{}
+    into := [Int]{}
+    loop _ in 0..<count {
+        join.push(0)
+        into.push(-1)
+    }
+    loop at in 0..<f.op.len() {
+        written: ir_x64_write(f, at)
+        if written < 0 || written >= count -> next
+        source: if f.op[at] == .Move -> f.a[at] else -> -1
+        if written < f.param_count || source < 0 || source >= count || size[source] < 0 || into[source] >= 0 || !ir_opt_local_box_straight(f, facts.def_at[source], at) {
+            join[written] = -1
+            next
+        }
+        if join[written] == 0 -> join[written] = 1
+        into[source] = written
+    }
+    loop slot in 0..<count {
+        target: if into[slot] >= 0 && join[into[slot]] == 1 -> into[slot] else -> -1
+        if target >= 0 && (size[target] < 0 || size[slot] < size[target]) -> size[target] = size[slot]
     }
     // Until no candidate drops out: an Else arm is dead only while its box
     // stays a candidate, and the reads in it then count again.
@@ -107,9 +139,11 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
                 if slot < 0 || slot >= count -> next
                 boxed: ir_opt_local_box_of(base, slot)
                 if size[boxed] < 0 -> next
+                // A box moving into its join: the join's reads are its own.
+                joining: op == .Move && boxed == slot && into[slot] == f.dst[at] && join[f.dst[at]] == 1 && size[f.dst[at]] >= 0
                 if op == .Drop && boxed == slot {
                     dropped[slot] = true
-                } else if !ir_opt_local_box_read(m, f, facts, at, slot, boxed, shift[slot], size[boxed], base, unique, release, free) {
+                } else if !joining && !ir_opt_local_box_read(m, f, facts, at, slot, boxed, shift[slot], size[boxed], base, unique, release, free) {
                     size[boxed] = -1
                     changed = true
                 }
@@ -121,10 +155,19 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
                 changed = true
             }
         }
+        // A join and its boxes drop out together; a dropped join's routine
+        // frees whichever box it holds.
+        loop slot in 0..<count {
+            target: if into[slot] >= 0 && join[into[slot]] == 1 -> into[slot] else -> -1
+            if target < 0 || (size[slot] >= 0 && size[target] >= 0 && !(dropped[target] && stored_drop[slot])) -> next
+            if size[slot] >= 0 || size[target] >= 0 -> changed = true
+            size[slot] = -1
+            size[target] = -1
+        }
     }
     made := 0
     loop slot in 0..<count {
-        if size[slot] >= 0 -> made += 1
+        if size[slot] >= 0 && join[slot] != 1 -> made += 1
     }
     if made == 0 -> return 0
     loop at in 0..<f.op.len() {
@@ -162,6 +205,17 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
 ir_opt_local_box_of: fn(base: [Int], slot: Int) -> Int Never! {
     if slot >= 0 && slot < base.len() && base[slot] >= 0 -> return base[slot]
     slot
+}
+
+// Whether running instruction `from` of `f` runs `to` (after it): nothing
+// between them opens, ends or leaves a region.
+ir_opt_local_box_straight: fn(f: IRFunction, from: Int, to: Int) -> Bool Never! {
+    if from < 0 || from >= to -> return false
+    loop at in (from + 1)..<to {
+        op: f.op[at]
+        if op == .Block || op == .Loop || op == .If || op == .Else || op == .End || op == .Br || op == .BrIf || op == .Return || op == .Unreachable -> return false
+    }
+    true
 }
 
 // Whether instruction `at` of `f` reads `read`, the box `boxed` (of `bytes`
@@ -316,4 +370,98 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
         assert_eq(ir_opt_slot_test_calls(m, "jet_rt_alloc"), 1)
         assert_eq(ir_opt_slot_test_calls(m, "jet_rt_free"), 1)
     }
+}
+
+// One arm of run(left) below: boxes `tag` twice (jet_rt_alloc(16, 8), two
+// Stores) and moves the box into `joined`, as an inlined call's return
+// moves its Result box into the call's result.
+ir_opt_local_box_join_arm: fn(m: &IRModule, run: &IRFunction, joined: Int, tag: Int, line: Int) Never! {
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    alloc: ir_intern_name(m, "jet_rt_alloc")
+    size: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, size, 16, -1, -1, line)
+    align: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, align, 8, -1, -1, line)
+    box: ir_slot(run, run.slot_type[joined], IRSlotKind.Temp, -1, 0)
+    sized: ir_args(run, [Int]{size, align})
+    _ := ir_emit(run, IROp.CallRuntime, box, alloc, sized, 2, line)
+    marked: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, marked, tag, -1, -1, line)
+    _ := ir_emit(run, IROp.Store, -1, box, 0, marked, line)
+    _ := ir_emit(run, IROp.Store, -1, box, 8, marked, line)
+    _ := ir_emit(run, IROp.Move, joined, box, -1, -1, line)
+}
+
+// run(left) boxes 1 or 2 in either arm of an If on `left` and moves the
+// arm's box into one slot (ir_opt_local_box_join_arm); after the If it reads
+// both words through that slot and ends the box (its unique test, free and
+// Drop). With `escape`, the slot's box is stored, so it outlives the reads.
+ir_opt_local_box_join_test_module: fn(escape: Bool) -> IRModule Never! {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    res: ir_intern_type(m, "Res", ir_layout(IRTypeKind.Pointer, Type.Named{name: "Res"}, 8, 8, IRClass.Pointer, false, 64, ""))
+    boxed: ir_mark_box(m, res)
+    unique: ir_intern_name(m, "jet_rt_block_unique")
+    free: ir_intern_name(m, "jet_rt_free")
+    run := ir_function_new("run", "test:join.jet::run", "", "join.jet", 1)
+    run.result = word
+    left: ir_slot(run, flag, IRSlotKind.Param, ir_intern_name(m, "left"), 1)
+    joined: ir_slot(run, boxed, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.If, -1, left, -1, -1, 2)
+    ir_opt_local_box_join_arm(m, run, joined, 1, 2)
+    _ := ir_emit(run, IROp.Else, -1, -1, -1, -1, 3)
+    ir_opt_local_box_join_arm(m, run, joined, 2, 3)
+    _ := ir_emit(run, IROp.End, -1, -1, -1, -1, 3)
+    if escape -> _ := ir_emit(run, IROp.Store, -1, joined, 8, joined, 4)
+    first: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Load, first, joined, 0, -1, 4)
+    second: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Load, second, joined, 8, -1, 4)
+    alone: ir_slot(run, flag, IRSlotKind.Temp, -1, 0)
+    tested: ir_args(run, [Int]{joined})
+    _ := ir_emit(run, IROp.CallRuntime, alone, unique, tested, 1, 5)
+    _ := ir_emit(run, IROp.If, -1, alone, -1, -1, 5)
+    bytes: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, bytes, 16, -1, -1, 5)
+    eight: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Const, eight, 8, -1, -1, 5)
+    freed: ir_args(run, [Int]{joined, bytes, eight})
+    _ := ir_emit(run, IROp.CallRuntime, -1, free, freed, 3, 5)
+    _ := ir_emit(run, IROp.Else, -1, -1, -1, -1, 5)
+    _ := ir_emit(run, IROp.Drop, -1, joined, -1, -1, 5)
+    _ := ir_emit(run, IROp.End, -1, -1, -1, -1, 5)
+    sum: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(run, IROp.Add, sum, first, second, IR_OVERFLOW_WRAP, 6)
+    _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 6)
+    ir_opt_compact(run)
+    m.entry = 0
+    name_rows_set(m.function_rows, run.key, 0)
+    m.functions.push(run)
+    m
+}
+
+#Test("The boxes an inlined call's returns move into its one result live in the frame") {
+    loop level in 1..<3 {
+        m := ir_opt_local_box_join_test_module(false)
+        options := ir_opt_options(level)
+        options.inline = IROptInline.Off
+        options.verify = true
+        report: ir_optimize_module(m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        assert_eq(ir_opt_slot_test_calls(m, "jet_rt_alloc"), 0)
+        assert_eq(ir_opt_slot_test_calls(m, "jet_rt_free"), 0)
+        assert_eq(ir_opt_slot_test_calls(m, "jet_rt_block_unique"), 0)
+    }
+}
+
+#Test("Boxes moved into a result whose box is stored keep their heap blocks") {
+    m := ir_opt_local_box_join_test_module(true)
+    options := ir_opt_options(1)
+    options.inline = IROptInline.Off
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    assert_eq(ir_opt_slot_test_calls(m, "jet_rt_alloc"), 2)
+    assert_eq(ir_opt_slot_test_calls(m, "jet_rt_free"), 1)
 }
