@@ -225,7 +225,7 @@ jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, 
         .Built(result, library, interface_text, threads, receipt) -> {
             object: jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink)
             if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
-            jet_cli_runtime_packed(result, prefix, object.bytes.move(), [U8]?{None}, trace_sink)
+            jet_cli_runtime_packed(result, prefix, object.bytes.move(), [U8]?{None}, compiler_threads, trace_sink)
         }
     }
 }
@@ -258,17 +258,17 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
             core: cores.pop() ?? panic("the runtime library lost the Core object")
             if object.problem != "" -> return jet_driver_compile_escaped_failure(object.problem)
             if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
-            jet_cli_runtime_packed(result, prefix, object.bytes.move(), Val(core.bytes.move()), trace_sink)
+            jet_cli_runtime_packed(result, prefix, object.bytes.move(), Val(core.bytes.move()), compiler_threads, trace_sink)
         }
     }
 }
 
 // The runtime `result` lowered to `object`, with the Core library's object
-// `core` (None: no Core object): the pack and the image
+// `core` (None: no Core object): the pack and the image, on `threads`
 // (jet_cli_runtime_pack).
-jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
+jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     if trace_sink == .Val(sink) -> sink.begin("runtime.pack", "", -1, -1)
-    packed: jet_cli_runtime_pack(result, prefix, object, core)
+    packed: jet_cli_runtime_pack(result, prefix, object, core, threads)
     if trace_sink == .Val(sink) -> sink.end("runtime.pack", -1)
     packed
 }
@@ -402,12 +402,13 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
 // JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
 // alone into the runtime pack, with no C archive (#6693), and
 // JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
-// `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image).
+// `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image),
+// linked on `threads`.
 // With the Core object `core` (jet_cli_core_library) the image prelinks the
 // runtime object and it together, so a program bound to the image can call
 // a Core function by its symbol; the pack, which a full link reads, stays
 // the runtime's alone.
-jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?) -> JetDriverCompileResult {
+jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
     if cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) == .Val(pack_path) {
         linked := x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
         if linked.errors.len() > 0 {
@@ -428,7 +429,7 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
                 }
                 prelinked = both.bytes.move()
             } else { prelinked = linked.bytes.move() }
-            image: x64_link_runtime_image(pack_path, prelinked.move())
+            image: x64_link_runtime_image(pack_path, prelinked.move(), threads)
             if image.errors.len() > 0 {
                 cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
                 return jet_driver_compile_escaped_failure("runtime image linking failed; see {prefix}.pack-issues")
