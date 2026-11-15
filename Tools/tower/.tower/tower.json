@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6884,
-    "rev": 103525,
+    "rev": 103545,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30282,8 +30282,8 @@
     {
       "id": "c0t54oz7",
       "num": 3280,
-      "title": "Prove selective and lazy decoding without hidden validation loss",
-      "body": "Prove selective and lazy decoding without hidden validation loss.\n\nCompare projected/partial/lazy/fixed-buffer operations with the canonical reader and generated decoder, preserving the exact validation boundary.\n\nCompare projected/partial/lazy/fixed-buffer operations with the canonical reader and generated decoder, preserving the exact validation boundary.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-core-f058. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "title": "JSON beyond decode: JMESPath queries, merge patch, diff, update, JSONC, field selection and exclusion",
+      "body": "Destination: Core's JSON goes past parse and decode with strict, bounded, typed operations: standard JMESPath queries, RFC 7386 merge patch, diff and update, an explicit JSONC dialect, and runtime field selection and exclusion that never weaken validation or emit hidden fields.\n\nWhy it matters: these are the everyday JSON jobs of config tools and services; each done ad hoc loses validation or data.\n\nDecisions: D-CORE-JMESPATH1=A (bounded standard JMESPath at core.data.jmespath), D-ENC-DYN1=A (typed decode stays strict).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (findings core-f055, core-f058).\n\nMoved out 2026-11-15: other formats to the data formats card; MIME to #6874; HTTP client to #3665; routes to #6864; WebSocket to #6878; Codable to #3236; reactive UI examples to #6552.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -30297,6 +30297,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: JSON criteria restated with proofs (c55 into c54, c57 into c56); c28 met (XMLProfile golden on dev 168e1e9e92). Moved out: other formats (c19-c23, c25, c26, c29) to #6883; c33, c34 to #6552; c37 to #6874; c44, c46 to #3665; c47 to #6864; c48 to #6878; c49, c51-c53 to #3236."
+        },
         {
           "at": "2026-11-13",
           "by": "Main",
@@ -30600,29 +30605,32 @@
         {
           "n": 23,
           "text": "(was #3271) [#3312]  • All core categories, timestamp32/64/96 and ext round trip, bounds and unknown fields. No separate runtime. • Golden `serde/encoding_msgpack`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:57.866Z"
+          "evidence": "Moved to #6883 c5: other formats get one card",
+          "at": "2026-11-15T03:20:12.149Z",
+          "closure": "obsolete"
         },
         {
           "n": 25,
           "text": "(was #3272) Golden serde/toml_profile passes with identical output on O0, O1 and O2, showing typed dates, number bounds, error locations and the documented write order.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:52:16.182Z"
+          "evidence": "Moved to #6883 c6: other formats get one card",
+          "at": "2026-11-15T03:20:13.498Z",
+          "closure": "obsolete"
         },
         {
           "n": 26,
           "text": "(was #3272) [#3251]  • Explicit include order with final typed validation. • Root escape, symlink and cycle rejection; byte, depth and file caps. • Invalid fields report their include path without secrets. A missing file is an IOError. • Golden `io/config_layers`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:02.589Z"
+          "evidence": "Moved to #6883 c7: other formats get one card",
+          "at": "2026-11-15T03:20:14.705Z",
+          "closure": "obsolete"
         },
         {
           "n": 27,
@@ -30636,38 +30644,41 @@
         {
           "n": 28,
           "text": "(was #3272) [#3282] no implicit external IO or executable markup. Golden `serde/xml_profile`. Record the namespace/C14N gap (D-ENCXML1) on its owner card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:04.489Z"
+          "evidence": "dev 168e1e9e92 with gate-p141: `jet test Compiler --profile golden --filter Data/Formats/XMLProfile` PASS on o0, o1 and o2 (no implicit external IO or executable markup). The namespace and C14N gap is recorded as ENCFMT c8 (the data formats card).",
+          "at": "2026-11-15T03:20:15.940Z"
         },
         {
           "n": 29,
           "text": "(was #3272) [#3283]  • Cut over to the strict DataTree/Codable profile and delete `Ini`/`INIError` from Core and CoreCallRows.jet. • Section/default/typed-getter rules; exact case and duplicate policy. • Raw parsing is distinct from Basic/Extended interpolation; cycles are bounded. • Round-trip order is kept and comment loss disclosed. • Golden `serde/encoding_ini`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:05.393Z"
+          "evidence": "Moved to #6883 c9: other formats get one card",
+          "at": "2026-11-15T03:20:17.171Z",
+          "closure": "obsolete"
         },
         {
           "n": 33,
           "text": "(was #3259) [#3243] Examples/features/ui/reactive_observable.jet proves same-value notification, derived order and disposal with no version-cap loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:04.865Z"
+          "evidence": "Moved to #6552 c37: reactive UI examples belong on the app runtime card",
+          "at": "2026-11-15T03:20:18.401Z",
+          "closure": "obsolete"
         },
         {
           "n": 34,
           "text": "(was #3259) [#3257] Examples/features/ui/async_command.jet shows a disabled command, duplicate activation, cancellation, a domain error surfacing as Failed, and teardown, using existing task ownership.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:05.645Z"
+          "evidence": "Moved to #6552 c38: reactive UI examples belong on the app runtime card",
+          "at": "2026-11-15T03:20:19.724Z",
+          "closure": "obsolete"
         },
         {
           "n": 35,
@@ -30690,83 +30701,92 @@
         {
           "n": 37,
           "text": "(was #3286) [#3125]  • One canonical quoted-string scanner (mime.jet:72,81-83). Quoted `;`, escaped quotes, duplicate parameters, unterminated quotes and unknown extensions have explicit outcomes. • HTTP and web use the canonical type. • Golden `net/url_mime`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:10.757Z"
+          "evidence": "Moved to #6874 c3: MIME parameters belong on the MIME card",
+          "at": "2026-11-15T03:20:21.155Z",
+          "closure": "obsolete"
         },
         {
           "n": 44,
           "text": "(was #3304) [#3071]  • Malformed JSON, a wrong field type and real framing failure stay distinct. The FieldError path survives with no second decode. Body limits are unchanged. • `http_json_decode_errors_stay_typed`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:19.051Z"
+          "evidence": "Moved to #3665 c25: HTTP client errors belong on the HTTP client card",
+          "at": "2026-11-15T03:20:22.373Z",
+          "closure": "obsolete"
         },
         {
           "n": 46,
           "text": "(was #3304) [#3225]  • Second consumption, early drop, cancel during read/upload, limits and pool reuse. • Separate phase/idle/total deadlines. Redirect, cookie, auth, proxy and TLS policy. Default-trust TLS rejects bad certificates. • Status, size, JSON and schema errors stay distinct. • `http_client_law` loopback tests; G5 keep-alive/worker probes (from #2782 c3).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:20.565Z"
+          "evidence": "Moved to #3665 c26: HTTP client law belongs on the HTTP client card",
+          "at": "2026-11-15T03:20:23.575Z",
+          "closure": "obsolete"
         },
         {
           "n": 47,
           "text": "(was #3304) [#3302]  • A conflicting route gives a deterministic two-span verdict (E2804, UI `http_route_ambiguous_overlap`). • Mux, router and App pick the same handler. HEAD and typed path failures are recorded. • Golden `net/route_overlap`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:21.333Z"
+          "evidence": "Moved to #6864 c5: route overlap belongs on the typed routes card",
+          "at": "2026-11-15T03:20:24.866Z",
+          "closure": "obsolete"
         },
         {
           "n": 48,
           "text": "(was #3304) [#3303]  • Two isolated connection contexts. Disconnect cleanup. An explicit MessageTooLarge bound. Acknowledgement means \"queued\" only; raw WS is not Socket.IO. • Golden `net/ws_lifetime`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:22.111Z"
+          "evidence": "Moved to #6878 c5: WebSocket lifetime belongs on the HTTP server card",
+          "at": "2026-11-15T03:20:26.426Z",
+          "closure": "obsolete"
         },
         {
           "n": 49,
           "text": "(was #4295) D-CODABLE-OPTIONS1=A is built as ratified: #Codable alone means both directions; type options only: .Encode or .Decode, unknown: .Deny, tag: .External (default), .Field(\"kind\") or .None, from: .Base for distinct types, and published; field forms #Codable(.Skip) and #Codable(.Flatten). #Encode, #Decode, #DenyUnknownFields, #Discriminant, #Untagged, #CodableAsBase, #PublishedSchema, #Skip and #Flatten are gone from the Prelude, the syntax registry and every caller, with no teaching diagnostic (owner order 2026-11-06). Combinations keep their results (unknown: .Deny with published still rejects unknown fields; a .Flatten field still disables the top-level unknown check; tag applies to enums only), and E2407-E2415, E0905 and E0910 stay. tests/cases rows cover each option and combination at O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T19:55:46.552Z"
+          "evidence": "Moved to #3236 c33: Codable options belong on the codec card",
+          "at": "2026-11-15T03:20:28.108Z",
+          "closure": "obsolete"
         },
         {
           "n": 51,
           "text": "(was #4295) [#4326] A field default that calls a fallible function uses its success type under the selected propagation/refusal. Generated locals stay bound (no unbound jet_serde_ok_value), with a fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:27.143Z"
+          "evidence": "Moved to #3236 c34: Codable belongs on the codec card",
+          "at": "2026-11-15T03:20:29.389Z",
+          "closure": "obsolete"
         },
         {
           "n": 52,
           "text": "(was #4295) [#4364] #DenyUnknownFields composes with #Flatten: consumed keys are tracked across flattened fields, and residual unknown keys are rejected.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:27.962Z"
+          "evidence": "Moved to #3236 c35: Codable belongs on the codec card",
+          "at": "2026-11-15T03:20:30.674Z",
+          "closure": "obsolete"
         },
         {
           "n": 53,
           "text": "(was #4295) [#4439] Synthesized encode/decode never collide with a type's own encode/decode methods.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:30:28.720Z"
+          "evidence": "Moved to #3236 c36: Codable belongs on the codec card",
+          "at": "2026-11-15T03:20:31.912Z",
+          "closure": "obsolete"
         },
         {
           "n": 54,
@@ -30780,11 +30800,12 @@
         {
           "n": 55,
           "text": "(was #3306 c2) Show newly added ordinary fields are emitted and Encode-omitted fields remain absent [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:37.097Z"
+          "evidence": "Merged into #3280 c54: emission of new and omitted fields is part of c54",
+          "at": "2026-11-15T03:20:33.398Z",
+          "closure": "obsolete"
         },
         {
           "n": 56,
@@ -30798,11 +30819,12 @@
         {
           "n": 57,
           "text": "(was #3306 c4) Measure allocation against an equivalent application projection and teach the allowlist distinction [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:38.712Z"
+          "evidence": "Merged into #3280 c56: the allocation measurement is part of c56",
+          "at": "2026-11-15T03:20:34.564Z",
+          "closure": "obsolete"
         },
         {
           "n": 58,
@@ -30835,7 +30857,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-15T03:20:10.397Z",
+      "updated": "2026-11-15T03:20:37.505Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 79,
       "goals": [
@@ -209001,6 +209023,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:20:37.505Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0t54oz7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:20:36.405Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0t54oz7",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:20:34.565Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-15T03:20:33.399Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#55"
+    },
+    {
+      "at": "2026-11-15T03:20:31.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-15T03:20:30.675Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#52"
+    },
+    {
+      "at": "2026-11-15T03:20:29.390Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#51"
+    },
+    {
+      "at": "2026-11-15T03:20:28.108Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-15T03:20:26.427Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-15T03:20:24.867Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-15T03:20:23.576Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-15T03:20:22.374Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-15T03:20:21.156Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-15T03:20:19.724Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-15T03:20:18.401Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-15T03:20:17.172Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-15T03:20:15.940Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-15T03:20:14.705Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-15T03:20:13.498Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-15T03:20:12.150Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#23"
+    },
     {
       "at": "2026-11-15T03:20:10.397Z",
       "by": "TowerKeeper-1",
