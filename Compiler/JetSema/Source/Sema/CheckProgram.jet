@@ -5337,8 +5337,10 @@ SemaWaveKind: enum {
 // the threads once it checked every module.
 sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, stream: Shared<SemaBodyStream>, work: Condition, changed: Condition, tasks: Int, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, kind: SemaWaveKind, phase: String, trace_sink: CompilerTraceSink?, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult], checked_functions: &Int, done: &Int) {
     if tasks <= 0 {
+        // Deferred so a panic of the lead stops the threads too: they would
+        // otherwise wait for work forever and the stream's join never end.
+        defer sema_check_body_stream_stop(cells, stream, work, changed, false)
         sema_check_body_stream_lead(shared, cells, stream, work, changed, environment, host_hooks, values, comptime_functions, comptime_rows, pending_obligations, kind, phase, trace_sink, starts, modules, checked_functions, done)
-        sema_check_body_stream_stop(cells, stream, work, changed, false)
         return
     }
     task.group sema_threads {
@@ -11947,14 +11949,31 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
             }
         }
     }
+    // The tag dataflow over every checked body (the Rust reference's
+    // `check_fact_tags_and_states`: a tagged value reaching a denied
+    // destination is reported, whatever else the bundle reported) reads only
+    // the graph's modules, rows and namespaces, never its symbol table, and
+    // the side checks' taint catalog and the bundle's E0307 reports, which
+    // only body checks make. The effect pass and the late checks write none
+    // of these, so the walk's threads run beside the effect pass and its
+    // reports join after the late checks, where they always read.
+    taint_reports := [Diagnostic]{}
+    taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
+    walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
+    walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
     // The effect graph reads every checked body in place and stamps each
-    // solved row onto `modules`.
-    // The effect check borrows the run's symbol table and hands it back.
-    effect_symbols := final_graph.symbols.move()
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effect_symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, final_graph.core_seal)
+    // solved row onto `modules`. It borrows the run's symbol table and hands
+    // it back; the walk's graph holds an empty one meanwhile.
+    effects := SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move()}
+    final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
+    task.group sema_finalize_effect_walks {
+        walking: task sema_finalize_walk_all(final_graph, walk_inputs)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, final_graph.core_seal)
+        if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
+        walked = walking.join() ?? panic(compiler_threads_failure_text(err))
+    }
     final_graph.symbols = effects.symbols.move()
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
-    if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
     if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
@@ -12026,17 +12045,18 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     if trace_sink == .Val(sink) -> sink.end("sema.late", modules.len())
 
-    // Tag dataflow over every checked body (the Rust reference's
-    // `check_fact_tags_and_states`): a tagged value reaching a denied
-    // destination is reported, whatever else the bundle reported. The Core
-    // usage walk ran beside the side checks.
+    // The tag dataflow walked beside the effect pass: its reports join in
+    // module order, none repeating a report the bundle holds by now, and
+    // each module's masked branches and fixed tags mark its functions. The
+    // Core usage walk ran beside the side checks.
     if trace_sink == .Val(sink) -> sink.begin("sema.walks", "", -1, -1)
-    taint_diagnostics := [Diagnostic]{}
-    taint_catalog := taint_prepared.pop() ?? panic("the side checks left no taint catalog")
-    final_graph = sema_finalize_walks(final_graph, taint_catalog, diagnostics, modules, threads, taint_diagnostics)
-    core_usage := sema_core_combine_module_usage(core_modules)
+    loop found in walked.found -> sema_taint_join_reports(taint_reports, diagnostics, found)
+    loop module_index in 0..<walked.masked.len() {
+        sema_mark_masked_branches(modules[module_index].functions, walked.masked[module_index], walked.fixed[module_index])
+    }
+    core_usage: sema_core_combine_module_usage(core_modules)
     if trace_sink == .Val(sink) -> sink.end("sema.walks", core_modules.len())
-    loop diagnostic in taint_diagnostics {
+    loop diagnostic in taint_reports {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
         diagnostics.push(diagnostic)
     }
@@ -12222,64 +12242,58 @@ sema_core_source_lint: fn(diagnostic: Diagnostic) -> Bool Never! {
 }
 
 // A compiler thread is admitted for at least this many bytes of item source
-// walked, so a small program walks on the calling thread: the taint walk
-// (sema_finalize_walks), and the Core usage walk beside the side checks
-// (sema_finalize_side_checks).
+// walked, so a small program walks on one thread: the taint walk
+// (sema_finalize_walk_inputs), and the Core usage walk beside the side
+// checks (sema_finalize_side_checks).
 SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD: 65536
 
 // Core usage jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD: 8
 
-// The tag dataflow after the effect publish (the Rust reference's
-// `check_fact_tags_and_states` taint walk) over `prepared` (sema_taint_prepare
-// of `graph`), on up to `threads` compiler threads that claim its modules,
-// heaviest source first: its reports first, then every function, method,
-// test and conversion body walked once, one job per module. Appends the new
-// reports to `reports`; the E0307 reports among `existing_diagnostics` (the
-// bundle's reports so far) settle switch coverage
-// (sema_taint_coverage_reports), and no report of `existing_diagnostics` is
-// repeated. A module's walk reads only the graph, the catalog and the
-// coverage reports, and each module's reports are kept apart and joined in
-// module order (sema_taint_join_reports), so the reports read exactly as one
-// thread's walk of every module in order. Every thread reads the graph and
-// the walk's inputs in place; the graph is returned. A program whose work
-// admits one thread walks on the calling thread.
-sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaRegistrationGraph {
-    owned: graph.move()
+// The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
+// taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
+// catalog, its modules heaviest source first, and the threads the walk
+// admits. Its own reports move onto `reports`; the E0307 reports among
+// `existing_diagnostics` (the bundle's reports so far) settle switch coverage
+// (sema_taint_coverage_reports).
+sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
-    catalog: taken.catalog.move()
     reports.extend(taken.reports.move())
     taint_weights: taken.weights.move()
-    coverage: sema_taint_coverage_reports(existing_diagnostics)
     work := 0
     loop weight in taint_weights -> work += weight
     workers: compiler_threads_admit(threads, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        state := SemaTaintFlowState{catalog: catalog.move(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: coverage.move(), fixed_tags: [String]{}}
-        loop module_index in 0..<owned.modules.len() {
-            found := [Diagnostic]{}
-            sema_taint_check_module(owned, state, module_index, found)
-            sema_taint_join_reports(reports, existing_diagnostics, found)
-            sema_mark_masked_branches(modules[module_index].functions, state.masked, state.fixed_tags)
-        }
-        return owned
-    }
-    inputs: SemaFinalizeWalkInputs{catalog: catalog.move(), coverage: coverage.move(), taint_order: compiler_threads_heaviest_first(taint_weights)}
-    queue: SemaFinalizeCoreQueue{next: 0}
-    walked := [[Diagnostic]]{}
+    SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers}
+}
+
+// Walks every function, method, test and conversion body of each module
+// once (sema_taint_check_module), one job per module, on `inputs.workers`
+// threads that claim the modules heaviest first. A module's walk reads only
+// the graph's modules, the catalog and the coverage reports, and keeps its
+// reports, masked branches and fixed tags in the module's slot, so joined in
+// module order (sema_taint_join_reports, sema_mark_masked_branches) they
+// read exactly as one thread's walk of every module in order. Reads the
+// graph and the inputs in place and writes neither.
+sema_finalize_walk_all: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs) -> SemaFinalizeWalked {
+    found := [[Diagnostic]]{}
     masked := [[Span]]{}
     fixed := [[String]]{}
-    loop _ in 0..<taint_weights.len() {
-        walked.push([Diagnostic]{})
+    loop _ in 0..<inputs.taint_order.len() {
+        found.push([Diagnostic]{})
         masked.push([Span]{})
         fixed.push([String]{})
     }
-    sema_finalize_walkers(owned, inputs, queue, 0, workers, walked, masked, fixed)
-    loop found in walked -> sema_taint_join_reports(reports, existing_diagnostics, found)
-    loop module_index in 0..<masked.len() {
-        sema_mark_masked_branches(modules[module_index].functions, masked[module_index], fixed[module_index])
-    }
-    owned
+    queue: SemaFinalizeCoreQueue{next: 0}
+    sema_finalize_walkers(graph, inputs, queue, 0, inputs.workers, found, masked, fixed)
+    SemaFinalizeWalked{found: found.move(), masked: masked.move(), fixed: fixed.move()}
+}
+
+// Each walked module's reports, masked branches and fixed tags, in module
+// order (sema_finalize_walk_all).
+SemaFinalizeWalked: struct {
+    found: [[Diagnostic]]
+    masked: [[Span]]
+    fixed: [[String]]
 }
 
 // Each masked branch of a module (Taint.jet sema_taint_mask_branch) joins
@@ -12360,12 +12374,13 @@ sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJo
 }
 
 // What every taint-walking thread reads besides the graph
-// (sema_finalize_walks): the catalog, the coverage reports and the modules
-// in claim order.
+// (sema_finalize_walk_inputs): the catalog, the coverage reports, the
+// modules in claim order and how many threads claim them.
 SemaFinalizeWalkInputs: struct {
     catalog: SemaTaintCatalog
     coverage: [Diagnostic]
     taint_order: [Int]
+    workers: Int
 }
 
 // The next unclaimed job, taken with one atomic add; every thread reads the
@@ -12439,7 +12454,7 @@ sema_finalize_core_claim: fn(queue: SemaFinalizeCoreQueue) -> Int { queue.next.a
 // effect-graph rows (sema_effect_prepare_module) of the k-th of
 // SEMA_FINALIZE_SIDE_EFFECT_PARTS consecutive module ranges. The taint job
 // builds the tag dataflow's catalog (sema_taint_prepare), which the taint
-// walk after the effect pass reads.
+// walk beside the effect pass reads.
 SEMA_FINALIZE_SIDE_INLINE_ALWAYS: 0
 
 SEMA_FINALIZE_SIDE_SCRIPT_ENTRIES: 1
