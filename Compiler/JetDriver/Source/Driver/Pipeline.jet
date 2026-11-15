@@ -1507,7 +1507,7 @@ jet_driver_comptime_function_closure: fn(
         }
         fresh: !settled_foreign && reused_row < 0 && waiting_row < 0
         if fresh && memory_plan.len() == 0 {
-            memory_plan.push(sema_function_memory_plan_from_graph(graph))
+            memory_plan.push(sema_function_memory_plan_from_graph(graph, threads))
         }
         checked := if {
             settled_foreign -> index.nodes[node].foreign ?? panic("a settled foreign closure node lost its check")
@@ -1669,7 +1669,7 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
     seeds: jet_driver_comptime_prefetch_seeds(programs[0], index, prechecks, seen)
     if seeds.len() == 0 -> return 0
     workers: sema_comptime_walk_admit(threads, programs[0], seeds, grows: true)
-    if workers <= 1 || !jet_driver_comptime_memory_plan(programs[0], memory_plan) -> return 0
+    if workers <= 1 || !jet_driver_comptime_memory_plan(programs[0], threads, memory_plan) -> return 0
     walk := sema_comptime_walk_open(environments[0], programs[0], available, values, memory_plan[0], workers)
     kept := 0
     task.group jet_driver_comptime_prefetch_threads {
@@ -1686,12 +1686,12 @@ jet_driver_comptime_prefetches: fn(threads: CompilerThreads) -> Bool {
     compiler_threads_admit(threads, 2, 2, 1, 0, 0) > 1
 }
 
-// The run's function memory plan, made once for the run; false when the
-// program lost its graph.
-jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, memory_plan: &[SemaFunctionMemoryPlan]) -> Bool {
+// The run's function memory plan, made once for the run, its walk on as many
+// threads as `threads` admits; false when the program lost its graph.
+jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: &[SemaFunctionMemoryPlan]) -> Bool {
     if memory_plan.len() == 0 {
         if program.registration_graph == .Val(graph) {
-            memory_plan.push(sema_function_memory_plan_from_graph(graph))
+            memory_plan.push(sema_function_memory_plan_from_graph(graph, threads))
         }
     }
     memory_plan.len() > 0
@@ -1736,7 +1736,7 @@ jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, pro
     }
     if jobs.len() < 2 -> return
     workers: sema_comptime_walk_admit(threads, program, jobs, grows: false)
-    if workers <= 1 || !jet_driver_comptime_memory_plan(program, memory_plan) -> return
+    if workers <= 1 || !jet_driver_comptime_memory_plan(program, threads, memory_plan) -> return
     walk := sema_comptime_walk_open(environment, program, available, values, memory_plan[0], workers)
     kept := 0
     task.group jet_driver_comptime_closure_prefetch_threads {

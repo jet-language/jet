@@ -2,6 +2,7 @@
 // statement lowering, then carried into the checked tree without backend reconstruction.
 use jet_foundation.[
     Binding,
+    CompilerThreads,
     Diagnostic,
     Expr,
     Func,
@@ -21,6 +22,9 @@ use jet_foundation.[
     TGCPromotionEdge,
     Type,
     TypedLitBody,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     gate_kind_parse,
     policy_key_name,
     policy_scope_name,
@@ -248,16 +252,90 @@ sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], p
     items.len()
 }
 
-sema_function_memory_walk_graph: fn(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+sema_function_memory_module_inputs: fn(graph: SemaRegistrationGraph) -> [SemaFunctionMemoryModuleInput] Never! {
     modules := [SemaFunctionMemoryModuleInput]{}
     loop module_row_index in 0..<graph.modules.len() {
         modules.push(SemaFunctionMemoryModuleInput{module_identity: graph.modules[module_row_index].module_identity, package_identity: graph.modules[module_row_index].package_identity, policy_declarations: graph.modules[module_row_index].program.policy_declarations})
     }
+    modules
+}
+
+// Walks the graph's modules `from..<to` in row order; returns their
+// top-level item count.
+sema_function_memory_walk_modules: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], from: Int, to: Int, walk: &SemaFunctionMemoryWalk) -> Int Never! {
     limit := 0
-    loop module_row_index in 0..<graph.modules.len() {
+    loop module_row_index in from..<to {
         limit += sema_function_memory_walk_module(modules, graph.modules[module_row_index].package_identity, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.policy_declarations, graph.modules[module_row_index].program.items, walk)
     }
     limit
+}
+
+sema_function_memory_walk_graph: fn(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    modules: sema_function_memory_module_inputs(graph)
+    sema_function_memory_walk_modules(graph, modules, 0, graph.modules.len(), walk)
+}
+
+// A memory-walk thread is admitted for at least this much module source, so
+// a small program walks on the calling thread.
+SEMA_FUNCTION_MEMORY_MIN_BYTES_PER_THREAD: 262144
+
+// One part's collecting walk: its modules' sources in row order and their
+// top-level item count.
+SemaFunctionMemoryWalked: struct {
+    sources: [SemaFunctionMemorySource]
+    limit: Int
+}
+
+// The collecting walk of every module of `graph` into `walk`. Each module's
+// rows read only the graph, so the modules split into consecutive parts by
+// source size (compiler_threads_partition), one thread each, as many as
+// `threads` admits; every part reads the graph in place, and the parts join
+// in order, so the rows are the same for any thread count.
+sema_function_memory_collect_graph: fn(graph: SemaRegistrationGraph, threads: CompilerThreads, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    weights := [Int]{}
+    work := 0
+    loop graph_module in graph.modules {
+        bytes: graph_module.source.count_bytes()
+        weights.push(bytes)
+        work += bytes
+    }
+    workers: compiler_threads_admit(threads, weights.len(), work, SEMA_FUNCTION_MEMORY_MIN_BYTES_PER_THREAD, 0, 0)
+    if workers <= 1 -> return sema_function_memory_walk_graph(graph, walk)
+    modules: sema_function_memory_module_inputs(graph)
+    parts := sema_function_memory_walk_parts(graph, modules, compiler_threads_partition(weights, workers), 0)
+    limit := 0
+    loop index in 0..<parts.len() {
+        limit += parts[index].limit
+        walk.sources.extend(parts[index].sources.move())
+    }
+    walk.next_row = walk.sources.len()
+    limit
+}
+
+// Parts `at` on of the module `bounds`, in part order, each walked on its own
+// thread and the last on this one.
+sema_function_memory_walk_parts: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], bounds: [Int], at: Int) -> [SemaFunctionMemoryWalked] Never! {
+    done := [SemaFunctionMemoryWalked]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_function_memory_walk_part(graph, modules, from, to))
+        return done
+    }
+    task.group sema_function_memory_walk_group {
+        head: task sema_function_memory_walk_part(graph, modules, from, to)
+        rest: sema_function_memory_walk_parts(graph, modules, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_function_memory_walk_part: fn(graph: SemaRegistrationGraph, modules: [SemaFunctionMemoryModuleInput], from: Int, to: Int) -> SemaFunctionMemoryWalked Never! {
+    walk := sema_function_memory_walk_new()
+    limit: sema_function_memory_walk_modules(graph, modules, from, to, walk)
+    SemaFunctionMemoryWalked{sources: walk.sources.move(), limit: limit}
 }
 
 sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleID, package_identity: String, walk: &SemaFunctionMemoryWalk) -> Int Never! {
@@ -410,9 +488,11 @@ sema_function_memory_boundary_diagnostics: fn(function: Func, promoted: [String]
 // A declaration no scoped-GC policy reaches is not copied into the plan (its
 // row has no function); the walk revisits the items only when a shared key or
 // an E2111 boundary check needs such a declaration after all.
-sema_function_memory_plan_from_graph: fn(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
+// The collecting walk runs on as many threads as `threads` admits
+// (sema_function_memory_collect_graph).
+sema_function_memory_plan_from_graph: fn(graph: SemaRegistrationGraph, threads: CompilerThreads) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
-    limit: sema_function_memory_walk_graph(graph, walk)
+    limit: sema_function_memory_collect_graph(graph, threads, walk)
     plan := sema_function_memory_plan_new()
     planned := sema_function_memory_plan_rows(plan, walk.sources, limit)
     walk.wanted = sema_function_memory_wanted_rows(plan, planned)
