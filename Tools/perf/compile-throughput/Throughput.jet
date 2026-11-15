@@ -2,7 +2,7 @@
 // Compile-throughput cell (#5479 c1; the gauntlet's axes.compile_throughput):
 // live, cold, uncached compiles by the compiler JET names, with their lines
 // per second, wall, CPU, peak memory and per-phase seconds from the
-// compiler's own trace. Three forms:
+// compiler's own trace. Four forms:
 //
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR]
 //       [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE]
@@ -12,6 +12,8 @@
 //       [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST]
 //       [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR]
 //       [--out FILE] [--tool PATH]
+//   jet Tools/perf/compile-throughput/Throughput.jet --batch PREVIOUS
+//       --current CURRENT [--out FILE]
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full
 //       [--programs LIST] [--arms default,single] [--samples N] [--warmups N]
 //       [--receipt FILE] [--baseline FILE] [--write-baseline FILE]
@@ -83,6 +85,30 @@
 // (the throughput ledger of every train). Exit: 0 PASS, 1 FAIL, 3
 // INCONCLUSIVE, 64 usage.
 //
+// The --batch form is the batch build's speed gate: it compiles nothing,
+// and reads two batch builds of `jet build --profile dev Compiler`, the
+// previous batch's (directory PREVIOUS) and this one's (CURRENT), each
+// directory holding the build's trace (`trace.txt`, from --trace) and GNU
+// `time -v`'s report on it (`time.txt`). It judges CPU (user + system, as
+// time -v counts it), traced CPU, and the process CPU of each top-level
+// phase of every process in the trace that has at least 0.5 s in either
+// build. Those phases are the build's own and each build step child's,
+// shown as `<process>/<phase>` (for example
+// `core-record: jet-bare/sema.finalize`). Traced CPU sums every process's
+// top-level phases, so it counts the build step children, which time -v
+// leaves out (the batch builds' time -v reports only the build process's
+// own CPU). One build a side gives one ratio CURRENT / PREVIOUS: FAIL over
+// +10%, a phase only when it also rose by 0.5 s or more (a smaller rise is
+// within one build's noise); a phase only one build ran is `new` or `gone`
+// (work moved between processes, which the CPU totals judge); else pass.
+// Wall, parallelism (traced CPU over wall) and peak memory are reported,
+// never judged. The table leaves out the phases under the floor. The
+// verdict line reads `batch speed gate: PASS` or `FAIL`; a missing or
+// unreadable file, or a build whose time.txt exit status is not 0, gives
+// INCONCLUSIVE. --out FILE appends a `batch` row for each quantity, floored
+// ones included (unix seconds, PREVIOUS, CURRENT, quantity, previous s,
+// current s, verdict). Exit: 0 PASS, 1 FAIL, 3 INCONCLUSIVE, 64 usage.
+//
 // The second form is the gauntlet cell, axes.compile_throughput of
 // Tools/gauntlet/measurement-manifest.json. Its programs: `bench300k` and
 // `bench30k`, written by `jet run Tools/perf/scaling/generate/run.jet --
@@ -121,6 +147,7 @@ use {
     crypto: core.crypto
     files: core.files
     json: core.encoding.json
+    math: core.math
     process: core.process
     sys: core.sys
     term: core.term
@@ -167,6 +194,10 @@ Options: struct {
     // The speed gate's seed jet ("" outside the gate) and perf.
     against: String
     perf: String
+    // The batch gate's previous and current build directories ("" outside
+    // it).
+    batch: String
+    current: String
 }
 
 // budget.json: per-phase ns per source line by column, each row naming the
@@ -178,8 +209,8 @@ OutsideTrace: struct { budget: [String: Float], owners: [String] }
 BudgetTarget: struct { column: String, lines_per_second: Int }
 BudgetFile: struct { target: BudgetTarget, rows: [BudgetPin], outside_trace: OutsideTrace? }
 
-TraceArgs: struct { proc_cpu_ns: Int?, value: Int?, items: Int?, unix_ms: Int? }
-TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: TraceArgs? }
+TraceArgs: struct { proc_cpu_ns: Int?, value: Int?, items: Int?, unix_ms: Int?, name: String? }
+TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, pid: Int?, tid: Int, args: TraceArgs? }
 OpenSpan: struct { kind: String, ts: Int }
 Phase: struct { kind: String, wall_ns: Int{0}, cpu_ns: Int{0}, count: Int{0} }
 Trace: struct {
@@ -215,6 +246,7 @@ usage: fn(message: String) -> Never {
     term.eprint("usage: JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
     term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
     term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
+    term.eprint("       jet Tools/perf/compile-throughput/Throughput.jet --batch PREVIOUS --current CURRENT [--out FILE]")
     process.exit(64)
 }
 
@@ -248,7 +280,7 @@ parse_cpus: fn(text: String) -> [Int] {
 parse_list: fn(text: String) -> [String] { text.split(",").map(fn(m) { m.trim() }).to_list() }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf"}
+    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf", batch: "", current: ""}
     index := 0
     loop index < args.len() {
         flag: args[index]
@@ -278,6 +310,8 @@ parse_options: fn(args: [String]) -> Options {
             flag == "--profile" -> options.profile = value
             flag == "--against" -> options.against = value
             flag == "--perf" -> options.perf = value
+            flag == "--batch" -> options.batch = value
+            flag == "--current" -> options.current = value
             else -> usage("unknown option {flag}")
         }
     }
@@ -286,6 +320,8 @@ parse_options: fn(args: [String]) -> Options {
         if !MODES.contains(mode) -> usage("unknown mode {mode}; the modes are {MODES.join(", ")}")
     }
     if options.against != "" && (options.lane != "" || options.budget != "") -> usage("--against takes neither --lane nor --budget")
+    if options.batch != "" && (options.current == "" || options.lane != "" || options.against != "" || options.budget != "") -> usage("--batch takes --current, and neither --lane, --against nor --budget")
+    if options.batch == "" && options.current != "" -> usage("--current goes with --batch")
     if options.lane == "" -> return options
     if options.lane != "quick" && options.lane != "full" -> usage("--lane is quick or full")
     if options.programs.len() == 0 -> options.programs = if options.lane == "quick" -> [String]{"bench30k"} else -> [String]{"bench300k", "selfhost"}
@@ -900,6 +936,209 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
     3
 }
 
+// ---- The batch speed gate (--batch) ----
+
+// One batch build as its directory records it: CPU (user + system), wall,
+// peak memory and exit status from time.txt, and every process's top-level
+// phases from trace.txt.
+BatchBuild: struct { cpu_ns: Int, wall_ns: Int, peak_bytes: Int, status: Int, phases: [Phase] }
+
+// The value of a `time -v` report line `KEY: VALUE`; None when it has none.
+time_value: fn(report: String, key: String) -> String? {
+    prefix: "{key}: "
+    loop raw in report.split("\n") {
+        line: raw.trim()
+        if line.starts_with(prefix) -> return Val(line.remove_prefix(prefix).copy())
+    }
+    None
+}
+
+// Seconds (`148.96`, or a `time -v` clock such as `2:18.09` or
+// `1:02:18.09`) in nanoseconds; None when it is not a number.
+clock_ns: fn(text: String) -> Int? {
+    total := Float{0.0}
+    loop part in text.split(":") {
+        value: Float.parse(part) ?? return None
+        total = total * 60.0 + value
+    }
+    Val(nearest(total * 1e9))
+}
+
+// Every process's top-level phases in a build's trace: each process's
+// opening lane (the lane of its first span) read as read_trace reads the
+// first process's. The first process's phases keep their kind; a later
+// process's read `<its process_name>/<kind>`, as
+// `core-record: jet-bare/sema.finalize`.
+build_phases: fn(text: String) -> [Phase] {
+    phases := [Phase]{}
+    at := [String: Int]{}
+    pids := [Int]{}
+    names := [String]{}
+    lanes := [Int]{}
+    stacks := [[OpenSpan]]{}
+    loop event in trace_events(text) {
+        pid: event.pid ?? 0
+        slot: pids.index_of(pid) ?? {
+            pids.push(pid)
+            names.push("")
+            lanes.push(-1)
+            stacks.push([OpenSpan]{})
+            pids.len() - 1
+        }
+        if event.ph == "M" && event.name == "process_name" {
+            names[slot] = (event.args?.name ?? "").copy()
+            next
+        }
+        if event.ph != "B" && event.ph != "E" -> next
+        if lanes[slot] < 0 -> lanes[slot] = event.tid
+        if event.tid != lanes[slot] -> next
+        ts: event.ts ?? next
+        if event.ph == "B" {
+            stacks[slot].push(OpenSpan{kind: event.cat ?? event.name, ts})
+            next
+        }
+        open: stacks[slot].pop() ?? next
+        if stacks[slot].len() > 0 -> next
+        kind: if slot == 0 || names[slot] == "" -> open.kind.copy() else -> "{names[slot]}/{open.kind}"
+        index: at.get(kind) ?? {
+            at[kind.copy()] = phases.len()
+            phases.push(Phase{kind: kind.copy()})
+            phases.len() - 1
+        }
+        phases[index].wall_ns += (ts - open.ts) * 1000
+        phases[index].count += 1
+        phases[index].cpu_ns += event.args?.proc_cpu_ns ?? 0
+    }
+    phases
+}
+
+// A batch build from its time.txt and trace.txt text; None when the report
+// lacks the CPU, wall or exit status line.
+batch_build: fn(report: String, trace: String) -> BatchBuild? {
+    user: clock_ns(time_value(report, "User time (seconds)") ?? return None) ?? return None
+    system: clock_ns(time_value(report, "System time (seconds)") ?? return None) ?? return None
+    wall: clock_ns(time_value(report, "Elapsed (wall clock) time (h:mm:ss or m:ss)") ?? return None) ?? return None
+    status: Int.parse(time_value(report, "Exit status") ?? return None) ?? return None
+    peak_kb: Int.parse(time_value(report, "Maximum resident set size (kbytes)") ?? "0") ?? 0
+    Val(BatchBuild{cpu_ns: user + system, wall_ns: wall, peak_bytes: peak_kb * 1024, status, phases: build_phases(trace)})
+}
+
+// The build DIR records; None, with the reason on stderr, when a file is
+// missing or unreadable, or the build failed.
+batch_dir: fn(dir: String) -> BatchBuild? {
+    report: files.read(files.join(dir, "time.txt")) ?? {
+        term.eprint("Throughput.jet: cannot read {dir}/time.txt: {err}")
+        return None
+    }
+    trace: files.read(files.join(dir, "trace.txt")) ?? {
+        term.eprint("Throughput.jet: cannot read {dir}/trace.txt: {err}")
+        return None
+    }
+    build: batch_build(report, trace) ?? {
+        term.eprint("Throughput.jet: {dir}/time.txt is not a `time -v` report")
+        return None
+    }
+    if build.status != 0 {
+        term.eprint("Throughput.jet: the build in {dir} exited {build.status}")
+        return None
+    }
+    Val(build)
+}
+
+// A top-level phase's process CPU in a batch build; 0 when it has none.
+build_phase_cpu: fn(build: BatchBuild, kind: String) -> Int {
+    (build.phases.find(fn(p) { p.kind == kind }) ?? return 0).cpu_ns
+}
+
+// One quantity of the batch gate: its value in each build and the verdict
+// on the one ratio CURRENT / PREVIOUS. A phase (floor above 0) fails only
+// when it also rose by the floor or more: a smaller rise is within one
+// build's noise. A phase only one build ran is `new` or `gone`: work moved
+// between processes, which the CPU totals judge.
+batch_row: fn(metric: String, previous: Int, current: Int, floor: Int) -> GateRow {
+    row := GateRow{mode: "build", metric: metric.copy(), seed: previous, new: current, ratio: 0.0, spread: 0.0, status: "pass"}
+    if {
+        previous < floor && current < floor -> row.status = "below floor"
+        previous == 0 -> row.status = "new"
+        current == 0 -> row.status = "gone"
+        else -> {
+            row.ratio = Float.from_int(current) / Float.from_int(previous)
+            if row.ratio > GATE_LIMIT && current - previous >= floor -> row.status = "FAIL"
+        }
+    }
+    row
+}
+
+// Every process's top-level phases' process CPU.
+traced_cpu: fn(build: BatchBuild) -> Int {
+    total := 0
+    loop phase in build.phases -> total += phase.cpu_ns
+    total
+}
+
+// CPU, traced CPU, then each phase either build ran, the current build's
+// first.
+batch_rows: fn(previous: BatchBuild, current: BatchBuild) -> [GateRow] {
+    rows := [GateRow]{batch_row("cpu", previous.cpu_ns, current.cpu_ns, 0), batch_row("traced cpu", traced_cpu(previous), traced_cpu(current), 0)}
+    kinds := [String]{}
+    loop phase in current.phases -> kinds.push(phase.kind.copy())
+    loop phase in previous.phases {
+        if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
+    }
+    loop kind in kinds -> rows.push(batch_row("phase {kind}", build_phase_cpu(previous, kind), build_phase_cpu(current, kind), GATE_PHASE_FLOOR_NS))
+    rows
+}
+
+// A row of the batch table: quantity, seconds, change in percent, verdict.
+batch_cells: fn(row: GateRow) -> [String] {
+    change: if row.ratio > 0.0 -> "{(row.ratio - 1.0) * 100.0:Fixed(1)}%" else -> "-"
+    [String]{row.metric.copy(), seconds(row.seed), seconds(row.new), change, row.status.copy()}
+}
+
+// A build's unjudged line: wall, CPU, traced CPU, parallelism (traced CPU
+// over wall) and peak memory.
+batch_line: fn(label: String, dir: String, build: BatchBuild) -> String {
+    traced: traced_cpu(build)
+    parallel: if build.wall_ns > 0 -> "{Float.from_int(traced) / Float.from_int(build.wall_ns):Fixed(1)}" else -> "-"
+    "{label} {dir}: wall {seconds(build.wall_ns)} s, cpu {seconds(build.cpu_ns)} s, traced cpu {seconds(traced)} s, parallel {parallel}, peak {build.peak_bytes /% 1048576} MiB"
+}
+
+// The --batch form. Returns the exit code: 0 PASS, 1 FAIL, 3 INCONCLUSIVE.
+run_batch: fn(options: Options) -> Int {
+    read_previous: batch_dir(options.batch)
+    read_current: batch_dir(options.current)
+    previous: read_previous ?? {
+        print("batch speed gate: INCONCLUSIVE")
+        return 3
+    }
+    current: read_current ?? {
+        print("batch speed gate: INCONCLUSIVE")
+        return 3
+    }
+    print(batch_line("previous", options.batch, previous))
+    print(batch_line("current ", options.current, current))
+    rows: batch_rows(previous, current)
+    print("")
+    print("{"quantity".pad_end(48, " ")} {"previous":PadLeft(10)} {"current":PadLeft(10)} {"change":PadLeft(8)} verdict")
+    loop row in rows {
+        if row.status == "below floor" -> next
+        cells: batch_cells(row)
+        print("{cells[0].pad_end(48, " ")} {cells[1]:PadLeft(10)} {cells[2]:PadLeft(10)} {cells[3]:PadLeft(8)} {cells[4]}")
+    }
+    if options.out != "" {
+        stamp: "{time.now().to_unix_ms() /% 1000}"
+        text := ""
+        loop row in rows {
+            cells: batch_cells(row)
+            text = "{text}batch\t{stamp}\t{options.batch}\t{options.current}\t{cells[0]}\t{cells[1]}\t{cells[2]}\t{cells[4]}\n"
+        }
+        files.append_all(options.out, text) ?? term.eprint("Throughput.jet: cannot append to {options.out}: {err}")
+    }
+    failed: rows.any(fn(r) { r.status.starts_with("FAIL") })
+    print("batch speed gate: {if failed -> "FAIL" else -> "PASS"}")
+    if failed -> 1 else -> 0
+}
+
 // ---- The gauntlet cell (--lane) ----
 
 // bench.json: each generated program's pin.
@@ -1292,7 +1531,7 @@ rate: fn(lines: Int, ns: Int) -> Int {
 }
 
 // A nonnegative value to the nearest whole number.
-nearest: fn(value: Float) -> Int { Int.from_float(value + 0.5) }
+nearest: fn(value: Float) -> Int { Int{math.floor(value + 0.5)} }
 
 // One quick-lane comparison; a regression or a missing value fails.
 compare: fn(out: &[Comparison], failures: &[String], program: String, arm: String, metric: String, previous: Int, current: Int, pct: Int, floor: Int) {
@@ -1687,6 +1926,7 @@ lane_report: fn(receipt: Receipt) -> [String] {
 
 run: fn() {
     options := parse_options(process.args())
+    if options.batch != "" -> process.exit(run_batch(options))
     jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
     if !files.is_file(jet) -> usage("JET={jet} is not a file")
     options.tree = files.absolute(options.tree) ?? usage("cannot resolve --tree {options.tree}")
@@ -1874,7 +2114,7 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
 // of sema.bodies process CPU, and `instructions`.
 gate_run: fn(compiler: String, repeat: Int, cpu_s: Float, instructions: Int, bodies_ms: Int) -> Run {
     trace: Trace{phases: [Phase]{Phase{kind: "sema.bodies", cpu_ns: bodies_ms * 1000000, count: 1}, Phase{kind: "load", cpu_ns: 100000000, count: 1}}, user_lines: 0, core_lines: 0, first_us: 0, last_us: 0}
-    Run{mode: "O0", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: Int.from_float(cpu_s * 1e9), instructions, peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
+    Run{mode: "O0", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: nearest(cpu_s * 1e9), instructions, peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
 }
 
 // Three planted rounds: the seed at 100 s, 1e12 instructions and 10 s of
@@ -1929,4 +2169,46 @@ gate_rounds: fn(new_cpu: [Float], new_instructions: Int, new_bodies_ms: Int) -> 
     assert_eq(perf_instructions("# started on Thu\n\n1234567,,instructions:u,9000,100.00,,\n"), 1234567)
     assert_eq(perf_instructions("<not counted>,,instructions:u,0,0.00,,\n"), -1)
     assert_eq(perf_instructions(""), -1)
+}
+
+// A planted `time -v` report of a build.
+batch_report: fn(user: String, system: String, status: Int) -> String {
+    "\tCommand being timed: \"jet build --profile dev Compiler\"\n\tUser time (seconds): {user}\n\tSystem time (seconds): {system}\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 2:18.09\n\tMaximum resident set size (kbytes): 2048\n\tExit status: {status}\n"
+}
+
+// A planted build trace: the build's own sema.finalize and a core-record
+// child's, with the given process CPU, and a build step under the floor.
+batch_trace: fn(finalize_ms: Int, record_ms: Int) -> String {
+    [String]{
+        "[",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":7,\"tid\":0,\"args\":{{\"name\":\"jet\"}}}},",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":8,\"tid\":0,\"args\":{{\"name\":\"core-record: jet-bare\"}}}},",
+        "{{\"name\":\"core-record\",\"cat\":\"build.step\",\"ph\":\"B\",\"ts\":1000,\"pid\":7,\"tid\":1}},",
+        "{{\"name\":\"M\",\"cat\":\"sema.finalize\",\"ph\":\"B\",\"ts\":2000,\"pid\":8,\"tid\":1000001}},",
+        "{{\"name\":\"M\",\"cat\":\"sema.finalize\",\"ph\":\"E\",\"ts\":5000,\"pid\":8,\"tid\":1000001,\"args\":{{\"proc_cpu_ns\":{record_ms}000000}}}},",
+        "{{\"name\":\"core-record\",\"cat\":\"build.step\",\"ph\":\"E\",\"ts\":9000,\"pid\":7,\"tid\":1,\"args\":{{\"proc_cpu_ns\":300000000}}}},",
+        "{{\"name\":\"M\",\"cat\":\"sema.finalize\",\"ph\":\"B\",\"ts\":9000,\"pid\":7,\"tid\":1}},",
+        "{{\"name\":\"M\",\"cat\":\"sema.finalize\",\"ph\":\"E\",\"ts\":12000,\"pid\":7,\"tid\":1,\"args\":{{\"proc_cpu_ns\":{finalize_ms}000000}}}},",
+        "]",
+    }.join("\n")
+}
+
+#Test("the batch gate reads every process's phases and fails a rise past 10%") {
+    previous: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000)) ?? panic("previous")
+    assert_eq(previous.cpu_ns, 160000000000)
+    assert_eq(previous.wall_ns, 138090000000)
+    assert_eq(previous.peak_bytes, 2097152)
+    assert_eq(previous.phases.map(fn(p) { "{p.kind}={p.cpu_ns /% 1000000}/{p.wall_ns /% 1000}" }).join(","), "core-record: jet-bare/sema.finalize=60000/3000,build.step=300/8000,sema.finalize=70000/3000")
+    steady: batch_build(batch_report("155.00", "10.00", 0), batch_trace(74000, 62000)) ?? panic("steady")
+    steady_rows: batch_rows(previous, steady)
+    assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,traced cpu=pass,phase core-record: jet-bare/sema.finalize=pass,phase build.step=below floor,phase sema.finalize=pass")
+    assert_eq(batch_cells(steady_rows[0]).join(" "), "cpu 160.00 165.00 3.1% pass")
+    risen: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 67000)) ?? panic("risen")
+    risen_rows: batch_rows(previous, risen)
+    assert_eq(risen_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,traced cpu=pass,phase core-record: jet-bare/sema.finalize=FAIL,phase build.step=below floor,phase sema.finalize=pass")
+    assert_eq(batch_row("phase comptime.precheck", 0, 900000000, GATE_PHASE_FLOOR_NS).status, "new")
+    assert_eq(batch_row("phase core-record: jet-bare/load", 900000000, 0, GATE_PHASE_FLOOR_NS).status, "gone")
+    assert_eq(batch_row("phase sema.check", 1140000000, 1400000000, GATE_PHASE_FLOOR_NS).status, "pass")
+    assert_eq(batch_build("\tUser time (seconds): 1.0\n", "") == None, true)
+    assert_eq(clock_ns("1:02:18.5"), Val(3738500000000))
 }

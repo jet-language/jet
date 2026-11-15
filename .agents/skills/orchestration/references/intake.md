@@ -189,7 +189,10 @@ runs and one 39-minute full test pass. These rules bind every train:
     fails the admit, and its `speed` row names the quantities that grew.
     The new compiler then compiles the corpus at check, O0 and release.
     Every compile is a row of the release's `evidence/throughput.tsv`, the
-    throughput ledger of every wave.
+    throughput ledger of every wave. Every batch build is gated too:
+    `Throughput.jet --batch` with the previous batch's build directory
+    and its own, judged on CPU, traced CPU and each process's phase CPU
+    from the two builds' traces; a rise over 10% fails the batch.
 16. **Census by reach, sized to memory.** The census runs check, build and
     the guard shards at once, then self-checks beside the Jetpack areas. It
     runs only the areas a submission's paths reach. The area budget is

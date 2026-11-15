@@ -170,6 +170,19 @@ then compiles the corpus once at `check`, `O0` and `release`. Every compile of
 both is a row of the release's `evidence/throughput.tsv`, so each release
 records the cell.
 
+`--batch PREVIOUS --current CURRENT` is the batch build's speed gate. It
+compiles nothing: it reads two batch builds of `jet build --profile dev
+Compiler`, each a directory with the build's trace (`trace.txt`) and GNU
+`time -v`'s report (`time.txt`). It judges CPU, traced CPU (every process's
+top-level phases, the build step children included, which `time -v` leaves
+out) and each process's top-level phases of at least 0.5 s, shown as
+`<process>/<phase>`. One build a side gives one ratio: a quantity over +10%
+fails, a phase only when it also rose by 0.5 s or more. A phase only one
+build ran is `new` or `gone`, work moved between processes that the totals
+judge. It prints `batch speed gate: PASS` or `FAIL` and exits 0 or 1, or 3
+when a build's files are missing or the build failed; `--out` records every
+quantity.
+
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
 builds the generated `bench300k` program and the compiler corpus (`selfhost`);
