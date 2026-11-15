@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106061,
+    "rev": 106066,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61217,11 +61217,11 @@
         {
           "n": 42,
           "text": "The compiler trace shows progress inside a large module: for the self-host unit (one module), sema.bodies and lower report per-item progress instead of 'module 1/76' for the whole phase. Proof: `jet test Compiler --profile cases --filter trace/progress_inside_module`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:29:31.035Z"
+          "evidence": "GoalsA-1-3-trace-progress-inside-module landed bc610e73b1 (sema.bodies and lower report per-item progress inside a large module). On batch compiler p157 (dev 058d3b0303), 2026-11-15 02:21: jet test Compiler --profile cases --filter trace/progress_inside_module PASS 1.",
+          "at": "2026-11-15T07:22:56.936Z"
         },
         {
           "n": 43,
@@ -61346,7 +61346,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T06:47:28.214Z",
+      "updated": "2026-11-15T07:22:56.936Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -96548,11 +96548,11 @@
         {
           "n": 4,
           "text": "A call to a function that reads a mutable global (or any other state a call can change) is never folded at compile time, even when every argument is a constant. Found by CardCloser-3 on 2026-11-15: a Never! runtime function reading a mutable global folded (alloc_window_stack(I64{0}) read alloc_root as 0). Proof: a tests/cases case where such a function's result changes after the global is written, printing the run-time values on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T07:04:19.081Z"
+          "evidence": "CardCloser-3-mutable-read-not-folded landed 3c5ca99bad (fold purity refuses a local value reading module state through callee bodies or its own initializer). on batch compiler p157 (dev 058d3b0303), 2026-11-15 02:21: jet test Compiler --profile cases --filter comptime_diff/a_local_value_over_module_state_is_computed_when_it_runs PASS 1 (O0/O1/O2 print the run-time values; p152 printed 1 20 0 against the expected 6 70 10); JET_RECHECK_VERIFY=1 comptime_diff PASS 155 KF 3.",
+          "at": "2026-11-15T07:22:45.045Z"
         }
       ],
       "refs": [],
@@ -96563,7 +96563,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-15T07:04:19.081Z",
+      "updated": "2026-11-15T07:22:45.045Z",
       "updatedBy": "Main",
       "criteriaLastN": 4,
       "completedAt": "2026-11-15T01:10:55.274Z"
@@ -96586,6 +96586,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c9 landing facts (GoalsB-5 3fd72a481e) proved on p157: jet run --trace Tools/agent-eval/RunColdContext.jet -- --help shows 3 '< sema.pass_facts' (p155: 5); JET_RECHECK_VERIFY=1 comptime_diff PASS 155 KF 3."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -96837,6 +96842,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T06:11:52.842Z"
+        },
+        {
+          "n": 16,
+          "text": "Regression from 226235f08c (body #run sites of a comptime pass build one program): tests/cases/context/compile_time_code_reads_the_build_root_context passes on p155 and gives ICE 101 on p156 and p157 (ir.build unlowered: report reads unknown locals deadline and thread, two body #run locals reading context). Proof: that case passes on O0, O1 and O2, and --profile cases --filter context/ has no ERROR.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T07:22:44.087Z"
         }
       ],
       "refs": [],
@@ -96847,9 +96861,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-15T07:03:51.130Z",
+      "updated": "2026-11-15T07:22:57.845Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 16
     },
     {
       "id": "c0on083p",
@@ -102109,6 +102123,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c11 on p157 (dev 058d3b0303, 2026-11-15 02:21): mapping 5.31x cycles (was 6.03x on p156; the window thread stacks 4b16946457); allocfree 3.36x and resize 1.98x unchanged, although p157 links p156's runtime, which carries the raw-heap runtime half; compare 3.17x; rawword 1.36x; atomics 0.99x. Since then: region-record slab d7ac865ff3 and the page-map reference 524ed1eefd landed (seen from p158)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 kernel cells on p156 (dev aa5f5f1bba, 2026-11-15 02:09), Jet release vs the asm reference, cycles ratio (code bytes ratio): compare 3.18x (1.04x), was 11.13x on p152 (list bytes-equal af277c2051); allocfree 3.32x (28.6x), was 8.12x (Core half of the raw-heap fast path 8375d732e6; the runtime half reaches programs from p157); resize 1.97x (13.3x), was 2.14x; mapping 6.03x (27.75x), was 5.88x (the window thread stacks landed 4b16946457 after this compiler); rawword 1.35x (0.80x); atomics 0.99x (1.56x). All but atomics still fail cycles."
         },
         {
@@ -102318,7 +102337,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T07:09:55.027Z",
+      "updated": "2026-11-15T07:22:58.748Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -218439,6 +218458,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T07:22:58.748Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:22:57.846Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:22:56.936Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-15T07:22:45.045Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d72itt",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T07:22:44.087Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#16 Regression from 226235f08c (body #run sites of a comptime pa"
+    },
     {
       "at": "2026-11-15T07:09:55.917Z",
       "by": "Main",
