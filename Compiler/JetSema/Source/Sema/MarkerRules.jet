@@ -2064,13 +2064,19 @@ sema_marker_rules_builtin_type: fn(name: String) -> Type? {
 // bare name is read as a value anywhere in the bundle (E0918) needs a real
 // function to point at. Statements count transitively through nested blocks
 // but not through a lambda body, which compiles to its own closure. Only
-// direct self-recursion is checked.
+// direct self-recursion is checked: a call of the function's own name, but
+// not one through an import (`mem.fill` in a method `fill`), nor, in a
+// method, a bare call that passes no `self` (`close(self.region)` in a
+// `close` method calls the region's).
 SEMA_INLINE_ALWAYS_MAX_STMTS: 40
 
 SemaInlineAlwaysScan: struct {
     target: String
     stmt_count: Int
     self_recursive: Bool
+    // The file's imports.
+    imports: [ImportDecl]
+    method: Bool
 }
 
 sema_inline_always_scan_body: fn(statements: [Stmt], scan: &SemaInlineAlwaysScan) {
@@ -2153,14 +2159,30 @@ sema_inline_always_scan_statement: fn(statement: Stmt, scan: &SemaInlineAlwaysSc
     }
 }
 
+// Whether `expression` is the method's own receiver, `self`.
+sema_inline_always_is_self: fn(expression: Expr) -> Bool {
+    if expression == .Ident(name, _, _) -> return name == "self"
+    if expression == .Paren(base, _, _) -> return sema_inline_always_is_self(base)
+    if expression == .Place(base, _, _, _) -> return sema_inline_always_is_self(base)
+    false
+}
+
+// Whether a method call's `receiver` is the alias of one of the file's
+// `imports` (`mem` in `mem.fill(…)`): the call names a function of that
+// module.
+sema_inline_always_through_import: fn(receiver: Expr, imports: [ImportDecl]) -> Bool {
+    if receiver == .Ident(name, _, _) -> return imports.any(fn(declaration) { declaration.alias == name })
+    false
+}
+
 sema_inline_always_scan_expr: fn(expression: Expr, scan: &SemaInlineAlwaysScan) {
     if expression == {
         .Call(call, _) -> {
-            if call.name == scan.target -> scan.self_recursive = true
+            if call.name == scan.target && (!scan.method || call.args.any(fn(arg) { sema_inline_always_is_self(arg.expr) })) -> scan.self_recursive = true
             sema_inline_always_scan_args(call.args, scan)
         }
         .MethodCall(receiver, method, _, _, _, args, _) | .OptMethodCall(receiver, method, _, _, args, _, _) -> {
-            if method == scan.target -> scan.self_recursive = true
+            if method == scan.target && !sema_inline_always_through_import(receiver, scan.imports) -> scan.self_recursive = true
             sema_inline_always_scan_expr(receiver, scan)
             sema_inline_always_scan_args(args, scan)
         }
@@ -2253,10 +2275,11 @@ sema_inline_always_scan_expr: fn(expression: Expr, scan: &SemaInlineAlwaysScan) 
 }
 
 // The local half of the promise: direct self-recursion (E0917) and the size
-// ceiling (E0919), both provable from the function alone.
-sema_inline_always_check_function: fn(function: Func, diagnostics: &[Diagnostic]) Never! {
+// ceiling (E0919), both provable from the function alone. `imports` are its
+// file's imports; `method` says it is a method.
+sema_inline_always_check_function: fn(function: Func, imports: [ImportDecl], diagnostics: &[Diagnostic], method: Bool) Never! {
     if !function.is_inline_always -> return
-    scan := SemaInlineAlwaysScan{target: function.name, stmt_count: 0, self_recursive: false}
+    scan := SemaInlineAlwaysScan{target: function.name, stmt_count: 0, self_recursive: false, imports, method}
     sema_inline_always_scan_body(function.body, scan)
     span: function.inline_span ?? function.name_span
     name: function.name
@@ -2281,9 +2304,10 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
     found := false
     loop source_module_index in 0..<graph.modules.len() {
         start: diagnostics.len()
+        imports: graph.modules[source_module_index].program.imports
         loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
             if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
-                sema_inline_always_check_function(function, diagnostics)
+                sema_inline_always_check_function(function, imports, diagnostics, method: false)
                 key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name)
                 id: symbol_find(graph.symbols, key) ?? next
                 if function.is_inline_always && address_taken.get(id.id) != None {
@@ -2293,10 +2317,10 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
             }
         }
         loop nominal_index in 0..<graph.modules[source_module_index].nominals.len() {
-            loop method_index in 0..<graph.modules[source_module_index].nominals[nominal_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].nominals[nominal_index].methods[method_index].declaration, diagnostics)
+            loop method_index in 0..<graph.modules[source_module_index].nominals[nominal_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].nominals[nominal_index].methods[method_index].declaration, imports, diagnostics, method: true)
         }
         loop implementation_index in 0..<graph.modules[source_module_index].impls.len() {
-            loop method_index in 0..<graph.modules[source_module_index].impls[implementation_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].impls[implementation_index].methods[method_index].declaration, diagnostics)
+            loop method_index in 0..<graph.modules[source_module_index].impls[implementation_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].impls[implementation_index].methods[method_index].declaration, imports, diagnostics, method: true)
         }
         if diagnostics.len() > start -> found = true
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)

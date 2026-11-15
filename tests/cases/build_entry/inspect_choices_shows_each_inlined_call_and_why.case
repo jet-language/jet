@@ -5,7 +5,8 @@
 # `--inline=always_marked`, only the `#Inline(Always)` callee is taken, and
 # the row says so. `#Inline(Always)` locks the choice: a callee that calls
 # itself fails the build naming it (E0917; the UI snapshot is
-# tests/ui/inline_always_recursive.stderr).
+# tests/ui/inline_always_recursive.stderr). A call of another function with
+# the callee's name, through an import or closing a field, is no recursion.
 fixture: inspect_choices_shows_each_inlined_call_and_why.fixture
 env: NO_COLOR=1
 step full: jet inspect choices -O2 inline.jet
@@ -35,3 +36,6 @@ step locked: jet check locked.jet
 exit: nonzero
 stderr: ~ "`count` calls itself, so `#Inline(Always)` cannot expand it" # the broken lock names the recursion
 stderr: ~ "E0917" # the recursive #Inline(Always) code
+step named: jet check named.jet
+exit: 0
+stderr: !~ "E0917" # `files.exists` in `exists` and `close(self.inner)` in `close` call other functions
