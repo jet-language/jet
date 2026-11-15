@@ -4308,21 +4308,21 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteALog.jet",
-      "line": 53,
+      "line": 62,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteALog.jet",
-      "line": 79,
+      "line": 89,
       "column": 5,
       "reason": "the log start runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteALog.jet",
-      "line": 88,
+      "line": 98,
       "column": 5,
       "reason": "the entry function configures before any other thread exists"
     },
@@ -11668,9 +11668,9 @@ memory kernel cutover takes it to zero. `jet Tools/agent/UnsafeRatchet.jet
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 31:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 488:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 494:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
-| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 53:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 79:5 | "the log start runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 88:5 | "the entry function configures before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 62:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 89:5 | "the log start runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 98:5 | "the entry function configures before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAMath.jet | 13:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 7:5 | "some lends a writable C-ABI Option success word" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 96:5 | "close(2) releases a descriptor this route opened" |

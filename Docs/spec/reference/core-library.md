@@ -304,8 +304,9 @@ own, the one stdout policy decides), the pure `stdio_fault`, `stdout_terminal` a
 `stderr_terminal`, and the `terminal8_*` reads and writes. A read answers its
 failure as an item: `terminal8_line` is
 `(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is
-`(h: Int, w: Int)?`. `jet.runtime.log` holds the calling thread's logging
-cells `core.log` is built on (`level_load`, `filter_store`, …), `flush`,
+`(h: Int, w: Int)?`. `jet.runtime.log` holds the logging cells `core.log` is
+built on (`level_load`, `filter_store`, …; the sink and format cells are the
+process's, the rest the calling thread's), `flush`,
 `process_exit` and `span_allocate` (`(id: Int, name: String)`), each
 `-[Log]>`, and the pure `metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
 `text_cells_*` and `etf_strings_*` that CSV, typed data, `core.sys.decode`

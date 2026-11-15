@@ -1,29 +1,36 @@
 // core.log host cells and sinks. Rust providers: (state cells, flush, spans,
 // JSON/text records), (trace id), (record emit, span allocate) and the AOT
-// jet_log_write_line/jet_log_process_exit leaves. Every cell is thread_local!
-// in Rust, so each OS thread owns one LogState96 block (allocated on first use,
-// freed by the TLS destructor): level0 disabled8 format16 sink24 (owned E4 or 0
-// for "") sample_every32 sample_count40 next_span48 trace56 (owned E4 or 0)
-// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}, and the
-// code's level filter88 (owned E4 or 0). The
+// jet_log_write_line/jet_log_process_exit leaves. Each OS thread owns one
+// LogState80 block (allocated on first use, freed by the TLS destructor):
+// level0 disabled8 sample_every16 sample_count24 next_span32 trace40 (owned
+// E4 or 0) spans: data48 len56 cap64, each span a 16-byte {id, owned name
+// E4}, and the code's level filter72 (owned E4 or 0). The sink and the
+// record format are the process's (log_process), so a sink one thread sets
+// receives the records of every thread. The
 // devtools publication (:316-590) reaches only installed event sinks; the
 // native runtime installs none, so it has no native counterpart.
-LOG_STATE_BYTES: I64{96}
+LOG_STATE_BYTES: I64{80}
 LOG_STATE_LEVEL: I64{0}
 LOG_STATE_DISABLED: I64{8}
-LOG_STATE_FORMAT: I64{16}
-LOG_STATE_SINK: I64{24}
-LOG_STATE_SAMPLE_EVERY: I64{32}
-LOG_STATE_SAMPLE_COUNT: I64{40}
-LOG_STATE_NEXT_SPAN: I64{48}
-LOG_STATE_TRACE: I64{56}
-LOG_STATE_SPANS: I64{64}
-LOG_STATE_SPANS_LEN: I64{72}
-LOG_STATE_SPANS_CAP: I64{80}
-LOG_STATE_FILTER: I64{88}
+LOG_STATE_SAMPLE_EVERY: I64{16}
+LOG_STATE_SAMPLE_COUNT: I64{24}
+LOG_STATE_NEXT_SPAN: I64{32}
+LOG_STATE_TRACE: I64{40}
+LOG_STATE_SPANS: I64{48}
+LOG_STATE_SPANS_LEN: I64{56}
+LOG_STATE_SPANS_CAP: I64{64}
+LOG_STATE_FILTER: I64{72}
 // LogField32: key0 value8 kind16 owned E4s, redacted24.
 LOG_FIELD_BYTES: I64{32}
 log_state_key := I64{0}
+// The process's sink, LogProcess24: lock0 (a mutex word every sink read and
+// write holds, so lines from several threads never interleave), sink8 (the
+// file path, owned E4, or 0 for stderr) and format16 (0 auto, 1 JSON, 2
+// text). Allocated by the start hook, before any other thread exists.
+LOG_PROCESS_BYTES: I64{24}
+LOG_PROCESS_SINK: I64{8}
+LOG_PROCESS_FORMAT: I64{16}
+log_process := I64{0}
 // The process's level filters below and above the code's
 // (Core/Log/Log.jet, jet.runtime.log config_load): the package's `log:` field and the
 // `--log` flag, which the entry function passes (jet_rt_log_configure), and
@@ -43,16 +50,19 @@ rt_log_state_drop_address: fn() -> I64 {
 rt_log_start_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-// runtime-init: 3 when log_state_key
+// runtime-init: 3 when log_state_key,log_process
 #Export(c) jet_rt_log_state_init: fn() {
     if (log_state_key != I64{0}) -> return
     closure: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_log_state_drop_address())
     rt_text_store(wrapping(closure + I64{16}), I64{0})
+    process: jet_rt_alloc(LOG_PROCESS_BYTES, I64{8})
+    thread_zero(process, LOG_PROCESS_BYTES)
     #Unsafe("runtime-init runs before any other thread exists") {
         log_state_key = jet_rt_tls_key_new(closure)
         log_start_code = rt_log_start_address()
+        log_process = process
     }
 }
 
@@ -179,7 +189,6 @@ log_filter_level_valid: fn(data: I64, first: I64, last: I64) -> Bool {
 }
 #Export(c) jet_log_filter_store: fn(value: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_FILTER), value) }
 #Export(c) jet_rt_log_state_drop: fn(_closure: I64, state: I64) -> I64 {
-    log_text_drop(rt_text_word(wrapping(state + LOG_STATE_SINK)))
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_TRACE)))
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_FILTER)))
     spans: rt_text_word(wrapping(state + LOG_STATE_SPANS))
@@ -227,13 +236,18 @@ log_text_cell_store: fn(cell: I64, value: I64) {
 #Export(c) jet_log_disabled_store: fn(value: Bool) {
     rt_text_store(wrapping(log_state() + LOG_STATE_DISABLED), if value -> I64{1} else -> I64{0})
 }
-// The cell is a u8 (`value as u8`).
+// The process's format; the cell is a u8 (`value as u8`).
 #Export(c) jet_log_format_store: fn(value: I64) {
     native: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    rt_text_store(wrapping(log_state() + LOG_STATE_FORMAT), native.bit_and(I64{255}))
+    sync_store(wrapping(log_process + LOG_PROCESS_FORMAT), native.bit_and(I64{255}))
 }
-#Export(c) jet_log_sink_store: fn(value: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_SINK), value) }
+// The process's sink, replaced under its lock (log_write).
+#Export(c) jet_log_sink_store: fn(value: I64) {
+    sync_mutex_lock(log_process)
+    log_text_cell_store(wrapping(log_process + LOG_PROCESS_SINK), value)
+    sync_mutex_unlock(log_process)
+}
 #Export(c) jet_log_sample_store: fn(value: I64) {
     native: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -282,10 +296,13 @@ log_sink_open: fn(path: I64) -> I64 {
 // Flush stderr, then open (creating) and flush the file sink.
 #Export(c) jet_ring_log_flush: fn() {
     _ := host_stdio_flush_failure(true)
-    path: rt_text_word(wrapping(log_state() + LOG_STATE_SINK))
-    if (path == I64{0}) -> return
-    fd: log_sink_open(path)
-    if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    sync_mutex_lock(log_process)
+    path: rt_text_word(wrapping(log_process + LOG_PROCESS_SINK))
+    if (path != I64{0}) {
+        fd: log_sink_open(path)
+        if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    }
+    sync_mutex_unlock(log_process)
 }
 
 // The thread's next span id, then +1.
@@ -402,18 +419,23 @@ log_spans_json_push: fn(target: I64, state: I64) {
     jet_rt_string_builder_push(target, rt_static_text("]"))
 }
 
-// Append `line` + LF to the file sink, else eprintln to stderr.
-log_write: fn(state: I64, line: I64) {
-    path: rt_text_word(wrapping(state + LOG_STATE_SINK))
+// Append `line` + LF to the process's file sink, else eprintln to stderr.
+// The sink's lock spans the whole line, so lines from several threads never
+// interleave.
+log_write: fn(line: I64) {
+    sync_mutex_lock(log_process)
+    path: rt_text_word(wrapping(log_process + LOG_PROCESS_SINK))
     if (path == I64{0}) {
         _ := host_stdio_text_failure(line, true, true, false)
-        return
+    } else {
+        fd: log_sink_open(path)
+        if (fd >= I64{0}) {
+            written: host_write_all(fd, rt_text_data(line), rt_text_len(line))
+            if (written == I64{0}) -> _ := host_write_all(fd, rt_text_data(rt_static_text("\n")), I64{1})
+            _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        }
     }
-    fd: log_sink_open(path)
-    if (fd < I64{0}) -> return
-    written: host_write_all(fd, rt_text_data(line), rt_text_len(line))
-    if (written == I64{0}) -> _ := host_write_all(fd, rt_text_data(rt_static_text("\n")), I64{1})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    sync_mutex_unlock(log_process)
 }
 
 // `line.replace(" }", "}")` over the whole rendered record.
@@ -455,7 +477,7 @@ log_emit_json: fn(state: I64, level: I64, message: I64, ts: I64, fields: I64, co
     jet_rt_string_builder_push(line, rt_static_text(" }}"))
     finished: log_drop_space_before_brace(line)
     jet_rt_string_drop(line)
-    log_write(state, finished)
+    log_write(finished)
     jet_rt_string_drop(finished)
 }
 
@@ -543,13 +565,13 @@ log_emit_text: fn(state: I64, level: I64, message: I64, ts: I64, fields: I64, co
         jet_rt_string_builder_push(line, rt_text_word(wrapping(field + I64{8})))
         at += I64{1}
     }
-    log_write(state, line)
+    log_write(line)
     jet_rt_string_drop(line)
 }
 
 // An explicit format code, else text on a terminal stderr.
-log_format_active: fn(state: I64) -> I64 {
-    explicit: rt_text_word(wrapping(state + LOG_STATE_FORMAT))
+log_format_active: fn() -> I64 {
+    explicit: sync_load(wrapping(log_process + LOG_PROCESS_FORMAT))
     if (explicit != I64{0}) -> return explicit
     if host_is_tty(I64{2}) -> I64{2} else -> I64{1}
 }
@@ -564,7 +586,7 @@ log_format_active: fn(state: I64) -> I64 {
     if (every > I64{1} && (next - I64{1}) % every != I64{0}) -> return
     ts: deadline_wall_now_ms()
     total: if (count < I64{0} || fields == I64{0}) -> I64{0} else -> count
-    if (log_format_active(state) == I64{2}) {
+    if (log_format_active() == I64{2}) {
         log_emit_text(state, level, message, ts, fields, total)
     } else {
         log_emit_json(state, level, message, ts, fields, total)

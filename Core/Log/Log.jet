@@ -34,7 +34,8 @@ use {
 // the package field and the flag, and the runtime checks JET_LOG at startup.
 //
 // Filtering, sampling, JSON line layout, and redaction are Jet. The sink
-// write and the process-global level, filter and trace cells are host.
+// write and the cells are host: the sink and its format are the process's,
+// the level, filter, sampling, spans and trace id the calling thread's.
 LogField: struct {
     key: String
     value: String
@@ -117,6 +118,8 @@ close: fn(span: LogSpan) Never! -[Log]> { rt.span_close(span) }
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
 /// file sink without a path, leaves the sink unchanged and logs an error
 /// record that names the rejected setting instead of returning silently.
+/// The sink is the process's: records from every thread, task and handler
+/// reach it, each line whole.
 set_sink: fn(kind: String, path: String) Never! -[Log]> {
     normalized: ascii_lower(trim(kind))
     if normalized == "stderr" {

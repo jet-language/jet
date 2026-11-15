@@ -1,7 +1,8 @@
 // `jet.runtime.log` (#6615): the runtime's public logging cells and sinks,
 // in Jet types with their declared effect rows. Each member is a runtime
 // binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
-// its one body; the cells are the calling thread's (RouteALog.jet). A tuple
+// its one body; the sink and format cells are the process's and the others
+// the calling thread's (RouteALog.jet). A tuple
 // result's items cross in the checked tuple's written order, which is the
 // export's slot order. A LogSpan or LogField crosses as a runtime record made
 // for the call. A member with no row is pure.
@@ -14,10 +15,10 @@ log: module {
     #Import(c) disabled_load: fn() -[Log]> Bool = "jet_log_disabled_load"
     #Import(c) disabled_store: fn(disabled: Bool) -[Log]> = "jet_log_disabled_store"
 
-    // The thread's format cell (a byte).
+    // The process's format cell (a byte).
     #Import(c) format_store: fn(format: Int) -[Log]> = "jet_log_format_store"
 
-    // The thread's file sink path; "" is none.
+    // The process's file sink path; "" is none.
     #Import(c) sink_store: fn(path: String) -[Log]> = "jet_log_sink_store"
 
     // The thread's sampling cells: every how many records, and the count.
@@ -51,7 +52,7 @@ log: module {
     #Import(c) priv span_close: fn(span: LogSpan) -[Log]> = "jet_ring_log_close"
 
     // Emits the record `message` at the level named `level` with `fields`
-    // to the thread's sinks, unless logging is off or sampled out. `priv`:
+    // to the process's sink, unless logging is off or sampled out. `priv`:
     // only Core calls it, after its level and filter checks.
     #Import(c) priv record_emit: fn(level: String, message: String, fields: [LogField]) -[Log]> = "jet_log_record_emit_raw"
 

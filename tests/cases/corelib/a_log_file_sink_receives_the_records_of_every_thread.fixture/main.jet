@@ -1,0 +1,55 @@
+// A log file sink set on the main thread receives the records of every
+// thread: a served route's handler logs inside a span while the main thread
+// waits on its request, and two tasks log from their own bodies. The program
+// then prints each line of the one file, in order of its body.
+use {
+    client: core.http.client
+    files: core.files
+    log: core.log
+    net: core.net
+    server: core.http.server
+    web: core.web
+}
+
+counted: fn(index: Int) -> Int Never! {
+    log.info("task {index} counted")
+    index
+}
+
+// The body and the active spans of one JSON line of the sink.
+shown: fn(line: String) -> String Never! {
+    body: line.split("\"body\":\"").to_list()[1].split("\"").to_list()[0]
+    if !line.contains("\"spans\":[") -> return body
+    "{body} in {line.split("\"spans\":[").to_list()[1].split("]").to_list()[0]}"
+}
+
+run: fn() {
+    log.otlp_file("events.jsonl")
+    log.info("main started")
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr: listener.local_addr() ?? panic("address")
+    mux: web.app()
+    mux.get("/lookup", fn(req: HTTPRequest) {
+        span: log.span("lookup")
+        log.enter(span)
+        log.info("handler served {req.path}")
+        log.close(span)
+        Ok(server.response(200, "42"))
+    })
+    serving: task mux.serve_once(listener) ?? panic("serve")
+    response: client.get("http://{addr}/lookup") ?? panic("get")
+    print("looked up {response.text()}")
+    _: serving.join() ?? panic("serve join")
+    total := 0
+    task.group counters {
+        first: task counted(1)
+        second: task counted(2)
+        total = (first.join() ?? 0) + (second.join() ?? 0)
+    }
+    print("counted {total}")
+    log.flush()
+    text: files.read("events.jsonl") ?? panic("the sink file is missing")
+    lines := text.split("\n").to_list().filter(fn(line) { line.len() > 0 }).map(fn(line) { shown(line) })
+    lines.sort()
+    loop line in lines -> print(line)
+}
