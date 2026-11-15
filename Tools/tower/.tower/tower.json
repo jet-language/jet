@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106200,
+    "rev": 106225,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21487,6 +21487,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c10 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 14 criteria from archived #2198, #3032: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -21700,7 +21705,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-08-25T19:59:25.500Z",
-      "updated": "2026-11-15T11:33:19.065Z",
+      "updated": "2026-11-15T11:35:37.919Z",
       "updatedBy": "TowerKeeper-2",
       "workOrder": 1,
       "probe": null,
@@ -53191,7 +53196,7 @@
       "id": "c01sunrb",
       "num": 4935,
       "title": "Build swap and replace out of a borrowed place (D-TAKE-REPLACE1=A, D-WRITE-TAKE1=A)",
-      "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Owner decision: add a canonical take/replace (e.g. mem.replace(place, new) -> old) or keep the rule and accept the copies. Needs a ballot with same-program alternatives.",
+      "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Decided: D-TAKE-REPLACE1=A and D-WRITE-TAKE1=A (ratified) add the canonical take and replace; this card builds them.",
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
@@ -53280,8 +53285,8 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-15T04:45:01.798Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:46.935Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G10"
       ],
@@ -53723,7 +53728,7 @@
       "id": "c0acg7c2",
       "num": 5005,
       "title": "Close Jai's build-option families in the one option table",
-      "body": "## Outcome\n\nEvery Jai build-option family that fits Jet's laws has one typed home in the one option table that #4913 creates, so it can be set from a `package.jet` profile, from `fn build` and from the CLI. A family that conflicts with I1 or I2 is recorded as refused, with the law that refuses it.\n\n## Evidence\n\n- Jai's `Build_Options` has about 45 fields. Sources: The Way to Jai @19cb4b7 `examples/30/30.4_build_options.jai:50-123`; focus-editor `first.jai` @c6b3ead lines 23-90; tsoding `infinite-pong-jai-wasm64/first.jai` @d3319ec lines 7-33.\n- Jet's build profile has eight fields: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode and settings (`crates/jet-pkg-model/src/Package/Blocks.rs:1339-1457`; `Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet:141-144`). The backend is chosen by profile, not separately (`Compiler/JetCli/Source/Cli/Front.jet:342-346`).\n- Families Jet lacks:\n  - output kind: static library, dynamic library, object file, check-only;\n  - output and intermediate paths;\n  - entry-point name and linker arguments (`append_linker_arguments`, `/SUBSYSTEM`);\n  - per-build target CPU features and OS target;\n  - backend choice;\n  - codegen knobs (split modules, frame pointers, red zone, debug-info format);\n  - runtime check policy (array, cast, math, null and overflow checks);\n  - dead-code elimination policy;\n  - runtime type-info retention;\n  - scratch-allocator size;\n  - generic instantiation depth cap;\n  - diagnostic output format (colour, MSVC format, short paths).\n- Full table: `Docs/research/mine-for-jet-2026-10-15-jai.md`, section \"Build options\".\n\n## Owner gate\n\nThe owner decides which families become public options and how they are spelled. Relaxing a check is an I1 question: an option may add checks, or relax one only inside an audited `#Unsafe` scope. It is never a silent global switch, unlike Jai's `array_bounds_check = .OFF`.",
+      "body": "## Outcome\n\nEvery Jai build-option family that fits Jet's laws has one typed home in the one option table that #4913 creates, so it can be set from a `package.jet` profile, from `fn build` and from the CLI. A family that conflicts with I1 or I2 is recorded as refused, with the law that refuses it.\n\n## Evidence\n\n- Jai's `Build_Options` has about 45 fields. Sources: The Way to Jai @19cb4b7 `examples/30/30.4_build_options.jai:50-123`; focus-editor `first.jai` @c6b3ead lines 23-90; tsoding `infinite-pong-jai-wasm64/first.jai` @d3319ec lines 7-33.\n- Jet's build profile has eight fields: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode and settings (`crates/jet-pkg-model/src/Package/Blocks.rs:1339-1457`; `Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet:141-144`). The backend is chosen by profile, not separately (`Compiler/JetCli/Source/Cli/Front.jet:342-346`).\n- Families Jet lacks:\n  - output kind: static library, dynamic library, object file, check-only;\n  - output and intermediate paths;\n  - entry-point name and linker arguments (`append_linker_arguments`, `/SUBSYSTEM`);\n  - per-build target CPU features and OS target;\n  - backend choice;\n  - codegen knobs (split modules, frame pointers, red zone, debug-info format);\n  - runtime check policy (array, cast, math, null and overflow checks);\n  - dead-code elimination policy;\n  - runtime type-info retention;\n  - scratch-allocator size;\n  - generic instantiation depth cap;\n  - diagnostic output format (colour, MSVC format, short paths).\n- Full table: `Docs/research/mine-for-jet-2026-10-15-jai.md`, section \"Build options\".\n\n## Ballot\n\nWhich families become public options and how they are spelled is on Main's ballot list (2026-11-15). Relaxing a check is an I1 question: an option may add checks, or relax one only inside an audited `#Unsafe` scope. It is never a silent global switch, unlike Jai's `array_bounds_check = .OFF`.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
@@ -53930,8 +53935,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:48:22.419Z",
-      "updated": "2026-11-15T05:07:38.313Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:48.477Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ],
@@ -53941,7 +53946,7 @@
       "id": "c0otj2s1",
       "num": 5006,
       "title": "One build plan produces several configurations of the same program",
-      "body": "## Outcome\n\n`fn build` can register one program in several configurations in a single plan: debug, release, web, or a cross target. Each configuration has its own profile and target, and all are built by one `jet build` with separate outputs.\n\n## Evidence\n\n- In Jai, every `compiler_create_workspace` call carries its own `Build_Options` (The Way to Jai @19cb4b7 `examples/30/30.1_workspaces.jai`, `30.13_dynamic_libraries.jai`).\n- Blow's \"build all\" builds a debug workspace and a release workspace in parallel (`OHZwYYW9koI` 00:03:01, 2015-10-15). Tsoding's game build produces release, debug and WebAssembly outputs on every build (`kjF_YuLsPqo` 00:05:13, 2022).\n- In Jet, `BuildTarget` has a toolchain handle but no profile (`crates/jet-comptime/src/Comptime/Build/targets.rs:129-143`). The profile is chosen once per invocation (`--profile`/`--release`, D-BUILD-DEFAULT1). Two configurations of one program need two invocations.\n\n## Owner gate\n\nThe public `BuildContext` API shape: a profile and target argument on each registered target, or a named configuration set applied to a target. Builds on #4913's one option table and D-BUILDCTX-FLAGS1 defaults.",
+      "body": "## Outcome\n\n`fn build` can register one program in several configurations in a single plan: debug, release, web, or a cross target. Each configuration has its own profile and target, and all are built by one `jet build` with separate outputs.\n\n## Evidence\n\n- In Jai, every `compiler_create_workspace` call carries its own `Build_Options` (The Way to Jai @19cb4b7 `examples/30/30.1_workspaces.jai`, `30.13_dynamic_libraries.jai`).\n- Blow's \"build all\" builds a debug workspace and a release workspace in parallel (`OHZwYYW9koI` 00:03:01, 2015-10-15). Tsoding's game build produces release, debug and WebAssembly outputs on every build (`kjF_YuLsPqo` 00:05:13, 2022).\n- In Jet, `BuildTarget` has a toolchain handle but no profile (`crates/jet-comptime/src/Comptime/Build/targets.rs:129-143`). The profile is chosen once per invocation (`--profile`/`--release`, D-BUILD-DEFAULT1). Two configurations of one program need two invocations.\n\n## Ballot\n\nThe public `BuildContext` API shape, on Main's ballot list (2026-11-15): a profile and target argument on each registered target, or a named configuration set applied to a target. Builds on #4913's one option table and D-BUILDCTX-FLAGS1 defaults.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
@@ -54018,8 +54023,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:26.421Z",
-      "updated": "2026-11-15T05:11:55.809Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:49.975Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ]
@@ -54189,7 +54194,7 @@
       "id": "c0gmf0y4",
       "num": 5009,
       "title": "Compiler event parity: import, program-wide generation, placeholders, link and artifact stages, per-invocation hooks",
-      "body": "## Outcome\n\nA package can replace the link step of one executable target with a declared, cached build action. That action receives the compiler's object files and libraries and produces the artifact. A package can also run checked steps on the written artifact, such as signing or embedding an icon or manifest, with failures reported as Jet diagnostics.\n\n## Evidence\n\n- Jai: setting `use_custom_link_command` makes the compiler stop at the `READY_FOR_CUSTOM_LINK_COMMAND` phase. `Message_Phase.compiler_generated_object_files` lists the objects, and the metaprogram links them itself, then calls `compiler_custom_link_command_is_complete(w)` (focus-editor `first.jai` @c6b3ead lines 75, 153-155, 357-391).\n- `PRE_WRITE_EXECUTABLE` lets a metaprogram replace the executable (Blow `AdoShhhnsQA` 00:03:53, 2018). `POST_WRITE_EXECUTABLE` reports the linker exit code (The Way to Jai @19cb4b7 `examples/30/30.5_compiler_intercept.jai:46-53`). Focus sets the icon and manifest after a successful link.\n- Jet links internally (`Compiler/JetBackend/Source/Image/ELF.jet:30`) or through rustc. D-HOOK-STAGES1 makes `compiler.emitted(Artifact)` read-only, with findings only. `b.action` (D-BUILDACTION1) can add steps over declared outputs, but it cannot take over an executable target's link.\n\n## Owner gate\n\nAmending D-HOOK-STAGES1 or D-BUILDACTION1 to allow a typed link step is public API. Linker-argument options belong to #5005.",
+      "body": "## Outcome\n\nA package can replace the link step of one executable target with a declared, cached build action. That action receives the compiler's object files and libraries and produces the artifact. A package can also run checked steps on the written artifact, such as signing or embedding an icon or manifest, with failures reported as Jet diagnostics.\n\n## Evidence\n\n- Jai: setting `use_custom_link_command` makes the compiler stop at the `READY_FOR_CUSTOM_LINK_COMMAND` phase. `Message_Phase.compiler_generated_object_files` lists the objects, and the metaprogram links them itself, then calls `compiler_custom_link_command_is_complete(w)` (focus-editor `first.jai` @c6b3ead lines 75, 153-155, 357-391).\n- `PRE_WRITE_EXECUTABLE` lets a metaprogram replace the executable (Blow `AdoShhhnsQA` 00:03:53, 2018). `POST_WRITE_EXECUTABLE` reports the linker exit code (The Way to Jai @19cb4b7 `examples/30/30.5_compiler_intercept.jai:46-53`). Focus sets the icon and manifest after a successful link.\n- Jet links internally (`Compiler/JetBackend/Source/Image/ELF.jet:30`) or through rustc. D-HOOK-STAGES1 makes `compiler.emitted(Artifact)` read-only, with findings only. `b.action` (D-BUILDACTION1) can add steps over declared outputs, but it cannot take over an executable target's link.\n\n## Ballot\n\nAmending D-HOOK-STAGES1 or D-BUILDACTION1 to allow a typed link step (c1, c2) is public API; it is on Main's ballot list (2026-11-15). Linker-argument options belong to #5005.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
@@ -54300,8 +54305,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-15T02:45:57.348Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:51.639Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G6"
       ],
@@ -55617,7 +55622,7 @@
       "id": "c064zxf4",
       "num": 5034,
       "title": "C source import: translate C into editable safe Jet, keep the rest behind the checked binder (c2v lesson)",
-      "body": "Source: mine-for-jet V report (Docs/research, 2026-10-16). V's c2v translates whole C and C++ projects to V through Clang's JSON AST (vlang/c2v README:1-86; DOOM and Doom 3 demos) and is V's main on-ramp for C codebases. Jet has no C source importer: Docs/spec/reference/migration-tier-map.md:28 keeps C binder-only by D-ADOPT-TIER1=A. The owner wants C compatibility as an on-ramp for new users (2026-10-16). V's model has two defects Jet must not copy: translated files relax the language rules (@[translated]: globals, pointer writes without unsafe, C scalar conversions; doc/docs.md:10990-11014), and vlang/doom still links the C platform layer and has broken sound (doom README:5-9). Jet already ratified one Clang declaration extractor for C and C++ (D-CBIND-UPSTREAM1=A, D-CIMPORT1=A, #4174), so a body importer can extend the same extraction instead of adding a parser. Owner choice D-CSRC-IMPORT1 decides whether the C row of the tier map changes.",
+      "body": "Source: mine-for-jet V report (Docs/research, 2026-10-16). V's c2v translates whole C and C++ projects to V through Clang's JSON AST (vlang/c2v README:1-86; DOOM and Doom 3 demos) and is V's main on-ramp for C codebases. Jet has no C source importer: Docs/spec/reference/migration-tier-map.md:28 keeps C binder-only by D-ADOPT-TIER1=A. The owner wants C compatibility as an on-ramp for new users (2026-10-16). V's model has two defects Jet must not copy: translated files relax the language rules (@[translated]: globals, pointer writes without unsafe, C scalar conversions; doc/docs.md:10990-11014), and vlang/doom still links the C platform layer and has broken sound (doom README:5-9). Jet already ratified one Clang declaration extractor for C and C++ (D-CBIND-UPSTREAM1=A, D-CIMPORT1=A, #4174), so a body importer can extend the same extraction instead of adding a parser. D-CSRC-IMPORT1=A (ratified) settles whether Jet translates C source into editable Jet, and so the C row of the tier map.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e6",
@@ -55675,8 +55680,8 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-16T13:34:44.515Z",
-      "updated": "2026-11-15T05:11:57.616Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:53.259Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ]
@@ -57763,7 +57768,7 @@
       "id": "c00ys8fj",
       "num": 5085,
       "title": "Scripting ergonomics ballots B1-B10 (list +, slot +=, char-index find, write, top-level statements, fail, Match.named, is_executable, Path.script_dir, Regex lint)",
-      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0111 (a plain call cannot change a temporary).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional owner-gated items from the port review not yet drafted here: merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
+      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0111 (a plain call cannot change a temporary).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional items from the port review, on Main's ballot list (2026-11-15): merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e17",
@@ -57853,8 +57858,8 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-15T03:48:02.436Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:54.770Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G3"
       ],
@@ -59633,7 +59638,7 @@
       "id": "c00tizy7",
       "num": 5455,
       "title": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)",
-      "body": "Owner discussion 2026-10-23: Jet aims to replace Nix. Nix buys reproducibility by pinning, while current security advice (AI shortens patch-to-exploit from weeks to hours) is \"update everything fast\". These goals conflict less than they seem: a declarative system can make updates atomic, reversible and verifiable, so it should be the easiest system to keep current. This umbrella collects the directions to discuss and plan later; nothing here is scheduled now.\n\nDirections (child cards):\n1. Need fewer updates: memory safety (I1) removes the largest CVE class; per-program authority limits blast radius.\n2. Make updating cheap and safe: a security lane separate from feature pins, atomic generations, health checks, automatic rollback, exact advisory matching, optional targeted patching (grafts).\n3. Make updates trustworthy: capability diffs on update, independent-builder reproducibility checks, signed trust root and transparency log (#2199), hermetic builds with no install scripts (#4760), bootstrappability from a small seed (#4154).\n4. Declarative plus imperative: imperative changes write back to the declaration, giving an audit trail, drift detection and attested generations.\n5. AI agents as users: capability-limited agent sessions by default.\n\nOwner questions to settle when this is planned (ballot material):\nQ1. Should JetOS apply security fixes automatically by default, or only when the declaration opts in?\nQ2. Should a dependency update that widens authority (new network, file write, #Unsafe) be blocked until approved, or only flagged?\nQ3. Is temporarily breaking bit-reproducibility for patch speed (grafts) acceptable if recorded and reconciled, or should reproducibility be absolute with a faster build farm instead?\n\nRelated existing cards: #2199 trust root, #3033 release updates without breaking the app, #3418 inferred effects and policy, #4154 bootstrap resilience, #4195 portable sandboxed app format, #4268 authority and sandbox boundaries, #4760 build hooks in the sandbox, #5070 package effects block.",
+      "body": "Owner discussion 2026-10-23: Jet aims to replace Nix. Nix buys reproducibility by pinning, while current security advice (AI shortens patch-to-exploit from weeks to hours) is \"update everything fast\". These goals conflict less than they seem: a declarative system can make updates atomic, reversible and verifiable, so it should be the easiest system to keep current. This umbrella collects the directions to discuss and plan later; nothing here is scheduled now.\n\nDirections (child cards):\n1. Need fewer updates: memory safety (I1) removes the largest CVE class; per-program authority limits blast radius.\n2. Make updating cheap and safe: a security lane separate from feature pins, atomic generations, health checks, automatic rollback, exact advisory matching, optional targeted patching (grafts).\n3. Make updates trustworthy: capability diffs on update, independent-builder reproducibility checks, signed trust root and transparency log (#2199), hermetic builds with no install scripts (#4760), bootstrappability from a small seed (#4154).\n4. Declarative plus imperative: imperative changes write back to the declaration, giving an audit trail, drift detection and attested generations.\n5. AI agents as users: capability-limited agent sessions by default.\n\nChoices for ballots (Q1 and Q3 are on Main's ballot list (2026-11-15); Q2 is settled by D-AUTH-DEFAULT1=A, #5459):\nQ1. Should JetOS apply security fixes automatically by default, or only when the declaration opts in?\nQ2. Should a dependency update that widens authority (new network, file write, #Unsafe) be blocked until approved, or only flagged?\nQ3. Is temporarily breaking bit-reproducibility for patch speed (grafts) acceptable if recorded and reconciled, or should reproducibility be absolute with a faster build farm instead?\n\nRelated existing cards: #2199 trust root, #3033 release updates without breaking the app, #3418 inferred effects and policy, #4154 bootstrap resilience, #4195 portable sandboxed app format, #4268 authority and sandbox boundaries, #4760 build hooks in the sandbox, #5070 package effects block.",
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
@@ -59692,8 +59697,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:29.670Z",
-      "updated": "2026-11-15T05:12:02.075Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:56.321Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ]
@@ -59784,7 +59789,7 @@
       "id": "c0gpih2e",
       "num": 5458,
       "title": "Targeted security patching (grafts) without a full rebuild, recorded and reconciled in the declaration",
-      "body": "To ship a fix for a widely used library fast, replace it in existing outputs without rebuilding every dependent (Guix calls these grafts). Trade-off: the result is no longer bit-identical to a from-scratch build. Proposal: the graft is recorded in the declaration and the next full build reconciles it. Owner question Q3 on the parent decides whether grafts are allowed at all.",
+      "body": "To ship a fix for a widely used library fast, replace it in existing outputs without rebuilding every dependent (Guix calls these grafts). Trade-off: the result is no longer bit-identical to a from-scratch build. Proposal: the graft is recorded in the declaration and the next full build reconciles it. Whether grafts are allowed at all (Q3 on the parent) is on Main's ballot list (2026-11-15).",
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
@@ -59820,7 +59825,7 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:34.985Z",
-      "updated": "2026-11-15T11:33:35.043Z",
+      "updated": "2026-11-15T11:34:57.928Z",
       "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
@@ -59831,7 +59836,7 @@
       "id": "c07yeb2k",
       "num": 5459,
       "title": "Capability diff on dependency update: widened effects or #Unsafe are reported with the call path, and --locked refuses them",
-      "body": "Jet tracks authority and effects in the type system, so an update can be diffed by what it is allowed to do, not only by its text. \"This update now wants network access\" or \"this update adds an #Unsafe block\" is shown at update time. Defends against maintainer takeovers (xz style), typosquatting and AI-generated or hallucinated packages. Owner question Q2 on the parent (block or flag). Related: #3418, #5070.",
+      "body": "Jet tracks authority and effects in the type system, so an update can be diffed by what it is allowed to do, not only by its text. \"This update now wants network access\" or \"this update adds an #Unsafe block\" is shown at update time. Defends against maintainer takeovers (xz style), typosquatting and AI-generated or hallucinated packages. Q2 on the parent (block or flag) is settled by D-AUTH-DEFAULT1=A: an update reports each widening, and --locked refuses it (c1). Related: #3418, #5070.",
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
@@ -59861,8 +59866,8 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:36.632Z",
-      "updated": "2026-11-15T05:12:05.110Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:34:59.538Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ]
@@ -60874,7 +60879,7 @@
       "id": "c0c209zc",
       "num": 5931,
       "title": "JetDevserver: finish the port, so jet dev serves the app preview, canvas, devtools and web hot swap from the self-hosted toolchain",
-      "body": "Destination: Compiler/JetDevserver checks clean, is built into `jet`, and serves:\n- `jet dev`'s app preview on a stable port;\n- `jet dev --canvas`, `jet run --app` and `jet run --share`;\n- the browser host's workbench and in-app devtools;\n- web hot swap for `jet dev --target=web`.\n\nPlain `jet dev` (watch plus rerun) lives in JetCli and works without it.\n\nOperative ruling: finish the port. The owner ruled on 2026-11-09 to keep JetDevserver and finish it. Under the AGENTS.md authority order, an explicit owner instruction (rank 1) outranks a ratified decision (rank 2), and the newer ruling wins, so it governs over D-DEVSERVER1=A (delete and rebuild lean, ratified 2026-10-24). The decision record is left for the owner to update.\n\nState 2026-11-13: G5DevX-2 owns the port in hour-sized steps, and the registration errors are cleared (34e02ff42f). The hot-swap paths refuse with not-available until #6625 lands. The 67 undeclared imports take path (b) (Main's log 2026-11-13).\n\nSource: O0Image-3's census 2026-10-24 and CFreeLead3's census 2026-11-09.",
+      "body": "Destination: Compiler/JetDevserver checks clean, is built into `jet`, and serves:\n- `jet dev`'s app preview on a stable port;\n- `jet dev --canvas`, `jet run --app` and `jet run --share`;\n- the browser host's workbench and in-app devtools;\n- web hot swap for `jet dev --target=web`.\n\nPlain `jet dev` (watch plus rerun) lives in JetCli and works without it.\n\nOperative ruling: finish the port. The owner ruled on 2026-11-09 to keep JetDevserver and finish it. Under the AGENTS.md authority order, an explicit owner instruction (rank 1) outranks a ratified decision (rank 2), and the newer ruling wins, so it governs over D-DEVSERVER1=A (delete and rebuild lean, ratified 2026-10-24). Amending the D-DEVSERVER1 record to match the 2026-11-09 ruling is on Main's ballot list (2026-11-15); the port proceeds under the ruling.\n\nState 2026-11-13: G5DevX-2 owns the port in hour-sized steps, and the registration errors are cleared (34e02ff42f). The hot-swap paths refuse with not-available until #6625 lands. The 67 undeclared imports take path (b) (Main's log 2026-11-13).\n\nSource: O0Image-3's census 2026-10-24 and CFreeLead3's census 2026-11-09.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e14",
@@ -61060,7 +61065,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-15T11:33:36.100Z",
+      "updated": "2026-11-15T11:35:01.299Z",
       "updatedBy": "TowerKeeper-2",
       "goals": [
         "G5"
@@ -66881,7 +66886,7 @@
       "id": "c0cwk90x",
       "num": 6040,
       "title": "Packages ladder: loose files grow into a package with `jet init`, workspaces serve every command, and the effects and gate rungs are decided",
-      "body": "Destination: climbing from loose files to a package to a workspace needs no rewrite (philosophy pillar 4, Ladders, Not Cliffs). `jet init` grows loose files into a package, writing package.jet and rewriting path imports with every edit shown (D-LOOSE-GROW1=A); a workspace serves check, test and run at its root (D-WORKSPACE-CMD1=A); the workspace inheritance, effects block and audited-gate rungs follow owner rulings that are not yet ballots.\n\nSource: Docs/audits/ladder-audit-2026-10-28.md findings L-01, L-03, L-04, L-05 and L-13 (merged cards #6042, #6043, #6044, #6051). The audit's drafted ballots D-WORKSPACE-INHERIT1, D-ABILITIES-BLOCK1 and D-ORG-POLICY1 are not on Tower; they are rows in the TowerKeeper-1 owner-gates list. E0982 must be registered again with its emitter when `jet init` lands (2026-11-12 log).",
+      "body": "Destination: climbing from loose files to a package to a workspace needs no rewrite (philosophy pillar 4, Ladders, Not Cliffs). `jet init` grows loose files into a package, writing package.jet and rewriting path imports with every edit shown (D-LOOSE-GROW1=A); a workspace serves check, test and run at its root (D-WORKSPACE-CMD1=A); the workspace inheritance, effects block and audited-gate rungs follow owner rulings that are not yet ballots.\n\nSource: Docs/audits/ladder-audit-2026-10-28.md findings L-01, L-03, L-04, L-05 and L-13 (merged cards #6042, #6043, #6044, #6051). The audit's drafted ballots D-WORKSPACE-INHERIT1, D-ABILITIES-BLOCK1 and D-ORG-POLICY1 are on Main's ballot list (2026-11-15). E0982 must be registered again with its emitter when `jet init` lands (2026-11-12 log).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
@@ -67022,7 +67027,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:00.925Z",
-      "updated": "2026-11-15T11:33:40.308Z",
+      "updated": "2026-11-15T11:35:02.816Z",
       "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
@@ -67033,7 +67038,7 @@
       "id": "c0qz3x03",
       "num": 6041,
       "title": "Config precedence (D-LADDER-LAW1=A): Policy Tighten, the BuildOptions pin and FactLaw .Force share one rung set",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-02; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Three precedence engines (Policy Tighten, BuildOptions pin/E2113, FactLaw .Force/E3521) with different rung sets; D-CONF-MERGE1/D-SETTING-ORDER1 index-only\n\nEvidence: Policy.jet:99-143; Statements.jet:65-120; BuildOptions.jet:371-393; FactLaw.jet:10-87; Merge.jet:175; SD:8684; SD:9661; build_fact_precedence.jet\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-02; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Three precedence engines (Policy Tighten, BuildOptions pin/E2113, FactLaw .Force/E3521) with different rung sets; D-CONF-MERGE1/D-SETTING-ORDER1 index-only\n\nEvidence: Policy.jet:99-143; Statements.jet:65-120; BuildOptions.jet:371-393; FactLaw.jet:10-87; Merge.jet:175; SD:8684; SD:9661; build_fact_precedence.jet\n\nAudit action: unify names. D-LADDER-LAW1=A and D-STRICT-DIAL1=A (ratified) settle the spelling and behaviour (c2, c3).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
@@ -67104,8 +67109,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:01.776Z",
-      "updated": "2026-11-15T05:12:22.522Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-15T11:35:04.324Z",
+      "updatedBy": "TowerKeeper-2",
       "goals": [
         "G7"
       ],
@@ -74243,7 +74248,7 @@
       "id": "c01vsb2c",
       "num": 6324,
       "title": "Make a := binding that is never reassigned an error",
-      "body": "Owner order (2026-10-30): a mutable binding (:=) that is never reassigned or mutated must be an error, so name: value (D-DECL-COLON1=A) is the only spelling for a value that never changes. Design only until the owner asks for implementation.",
+      "body": "Owner order (2026-10-30): a mutable binding (:=) that is never reassigned or mutated must be an error, so name: value (D-DECL-COLON1=A) is the only spelling for a value that never changes. Design only until the owner lifts the hold; the go-ahead to build D-MUT-NEVER1=A is on Main's ballot list (2026-11-15).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -74300,8 +74305,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-15T04:24:41.567Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-15T11:35:05.876Z",
+      "updatedBy": "TowerKeeper-2"
     },
     {
       "id": "c0r2eell",
@@ -74402,7 +74407,7 @@
       "id": "c06he0ee",
       "num": 6326,
       "title": "Excellent built-in support for state machines",
-      "body": "Owner order (2026-10-30): Jet needs excellent built-in support for things like state machines. Design only until the owner asks for implementation.",
+      "body": "Owner order (2026-10-30): Jet needs excellent built-in support for things like state machines. The owner lifted the design-only hold on 2026-11-09: c3-c5 are built under ratified D-MACHINE1.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -74507,7 +74512,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-15T11:33:47.148Z",
+      "updated": "2026-11-15T11:35:08.104Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
@@ -83372,7 +83377,7 @@
       "id": "c0s9rdnu",
       "num": 6524,
       "title": "Service supervision: one Service record, readiness, bounded restarts, a declared restart policy, and pipeline values",
-      "body": "Destination: a service tree is supervised from declared data. One Service record (D-SERVICE-WORD1=A) covers the beginner run form and the expert fields; the supervisor separates start from readiness and bounds every restart and watch loop; restart policy is a field on the tree or worker line, not the `set_restart` setter (Core/Service/Service.jet); and `tasks.pipeline(source)…` builds a dataflow value whose pure stages run in parallel.\n\nWhy it matters: supervision today is a setter with a tree-wide strategy and no intensity, and Core has no pipeline value.\n\nDecisions: D-SERVICE-WORD1=A. The restart-field and pipeline spellings have no decision yet (owner-gates.tsv).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.6 (card #6513).",
+      "body": "Destination: a service tree is supervised from declared data. One Service record (D-SERVICE-WORD1=A) covers the beginner run form and the expert fields; the supervisor separates start from readiness and bounds every restart and watch loop; restart policy is a field on the tree or worker line, not the `set_restart` setter (Core/Service/Service.jet); and `tasks.pipeline(source)…` builds a dataflow value whose pure stages run in parallel.\n\nWhy it matters: supervision today is a setter with a tree-wide strategy and no intensity, and Core has no pipeline value.\n\nDecisions: D-SERVICE-WORD1=A. The restart-field and pipeline spellings are on Main's ballot list (2026-11-15).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.6 (card #6513).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -83465,7 +83470,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:06.066Z",
-      "updated": "2026-11-15T11:33:54.342Z",
+      "updated": "2026-11-15T11:35:10.663Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 7
     },
@@ -102143,7 +102148,7 @@
       "id": "c0e6znz4",
       "num": 6851,
       "title": "Core gets no privilege a package lacks: host-leaf gates, per-domain call checks, Core-only constructs, #Unsafe and lexing",
-      "body": "Destination: Core is ordinary Jet that uses only mechanisms any package can use (Docs/spec/philosophy.md, pillar 5). Today sema lets Core do things a package cannot: it gates host leaves on the caller's module name, keeps a hand-written checker per Core domain, accepts constructs only in Core files, exempts Core from the #Unsafe secret rules, and lexes and parses Core with its own rules.\n\nWhy it matters: a third-party library must be able to do what Core does, and every privilege is a second rule that tools copy and drift on.\n\nSources: findings F02, F03, F07, F08 and F14 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f). Split from #6151, which keeps the Core-declaration and twin-table work. D-HOST-LEAF1=E (runtime is an ordinary library, #6615). Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4).\n\nOwner gate (2026-11-06, recorded on #6151): package-private `__` helpers (the lexing criteria) wait for one plain owner question; none is drafted yet.",
+      "body": "Destination: Core is ordinary Jet that uses only mechanisms any package can use (Docs/spec/philosophy.md, pillar 5). Today sema lets Core do things a package cannot: it gates host leaves on the caller's module name, keeps a hand-written checker per Core domain, accepts constructs only in Core files, exempts Core from the #Unsafe secret rules, and lexes and parses Core with its own rules.\n\nWhy it matters: a third-party library must be able to do what Core does, and every privilege is a second rule that tools copy and drift on.\n\nSources: findings F02, F03, F07, F08 and F14 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f). Split from #6151, which keeps the Core-declaration and twin-table work. D-HOST-LEAF1=E (runtime is an ordinary library, #6615). Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4).\n\nBallot: package-private `__` helpers (the lexing criteria) are on Main's ballot list (2026-11-15).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -102296,7 +102301,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-15T11:34:07.491Z",
+      "updated": "2026-11-15T11:35:13.242Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 14
     },
@@ -102304,7 +102309,7 @@
       "id": "c0sdz4q0",
       "num": 6852,
       "title": "Copy, resource, typestate, effect, sink and layout facts come from declarations, not Core names",
-      "body": "Destination: the checker reads copy, resource, typestate, effect and sink facts, and IR reads runtime-handle layout, from the declaration of a type or function. No compiler file keeps a list of Core type or module names to decide them.\n\nWhy it matters: a package type declared the same way as a Core type must get the same facts, and every name list drifts from Core (census F1 found Core/Jobs/Jobs.jet `queue() -[DB, Env, FS, Time]>` reduced to Effect.DB).\n\nSources: findings F06, F11 and F12 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f); D-CORE-LOWER1=A (lowering). Split from #6151.\n\nStarting point for the taint criteria: an unlanded, unreviewed rework saved from lane TlsLead-3-6151 (on 73739ba7c3) at $JET_SCRATCH_ROOT/lanes/Main/tls-unlanded/TlsLead-3-6151.patch (35 files: Sema/Taint.jet, ProveReplay.jet, CoreSourceRows.jet; deletes JetFoundation/Data/Syntax/Sinks.jet).\n\nOwner gate (2026-11-06, recorded on #6151): the declaration-facts criteria and the layout criterion each wait for one plain owner question; none is drafted yet.",
+      "body": "Destination: the checker reads copy, resource, typestate, effect and sink facts, and IR reads runtime-handle layout, from the declaration of a type or function. No compiler file keeps a list of Core type or module names to decide them.\n\nWhy it matters: a package type declared the same way as a Core type must get the same facts, and every name list drifts from Core (census F1 found Core/Jobs/Jobs.jet `queue() -[DB, Env, FS, Time]>` reduced to Effect.DB).\n\nSources: findings F06, F11 and F12 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f); D-CORE-LOWER1=A (lowering). Split from #6151.\n\nStarting point for the taint criteria: an unlanded, unreviewed rework saved from lane TlsLead-3-6151 (on 73739ba7c3) at $JET_SCRATCH_ROOT/lanes/Main/tls-unlanded/TlsLead-3-6151.patch (35 files: Sema/Taint.jet, ProveReplay.jet, CoreSourceRows.jet; deletes JetFoundation/Data/Syntax/Sinks.jet).\n\nBallots: the declaration-facts criteria and the layout criterion are on Main's ballot list (2026-11-15).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -102385,7 +102390,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-15T11:34:11.898Z",
+      "updated": "2026-11-15T11:35:15.772Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 6
     },
@@ -102393,7 +102398,7 @@
       "id": "c06r6neu",
       "num": 6853,
       "title": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)",
-      "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nOwner gate: growing public enums (a marker requiring an `else` arm) has no ballot; recorded in the owner-gates list.\n\nSplit from #6202 (the research card).",
+      "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nBallot: growing public enums (a marker requiring an `else` arm) are on Main's ballot list (2026-11-15).\n\nSplit from #6202 (the research card).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -102493,7 +102498,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-15T11:34:13.521Z",
+      "updated": "2026-11-15T11:35:18.430Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 8
     },
@@ -105082,7 +105087,7 @@
       "id": "c0pdkpef",
       "num": 6883,
       "title": "Data formats beyond JSON each have one strict profile: TOML, XML, INI, BSON, BEVE, plist, MessagePack and layered config",
-      "body": "Destination: each data format Core reads or writes has one strict, bounded profile over DataTree and Codable: typed values, exact limits, explicit Unsupported for what it cannot represent, malformed and hostile input rejected with a location, and a golden per format on O0, O1 and O2.\n\nWhy it matters: a lenient or partial format reader silently loses data or accepts hostile input; one profile per format keeps every caller's meaning the same.\n\nDecisions: D-ENCBIN1=A (canonical binary interchange), D-ENCXML1=A (lossless XML over DataTree), D-ENCSTREAM1=A, D-ENCBASE-STRICT1=A. Fixed-buffer base encodings wait on an owner choice (owner-gates row).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (core findings).\n\nSource: #3280 c19-c23, c25, c26, c28, c29 (archived #3267, #3269, #3275, #3284, #3312, #3251, #3282, #3283; via #3271 and #3272).",
+      "body": "Destination: each data format Core reads or writes has one strict, bounded profile over DataTree and Codable: typed values, exact limits, explicit Unsupported for what it cannot represent, malformed and hostile input rejected with a location, and a golden per format on O0, O1 and O2.\n\nWhy it matters: a lenient or partial format reader silently loses data or accepts hostile input; one profile per format keeps every caller's meaning the same.\n\nDecisions: D-ENCBIN1=A (canonical binary interchange), D-ENCXML1=A (lossless XML over DataTree), D-ENCSTREAM1=A, D-ENCBASE-STRICT1=A. Fixed-buffer base encodings are on Main's ballot list (2026-11-15).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (core findings).\n\nSource: #3280 c19-c23, c25, c26, c28, c29 (archived #3267, #3269, #3275, #3284, #3312, #3251, #3282, #3283; via #3271 and #3272).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -105218,7 +105223,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
-      "updated": "2026-11-15T11:34:15.812Z",
+      "updated": "2026-11-15T11:35:21.886Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 12
     },
@@ -105351,7 +105356,7 @@
       "id": "c0r8ohhq",
       "num": 6885,
       "title": "Text formatting: exact number formatting, data templates, explicit locales and text diffs",
-      "body": "Destination: Core formats numbers exactly (shortest round-trip digits, ties-to-even on the exact binary value, no crash on any tier), renders bounded data templates, formats and parses with an explicit Locale and no process-global default, and offers text diffs whose similarity, alignment, output and patch rules are stated.\n\nWhy it matters: number and template output is what users and files see; a rounding or locale surprise is a data bug.\n\nDecisions: D-FLOAT-POSITIONAL1=A, D-CORE-TEMPLATE1=A. A Locale object and new diff operations need their own ballots (owner-gates rows).\n\nSource: #3262 c6, c8, c9, c16, c17, c26 (archived #3252, #3307, #3311, #4417, #4331, #4407; via #4426).",
+      "body": "Destination: Core formats numbers exactly (shortest round-trip digits, ties-to-even on the exact binary value, no crash on any tier), renders bounded data templates, formats and parses with an explicit Locale and no process-global default, and offers text diffs whose similarity, alignment, output and patch rules are stated.\n\nWhy it matters: number and template output is what users and files see; a rounding or locale surprise is a data bug.\n\nDecisions: D-FLOAT-POSITIONAL1=A, D-CORE-TEMPLATE1=A. A Locale object and new diff operations are on Main's ballot list (2026-11-15).\n\nSource: #3262 c6, c8, c9, c16, c17, c26 (archived #3252, #3307, #3311, #4417, #4331, #4407; via #4426).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -105433,7 +105438,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:54.433Z",
-      "updated": "2026-11-15T11:34:17.739Z",
+      "updated": "2026-11-15T11:35:24.540Z",
       "updatedBy": "TowerKeeper-2"
     },
     {
@@ -105700,7 +105705,7 @@
       "id": "c0rqtmrp",
       "num": 6888,
       "title": "Core codecs: gzip and zstd live in core.compress and really compress, and image decode is bounded by one shared inflater",
-      "body": "Destination: stream codecs (gzip, zstd) have one public home, core.compress, and their encoders actually compress; core.archive keeps only the zip and tar containers; one source-owned inflater checks the caller's output ceiling before every byte, and core.image decodes and encodes PNG, JPEG and GIF with bounded, typed failures on every tier.\n\nWhy it matters: an encoder that writes stored blocks only is a silent 0% compression; an unbounded inflater is a decompression bomb; two homes for gzip is two names for one thing.\n\nState (dev 7259131021): gzip and zstd live in Core/Archive/Gzip.jet and Core/Archive/Zstd.jet (and Archive.jet compress/decompress); there is no Core/Compress; the encoders write stored blocks only (D-COMPTIME-SIZE1 review, 2026-11-12).\n\nDecisions: D-CODECS1=A, D-CORE-COMPRESS1=A (split codecs from containers), D-CORE-ARCHIVE-BOUND1=A (bounded inflater, spelled core.archive.decompress_bounded), D-CORE-IMAGE1=A. The two module homes conflict; see the owner-gates row on the first criterion.\n\nSource: #3551 c9-c15, c17 (archived #499, #3561, #3562, #3564).",
+      "body": "Destination: stream codecs (gzip, zstd) have one public home, core.compress, and their encoders actually compress; core.archive keeps only the zip and tar containers; one source-owned inflater checks the caller's output ceiling before every byte, and core.image decodes and encodes PNG, JPEG and GIF with bounded, typed failures on every tier.\n\nWhy it matters: an encoder that writes stored blocks only is a silent 0% compression; an unbounded inflater is a decompression bomb; two homes for gzip is two names for one thing.\n\nState (dev 7259131021): gzip and zstd live in Core/Archive/Gzip.jet and Core/Archive/Zstd.jet (and Archive.jet compress/decompress); there is no Core/Compress; the encoders write stored blocks only (D-COMPTIME-SIZE1 review, 2026-11-12).\n\nDecisions: D-CODECS1=A, D-CORE-COMPRESS1=A (split codecs from containers), D-CORE-ARCHIVE-BOUND1=A (bounded inflater, spelled core.archive.decompress_bounded), D-CORE-IMAGE1=A. The two module homes conflict; the choice is on Main's ballot list (2026-11-15).\n\nSource: #3551 c9-c15, c17 (archived #499, #3561, #3562, #3564).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -105809,7 +105814,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:30:11.324Z",
-      "updated": "2026-11-15T11:34:18.661Z",
+      "updated": "2026-11-15T11:35:27.617Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 9
     },
@@ -106324,7 +106329,7 @@
       "id": "c0jt78qz",
       "num": 6895,
       "title": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes",
-      "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop has no decision yet (owner-gates.tsv).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
+      "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop is on Main's ballot list (2026-11-15).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -106441,7 +106446,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-15T11:34:19.618Z",
+      "updated": "2026-11-15T11:35:30.408Z",
       "updatedBy": "TowerKeeper-2"
     },
     {
@@ -109152,7 +109157,7 @@
       "id": "c0sttk1s",
       "num": 6925,
       "title": "Core crypto and service keys: the file-seal contract, one Secret mechanism, and no signing key derivable from a public token",
-      "body": "Destination: Core/Crypto's file seal meets the JETC v2 contract and D-CRYPTO-ENVELOPE2=A's signatures, sealing works for an unprivileged user on every supported Linux kernel, every secret (crypto keys included) uses the one runtime Secret mechanism that wipes on Close and on crash, and no service signing key can be derived from a public token.\n\nWhy: these are the security defects the 2026-10 Core crypto and memory reviews found (I8: one mechanism per job).\n\nSource: #1387 c13-c15 and c18-c20, carried from folded #4777, #4841, #4861, #4863, #5891 and #4821. Two items wait on owner decisions with no ballot on the board yet: D-SERVICE-AUTH-KEY1 and D-EDPOINT-ORPHAN1 (owner-gates.tsv).",
+      "body": "Destination: Core/Crypto's file seal meets the JETC v2 contract and D-CRYPTO-ENVELOPE2=A's signatures, sealing works for an unprivileged user on every supported Linux kernel, every secret (crypto keys included) uses the one runtime Secret mechanism that wipes on Close and on crash, and no service signing key can be derived from a public token.\n\nWhy: these are the security defects the 2026-10 Core crypto and memory reviews found (I8: one mechanism per job).\n\nSource: #1387 c13-c15 and c18-c20, carried from folded #4777, #4841, #4861, #4863, #5891 and #4821. Two items are on Main's ballot list (2026-11-15): D-SERVICE-AUTH-KEY1 and D-EDPOINT-ORPHAN1.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -109242,7 +109247,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
-      "updated": "2026-11-15T11:34:25.934Z",
+      "updated": "2026-11-15T11:35:33.465Z",
       "updatedBy": "TowerKeeper-2",
       "criteriaLastN": 7
     },
@@ -112929,7 +112934,7 @@
       "id": "c0r1ln6j",
       "num": 6967,
       "title": "The build graph runs deterministically and shows its work: ordered scheduling, the ratified pools, alias-safe step outputs and the build board",
-      "body": "Destination: `jet build` schedules a graph deterministically (longest remaining path, then key; only the ratified pools cpu, memory, linker, console and gpu; a failure cancels only its dependents), refuses a step output reached through an aliased read folder, and shows its work on a TTY board of at most 8 lines with one final receipt line, plus `--json` NDJSON and `--trace` Chrome trace output.\n\nWhy: a build users can trust gives the same order and diagnostics every run and shows progress without flooding the terminal.\n\nDecisions: D-BUILD-UI1=A (what jet build shows while it works). The board look needs owner acceptance (owner-gates row).\n\nSource: #6682 c8, c9 and c10 (from #2514 c10 and c11, #2526 and #2527), moved 2026-11-15 because they are build-executor behavior, not the project build function.",
+      "body": "Destination: `jet build` schedules a graph deterministically (longest remaining path, then key; only the ratified pools cpu, memory, linker, console and gpu; a failure cancels only its dependents), refuses a step output reached through an aliased read folder, and shows its work on a TTY board of at most 8 lines with one final receipt line, plus `--json` NDJSON and `--trace` Chrome trace output.\n\nWhy: a build users can trust gives the same order and diagnostics every run and shows progress without flooding the terminal.\n\nDecisions: D-BUILD-UI1=A (what jet build shows while it works). The owner's acceptance of the board look is on Main's ballot list (2026-11-15).\n\nSource: #6682 c8, c9 and c10 (from #2514 c10 and c11, #2526 and #2527), moved 2026-11-15 because they are build-executor behavior, not the project build function.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -112983,7 +112988,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:35:08.120Z",
-      "updated": "2026-11-15T11:34:30.617Z",
+      "updated": "2026-11-15T11:35:36.535Z",
       "updatedBy": "TowerKeeper-2"
     },
     {
@@ -217538,6 +217543,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T11:35:37.920Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0nctuf1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T11:35:36.536Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0r1ln6j",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:33.465Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0sttk1s",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:30.408Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0jt78qz",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:27.618Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0rqtmrp",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:24.541Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0r8ohhq",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:21.887Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0pdkpef",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:18.430Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c06r6neu",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:15.773Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:13.242Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:10.664Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0s9rdnu",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:08.105Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c06he0ee",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:05.876Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c01vsb2c",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:04.324Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0qz3x03",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:02.816Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0cwk90x",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:35:01.299Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:59.538Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c07yeb2k",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:57.928Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0gpih2e",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:56.321Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c00tizy7",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:54.770Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:53.259Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c064zxf4",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:51.639Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0gmf0y4",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:49.976Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0otj2s1",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:48.477Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c0acg7c2",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-15T11:34:46.935Z",
+      "by": "TowerKeeper-2",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "body"
+    },
     {
       "at": "2026-11-15T11:34:45.172Z",
       "by": "TowerKeeper-2",
