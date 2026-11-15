@@ -219,6 +219,147 @@ ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String,
     return -1
 }
 
+// `core.mem.list_append<T>(values, from, count)`: the List at the
+// written place `values`, made its own first (ir_make_unique), grows by the
+// `count` Ts at `from`, moved in as one move of their bytes
+// (jet_rt_mem_move). A full buffer grows to twice its capacity, or to the
+// new length when that is more, and its elements move before the old one
+// goes, so `from` may name the List's own elements. Nothing runs on the Ts
+// the move duplicates. The answer is false, and the List as it was, when
+// `count` is negative, the new length's bytes overflow, or the growth is
+// refused; a count of zero appends nothing. Under the sentry the range at
+// `from` is checked first under the operation's name.
+ir_core_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    member: "list_append"
+    if type_args.len() != 1 || args.len() != 3 -> return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    row: ir_value_type(m, p, type_args[0]) ?? return ir_type_fail(b, span, type_args[0])
+    backs := [IRWriteBack]{}
+    list: ir_place_address(m, p, b, args[0], backs, span)
+    if ir_failed(b) || list < 0 -> return -1
+    pointer: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || pointer < 0 -> return -1
+    counted: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    stride: ir_list_stride(m, row)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    appended: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, appended, 0, -1, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    whole: ir_bool_op(m, b, IROp.Le, zero, count)
+    ir_open_if(b.f, whole, b.line)
+    // The most elements whose bytes a word counts.
+    limit: ir_word_const(m, b, if stride > 0 -> 9223372036854775807 /% stride else -> 9223372036854775807)
+    length: ir_load_word(m, b, list, 0)
+    room: ir_word_op(m, b, IROp.Sub, limit, length)
+    fits: ir_bool_op(m, b, IROp.Le, count, room)
+    ir_open_if(b.f, fits, b.line)
+    ir_emit(b.f, IROp.Const, appended, 1, -1, -1, b.line)
+    any: ir_bool_op(m, b, IROp.Lt, zero, count)
+    ir_open_if(b.f, any, b.line)
+    ir_make_unique(m, p, b, list)
+    total: ir_word_op(m, b, IROp.Add, length, count)
+    if stride > 0 {
+        width: ir_word_const(m, b, stride)
+        added: ir_word_op(m, b, IROp.Mul, count, width)
+        from: ir_sentry_range(m, p, b, pointer, added, row, member, span)
+        kept: ir_word_op(m, b, IROp.Mul, length, width)
+        capacity: ir_load_word(m, b, list, 8)
+        full: ir_bool_op(m, b, IROp.Lt, capacity, total)
+        ir_open_if(b.f, full, b.line)
+        grown: ir_word_op(m, b, IROp.Add, capacity, capacity)
+        short: ir_bool_op(m, b, IROp.Lt, grown, total)
+        ir_open_if(b.f, short, b.line)
+        ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        over: ir_bool_op(m, b, IROp.Lt, limit, grown)
+        ir_open_if(b.f, over, b.line)
+        ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
+        data: ir_list_grow_buffer(m, b, list, grown_bytes, true)
+        made: ir_bool_op(m, b, IROp.Ne, data, zero)
+        ir_open_if(b.f, made, b.line)
+        old_data: ir_load_word(m, b, list, 16)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, kept}, -1)
+        grown_end: ir_word_op(m, b, IROp.Add, data, kept)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{grown_end, from, added}, -1)
+        ir_release_moved_buffer(m, b, old_data, data, capacity, stride)
+        ir_emit(b.f, IROp.Store, -1, list, 16, data, b.line)
+        ir_emit(b.f, IROp.Store, -1, list, 8, grown, b.line)
+        ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line)
+        ir_else(b.f, b.line)
+        ir_emit(b.f, IROp.Const, appended, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_else(b.f, b.line)
+        elements: ir_load_word(m, b, list, 16)
+        tail: ir_word_op(m, b, IROp.Add, elements, kept)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{tail, from, added}, -1)
+        ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line)
+        ir_end(b.f, b.line)
+    } else {
+        ir_emit(b.f, IROp.Store, -1, list, 0, total, b.line)
+    }
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_write_backs(m, p, b, backs, span)
+    ir_release(m, b, list)
+    appended
+}
+
+// `core.mem.list_copy<T>(to, values, start, count)`: the `count` Ts
+// at `to` become `values[start..<start + count]`, as one move of their bytes
+// (jet_rt_mem_move), so the two may overlap. Nothing runs on the Ts the copy
+// duplicates or overwrites. A range that is not inside the List stops the
+// run as a List slice's does (jet_rt_slice_end); a count of zero copies
+// nothing. Under the sentry the range at `to` is checked first under the
+// operation's name.
+ir_core_list_copy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    member: "list_copy"
+    if type_args.len() != 1 || args.len() != 4 -> return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    row: ir_value_type(m, p, type_args[0]) ?? return ir_type_fail(b, span, type_args[0])
+    target: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || target < 0 -> return -1
+    list: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || list < 0 -> return -1
+    first: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || first < 0 -> return -1
+    start: ir_native_index(m, b, first, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, first)
+    counted: ir_expr(m, p, b, args[3])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    finish: ir_word_op(m, b, IROp.Add, start, count)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    exclusive: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, exclusive, 1, -1, -1, b.line)
+    stop_args := [Int]{start, finish, exclusive, ir_list_length(m, b, list)}
+    loop value in ir_location(m, b, b.line) -> stop_args.push(value)
+    word_row: ir_word_row(m)
+    _: ir_runtime(m, b, "jet_rt_slice_end", stop_args, word_row)
+    stride: ir_list_stride(m, row)
+    if stride > 0 {
+        zero: ir_word_const(m, b, 0)
+        any: ir_bool_op(m, b, IROp.Lt, zero, count)
+        ir_open_if(b.f, any, b.line)
+        width: ir_word_const(m, b, stride)
+        total: ir_word_op(m, b, IROp.Mul, count, width)
+        to: ir_sentry_range(m, p, b, target, total, row, member, span)
+        data: ir_list_data(m, b, list)
+        from: ir_element_address(m, b, data, start, stride)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, from, total}, -1)
+        ir_end(b.f, b.line)
+    }
+    ir_release(m, b, list)
+    return -1
+}
+
 // A fill's stores at the word address `to`: plain data (no drop, nothing
 // ir_copy_needs) as one runtime fill of the value's bytes (JetRuntime
 // RawWords.jet jet_rt_mem_fill, or for a lone byte value jet_rt_mem_fill_bytes

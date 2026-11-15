@@ -49,6 +49,13 @@ run: fn() Never! {
     unsafe_test_require(outside_kernel.gates[0].operations.len() == 0 && outside_kernel.gates[0].memory_operations.len() == 3, "raw memory calls carry no obligation")
     inside_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("src/kernel/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
     unsafe_test_require(inside_kernel.diagnostics.len() == 0, "a kernel file holds raw memory calls")
+    // A bulk List move reads or writes raw memory too; its address is the
+    // raw pointer, never the List.
+    moves: parse_source("run: fn() {{ #Unsafe(\"live\") {{ _ := mem.list_append<U8>(bytes, p, n)\nmem.list_copy<U8>(q, bytes, 0, n) }} }}".bytes())
+    moves_refused: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: moves.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(moves_refused.diagnostics.len() == 2 && moves_refused.diagnostics[0].diagnostic.what.contains("`list_append`") && moves_refused.diagnostics[1].diagnostic.what.contains("`list_copy`"), "each bulk List move outside the kernel is refused: {moves_refused.diagnostics:Debug}")
+    moved: moves_refused.gates[0].memory_operations
+    unsafe_test_require(moved.len() == 2 && moved[0].address.len() == 1 && moved[0].address[0] == "p" && moved[1].address.len() == 1 && moved[1].address[0] == "q", "a bulk List move's address is its raw pointer")
     no_kernel: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, policy_path: Val("src/app.jet"), memory_kernel: Val([String]{})}], GateSet{})
     // The raw pointer `*cell` and the dereference `p.*`.
     unsafe_test_require(no_kernel.diagnostics.len() == 2 && no_kernel.diagnostics[0].diagnostic.code == "E3113", "a package naming no kernel refuses raw pointers")

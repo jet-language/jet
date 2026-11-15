@@ -58,6 +58,24 @@ Pin: struct<T> {}
     core.mem.fill<T>(to, value, count)
 }
 
+// The List at `values` grows by the `count` Ts at `from`, as one move of
+// their bytes; nothing runs on the Ts moved. A full List's buffer grows to
+// twice its capacity, or to the new length when that is more, and its own
+// elements move first, so `from` may name them. False, and the List as it
+// was, when `count` is negative or the growth fails; a count of zero appends
+// nothing.
+#Unsafe("`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append") list_append: fn<T>(values: &[T], from: *T, count: Int) -> Bool Never! {
+    core.mem.list_append<T>(values, from, count)
+}
+
+// The `count` Ts at `to` become `values[start..<start + count]`, as one move
+// of their bytes, so the two may overlap; nothing runs on the Ts moved or
+// overwritten. A range that is not inside `values` stops the run as a slice
+// of it does; a count of zero copies nothing.
+#Unsafe("`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy") list_copy: fn<T>(to: *T, values: [T], start: Int, count: Int) Never! {
+    core.mem.list_copy<T>(to, values, start, count)
+}
+
 // `size` bytes of fresh heap storage aligned to `align`, as a byte pointer
 // (`cast<U>` gives the typed view), or None when `size` is not above zero,
 // `align` is not a power of two, or the heap refuses. The bytes are not
@@ -106,7 +124,8 @@ stream_store: fn<T>(dst: &T, value: T) Never! {
 // allocation fails). Reserved `__` names, never public.
 //
 // Each operation here, and `volatile_read`, `volatile_write`, `copy`, `fill`,
-// `alloc_raw`, `free_raw` and `stream_store` above, is a compiler intrinsic:
+// `list_append`, `list_copy`, `alloc_raw`, `free_raw` and `stream_store`
+// above, is a compiler intrinsic:
 // the compiler builds every call inline (JetIR Build.jet IR_CORE_INTRINSICS)
 // and never builds the body, so a body names only the declaration's own
 // operation.

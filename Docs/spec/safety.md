@@ -237,15 +237,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1386,
+  "total": 1395,
   "counts": {
     "Compiler": 638,
-    "Core": 174,
+    "Core": 176,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 9,
-    "tests": 505
+    "tests": 512
   },
   "regions": [
     {
@@ -5375,105 +5375,119 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 65,
+      "line": 67,
+      "column": 1,
+      "reason": "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 75,
+      "column": 1,
+      "reason": "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 83,
       "column": 1,
       "reason": "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 71,
+      "line": 89,
       "column": 1,
       "reason": "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 82,
+      "line": 100,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 90,
+      "line": 108,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 129,
+      "line": 148,
       "column": 1,
       "reason": "`pointer` and the T `count` elements past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 133,
+      "line": 152,
       "column": 1,
       "reason": "`pointer` and the address `bytes` past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 142,
+      "line": 161,
       "column": 1,
       "reason": "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 146,
+      "line": 165,
       "column": 1,
       "reason": "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 166,
+      "line": 185,
       "column": 9,
       "reason": "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 174,
+      "line": 193,
       "column": 5,
       "reason": "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 205,
+      "line": 224,
       "column": 13,
       "reason": "the region mapped these pages at reserve, and no block of it is used after close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 238,
+      "line": 257,
       "column": 9,
       "reason": "`next`'s bytes now belong to this block, so its release duty is this block's"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 265,
+      "line": 284,
       "column": 5,
       "reason": "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 270,
+      "line": 289,
       "column": 9,
       "reason": "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 319,
+      "line": 338,
       "column": 9,
       "reason": "the block's bytes went back to the allocator that served them"
     },
@@ -7163,6 +7177,55 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 15,
       "column": 5,
       "reason": "every move and every byte written or read stays inside the block, which is freed once after the moves"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "every raw range stays inside the `values` tuple, which outlives each access"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "each append reads the Ints `many` holds, which move before their old buffer goes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "both ranges stay inside `names`; every String is a static text, which needs no single owner"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the append reads one Int past the tuple, so the sentry stops it before the List changes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the copy writes one Int past the tuple, so the sentry stops it before any byte moves"
     },
     {
       "package": "tests",
@@ -9959,13 +10022,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 638 |
-| Core | 174 |
+| Core | 176 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 9 |
-| tests | 505 |
-| **total** | **1386** |
+| tests | 512 |
+| **total** | **1395** |
 
 ### Regions
 
@@ -10703,21 +10766,23 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 51:1 | "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy" |
 | Core | Core/Mem/Mem.jet | 57:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
-| Core | Core/Mem/Mem.jet | 65:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
-| Core | Core/Mem/Mem.jet | 71:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
-| Core | Core/Mem/Mem.jet | 82:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
-| Core | Core/Mem/Mem.jet | 90:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
-| Core | Core/Mem/Mem.jet | 129:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 133:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 142:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
-| Core | Core/Mem/Mem.jet | 146:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
-| Core | Core/Mem/Mem.jet | 166:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
-| Core | Core/Mem/Mem.jet | 174:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
-| Core | Core/Mem/Mem.jet | 205:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
-| Core | Core/Mem/Mem.jet | 238:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
-| Core | Core/Mem/Mem.jet | 265:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
-| Core | Core/Mem/Mem.jet | 270:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
-| Core | Core/Mem/Mem.jet | 319:9 | "the block's bytes went back to the allocator that served them" |
+| Core | Core/Mem/Mem.jet | 67:1 | "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append" |
+| Core | Core/Mem/Mem.jet | 75:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy" |
+| Core | Core/Mem/Mem.jet | 83:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
+| Core | Core/Mem/Mem.jet | 89:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
+| Core | Core/Mem/Mem.jet | 100:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
+| Core | Core/Mem/Mem.jet | 108:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
+| Core | Core/Mem/Mem.jet | 148:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 152:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 161:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
+| Core | Core/Mem/Mem.jet | 165:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
+| Core | Core/Mem/Mem.jet | 185:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
+| Core | Core/Mem/Mem.jet | 193:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
+| Core | Core/Mem/Mem.jet | 224:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
+| Core | Core/Mem/Mem.jet | 257:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
+| Core | Core/Mem/Mem.jet | 284:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
+| Core | Core/Mem/Mem.jet | 289:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
+| Core | Core/Mem/Mem.jet | 338:9 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 172:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 178:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
 | Core | Core/Net/Net.jet | 184:5 | "read the native IP address discriminant" |
@@ -10959,6 +11024,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet | 14:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet | 15:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 6:5 | "every raw range stays inside the `values` tuple, which outlives each access" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 17:5 | "each append reads the Ints `many` holds, which move before their old buffer goes" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 27:5 | "both ranges stay inside `names`; every String is a static text, which needs no single owner" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet | 6:5 | "the append reads one Int past the tuple, so the sentry stops it before the List changes" |
+| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet | 6:5 | "the copy writes one Int past the tuple, so the sentry stops it before any byte moves" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
 | tests | tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/main.jet | 5:5 | "every step stays inside the `values` tuple, which outlives each read" |

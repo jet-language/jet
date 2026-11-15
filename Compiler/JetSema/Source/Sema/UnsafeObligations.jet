@@ -119,6 +119,8 @@ SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
     {name: "byte_offset", form: SEMA_RAW_METHOD, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "fill", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "list_append", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
+    {name: "list_copy", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "window", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     {name: "address_of", form: SEMA_RAW_MEM, prefix: false, kind: "", required: [String]{}, pointers: 0, syscalls: [String]{}},
     // Raw reads and writes, byte copies and moves, atomic words.
@@ -563,15 +565,20 @@ sema_unsafe_mem_receiver: fn(receiver: Expr) -> Bool Never! {
 }
 
 // The address roots of a raw operation's pointer operand: `copy(to, from,
-// count)` has two, `fill(to, value, count)` one, and `window` takes its
-// pointer before its count.
+// count)` has two, `fill(to, value, count)` and `list_copy(to, values,
+// start, count)` one, `list_append(values, from, count)` reads its pointer
+// after the List, and `window` takes its pointer before its count.
 sema_unsafe_operation_roots: fn(method: String, receiver: Expr, args: [CallArg]) -> [String] Never! {
     roots := [String]{}
     pointers: if method == {
         "alloc_raw" | "address_of" -> 0
         "copy" -> 2
-        "fill" -> 1
+        "fill" | "list_copy" -> 1
         "window" -> args.len() - 1
+        "list_append" -> {
+            if args.len() > 1 -> sema_unsafe_address_roots(args[1].expr, roots)
+            return roots
+        }
         else -> {
             sema_unsafe_pointer_roots(receiver, args, roots)
             return roots

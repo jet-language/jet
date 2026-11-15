@@ -729,6 +729,16 @@ MEM_COPY: "copy"
 /// copy of `value`. Needs `#Unsafe`.
 MEM_FILL: "fill"
 
+/// `mem.list_append(values, from, count)` — the List grows by the `count` Ts
+/// at a raw pointer, moved in as one move of their bytes; false when the
+/// growth fails. Needs `#Unsafe`.
+MEM_LIST_APPEND: "list_append"
+
+/// `mem.list_copy(to, values, start, count)` — `values[start..<start +
+/// count]` moved out to the `count` Ts at a raw pointer as one move of their
+/// bytes. Needs `#Unsafe`.
+MEM_LIST_COPY: "list_copy"
+
 /// `mem.alloc_raw(size, align)` — `size` fresh heap bytes as a
 /// `mem.Ptr<U8>?`, None when refused. Needs `#Unsafe`.
 MEM_ALLOC_RAW: "alloc_raw"
@@ -809,6 +819,8 @@ CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: MEM_VOLATILE_WRITE, field_1: CoreMemGate.Audit),
     (field_0: MEM_COPY, field_1: CoreMemGate.Audit),
     (field_0: MEM_FILL, field_1: CoreMemGate.Audit),
+    (field_0: MEM_LIST_APPEND, field_1: CoreMemGate.Audit),
+    (field_0: MEM_LIST_COPY, field_1: CoreMemGate.Audit),
     (field_0: MEM_ALLOC_RAW, field_1: CoreMemGate.Audit),
     (field_0: MEM_FREE_RAW, field_1: CoreMemGate.Audit),
     (field_0: MEM_WINDOW, field_1: CoreMemGate.Audit),

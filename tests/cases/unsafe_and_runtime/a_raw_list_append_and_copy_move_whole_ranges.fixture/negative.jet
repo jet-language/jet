@@ -1,0 +1,11 @@
+use core.mem
+
+run: fn() {
+    cell := (a: 1, b: 2)
+    list := [Int]{7, 8, 9}
+    #Unsafe("the two Ints of `cell` take the copy") {
+        first: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.list_copy<Int>(first, list, 1, -1)
+    }
+    print(cell.a)
+}

@@ -947,11 +947,12 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // the runtime bitcasts' frame-word copy on every tier and in compile-time
 // evaluation, so Core's bit work stays in I64 where Int to_bits would box;
 // their Jet bodies are only what a compiler without this table (the seed)
-// runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout,
-// volatile and streaming access, the raw pointer steps, and the raw block
-// copy and fill at the call's one type argument, and the raw heap
-// allocation and release, a region's reserve and release of fresh pages,
-// and `context.allocator`'s take, give and room of a block, which take none.
+// runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout and
+// bulk List moves, volatile and streaming access, the raw pointer steps,
+// and the raw block copy and fill at the call's one type argument, and the
+// raw heap allocation and release, a region's reserve and release of fresh
+// pages, and `context.allocator`'s take, give and room of a block, which
+// take none.
 IRCoreIntrinsicRow: struct {
     module_name: String
     name: String
@@ -964,6 +965,8 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__type_size", intrinsic: IRRuntimeIntrinsic.TypeSize},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__list_capacity", intrinsic: IRRuntimeIntrinsic.ListCapacity},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__list_reserve_exact", intrinsic: IRRuntimeIntrinsic.ListReserveExact},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "list_append", intrinsic: IRRuntimeIntrinsic.ListAppend},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "list_copy", intrinsic: IRRuntimeIntrinsic.ListCopy},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "volatile_read", intrinsic: IRRuntimeIntrinsic.VolatileRead},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "volatile_write", intrinsic: IRRuntimeIntrinsic.VolatileWrite},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "stream_store", intrinsic: IRRuntimeIntrinsic.StreamStore},
@@ -1006,7 +1009,7 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
-        .TypeSize | .ListCapacity | .ListReserveExact | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
+        .TypeSize | .ListCapacity | .ListReserveExact | .ListAppend | .ListCopy | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
         .ViewFromRaw -> function.generic_params.len() == 2
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .RegionReserve | .ContextGive | .ContextRoom -> ir_intrinsic_signature(function, 1)

@@ -3212,6 +3212,20 @@ local is a located R0801 fault. See
 `tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.case`.
 (D-RAWPTR2=A)
 
+`mem.list_append(values, from, count)` grows the List `values` by the
+`count` `T`s at `from` and gives `true`; `mem.list_copy(to, values, start,
+count)` moves `values[start..<start + count]` to the `count` `T`s at `to`.
+Each is one memmove of the bytes, bitwise as `mem.copy` is. A full List's
+buffer grows to twice its capacity, or to the new length when that is
+more, and its elements move before the old buffer goes, so `from` may name
+the List's own elements. `list_append` gives `false`, and leaves the List as
+it was, when `count` is negative or the growth fails; a `count` of zero
+appends nothing. A `list_copy` range that is not inside the List stops the
+run as the slice `values[start..<start + count]` does. Both are E3101
+outside `#Unsafe`, and under the memory sentry the whole raw range is
+checked before any byte moves. See
+`tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.case`.
+
 `mem.alloc_raw(size, align)` takes a byte size and a byte alignment and gives
 `mem.Ptr<U8>?`: `size` fresh, uncleared heap bytes at an `align` boundary, or
 `None` when `size` is not above zero, `align` is not a power of two, or the
