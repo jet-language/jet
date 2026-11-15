@@ -1074,9 +1074,17 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // realized (jet_driver_foreign_link_live). With none, the program links
     // no C, needs no C tools and starts at `__jet_start`. Meanwhile the
     // closure thread reads the pack that collection needs.
+    // At the run base the program first binds to the prelinked runtime
+    // image with no closure, which reads neither the pack nor any C. The
+    // bind collects from `main` and refuses an import the image lacks
+    // (StaticLink.jet link_scan_reloc), and a provider's symbol is one: the
+    // image holds the runtime, which the pack defines too, and the Core
+    // library, which the full link takes beside the pack. So a bind that
+    // succeeds is the link the collection would have chosen, and only a
+    // refused one reads the pack for it.
     decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
     first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
-    bind: base == LINK_RUN_BASE && !decided
+    bind: base == LINK_RUN_BASE
     // A run whose Core is the Core built into this jet binds its Core calls
     // to the Core library's code, which was built from that Core: the
     // image's when the program binds to the image, else jet_core.o's, which
@@ -1115,27 +1123,12 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     }
     built := objects.pop() ?? panic("the native route lost its object")
     if built.failure == .Val(failure) -> return JetCLINativeLinked.Failed{failure: failure}
-    realized := closures.pop() ?? panic("the native route lost its C closure")
+    realized: closures.pop() ?? panic("the native route lost its C closure")
     object := built.bytes.move()
-    if decided {
-        pack := realized.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: realized.runtime_error}}
-        query := x64_link_live_undefined([String]{"{executable_path} (program object)", realized.runtime_path}, [[U8]]{object.move(), pack.move()})
-        live := [String:Bool]{}
-        loop symbol in query.symbols -> live[symbol.copy()] = true
-        queried := query.bufs.move()
-        pack = queried.pop() ?? panic("the live symbol query lost the runtime pack")
-        object = queried.pop() ?? panic("the live symbol query lost the program object")
-        kept: jet_driver_foreign_link_live(foreign_link, live)
-        if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 || base == LINK_RUN_BASE {
-            // A live closure, or a program with none that binds to the
-            // prelinked runtime image.
-            realized = jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, base == LINK_RUN_BASE)
-        } else { realized.runtime = Val(pack.move()) }
-    }
     if trace_sink == .Val(sink) {
         sink.end("native.foreign", if realized.inputs == .Val(found) -> found.names.len() else -> 0)
     }
-    closure: realized.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: realized.error}}
+    closure := realized.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: realized.error}}
     runtime := realized.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: realized.runtime_error}}
     runtime_path := realized.runtime_path
     if realized.bound {
@@ -1155,6 +1148,23 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         // The image moved into the bind; the full link reads the pack.
         runtime_path = jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_PACK_FILE)
         runtime = jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_PACK_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime: {err.message}"}}
+    }
+    if decided {
+        // `runtime` is the pack: the collection names the live undefined
+        // symbols, and only their declarations' providers are realized.
+        query := x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
+        live := [String:Bool]{}
+        loop symbol in query.symbols -> live[symbol.copy()] = true
+        queried := query.bufs.move()
+        runtime = queried.pop() ?? panic("the live symbol query lost the runtime pack")
+        object = queried.pop() ?? panic("the live symbol query lost the program object")
+        kept: jet_driver_foreign_link_live(foreign_link, live)
+        if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 {
+            live_closure: jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, false)
+            closure = live_closure.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: live_closure.error}}
+            runtime = live_closure.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: live_closure.runtime_error}}
+            runtime_path = live_closure.runtime_path
+        }
     }
     // Input names appear only in link diagnostics; the image is a function of
     // the bytes and their order. The object and runtime move in, uncopied; the
