@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102625,
+    "rev": 102627,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53976,7 +53976,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -54018,11 +54018,11 @@
         {
           "n": 6,
           "text": "A module global written `name := <value>` whose computed value holds exact Ints beyond a machine word, or a map keyed by a nominal type, is laid out as static data while compiling, with no first-use build or startup copy (D-JAI-COMPTIME1=A, \"no startup copy\"). The first-use build (atomic ready word plus compare-exchange) is left only for values that hold runtime handles, which cannot exist while compiling. A golden mutates each kind at O0/O1/O2, and an IR or object test shows no first-use helper for them. (Gap found in G6Meta-5029c5-r2, Main.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T07:47:23.778Z"
+          "evidence": "Holds on dev since bced5762a5 (with ce550d258a, G6Meta-5029f1): a mutable module global holding a 2^70 Int, an enum-keyed map, struct-keyed maps and wide Int keys is laid out as static data, and only a Shared cell keeps a first-use start helper. `jet test Compiler --profile cases --filter module_storage/module_globals_start_laid_out_unless_they_hold_a_handle` on the gate-p136 batch jet: PASS 1, FAIL 0. The case mutates each global at -O0/-O1/-O2 and in the -O2 AOT build, and `jet inspect decisions -O1` counts 0 `storage.start` calls and 0 ready-word loads in the laid-out reader.",
+          "at": "2026-11-15T01:18:24.136Z"
         }
       ],
       "refs": [
@@ -54040,12 +54040,13 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:47.130Z",
-      "updated": "2026-11-14T22:58:36.262Z",
+      "updated": "2026-11-15T01:18:28.766Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-15T01:18:28.766Z"
     },
     {
       "id": "c064zxf4",
@@ -205676,6 +205677,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T01:18:28.766Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06y0cef",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-15T01:18:24.136Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06y0cef",
+      "note": "#6"
+    },
     {
       "at": "2026-11-15T01:18:22.754Z",
       "by": "Main",
