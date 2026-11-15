@@ -1,0 +1,18 @@
+# A guarded table's row policy is asked on every path that reaches the table,
+# as the caller the task acts for, so no path has more rights than its
+# caller's. The fixture's notes are each their owner's alone. eve, who owns
+# none, reads and writes the table directly, binds a live query, spawns a
+# task as a job's worker is spawned, calls a public and a signed-in endpoint,
+# and sends a webhook delivery under a guessed key. A task that acts for no
+# one, the program's own included, does the same. A live binding runs as the
+# caller that bound it even when another caller reads it; a spawned task and
+# a request act for no one, whoever spawned or served them; a signed-in
+# endpoint answers 401 while no request has a signed-in caller. Every one of
+# those attempts is refused or finds nothing. Only a run that asks for the
+# system reads every note.
+fixture: row_policy_no_bypass.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = row_policy_no_bypass.stdout.expected

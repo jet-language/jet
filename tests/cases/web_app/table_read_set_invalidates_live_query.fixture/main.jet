@@ -57,9 +57,9 @@ first_note: fn() -[DB.Read]> String BoardError! {
     boards.value.note_runs += 1
     store: boards.value.store ?? return Err(BoardError.Unopened)
     if notes_of(store).get(1) == {
-        .Val(found) -> found.body
-        .None -> "none"
-        .Err(_) -> return Err(BoardError.Read)
+        .Val(found) -> Ok(found.body)
+        .None -> Ok("none")
+        .Err(_) -> Err(BoardError.Read)
     }
 }
 

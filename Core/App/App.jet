@@ -296,25 +296,28 @@ priv remote_invalid: fn(text: String) -> [FieldError] Never! {
     errors
 }
 
-// A live binding: one source function applied to one argument list. The
-// compiler builds it from `live(source, args...)` or
-// `subscribe(source, args...)`; `state` reads it. A source may read the
-// database, fetch over the network and wait, nothing more, so `state` runs
-// on every target that has those, the web included.
+// A live binding: one source function applied to one argument list, run as
+// the caller that made it. The compiler builds it from
+// `live(source, args...)` or `subscribe(source, args...)`; `state` reads it.
+// A source may read the database, fetch over the network and wait, nothing
+// more, so `state` runs on every target that has those, the web included.
 Live: struct<T, E> {
     id: Int
     run: fn() -[DB.Read, Net, Time]> T E!
+    priv acting: Acting?
 }
 
-// One registry binding, named by its source's wire name and its encoded
-// argument list. `value` is the last result, `ok:` or `err:` then its JSON,
-// and empty before the first run; `generation` counts the invalidations that
-// reached the binding; `overtaken` counts its runs in a row that an
-// invalidation overtook, and `held_ns` is the monotonic time until which a
-// stale binding serves its stored result (0: none); `every_ns` is the poll
-// interval (0: none) and `ran_ns` the monotonic time of the last run.
-// `reads` is its read set: the other sources (a table's `core.db.live:<table>`)
-// its runs read (`live_reads`), so a write to any of them re-runs it too.
+// One registry binding, named by its source's wire name, its encoded
+// argument list and `caller`, the caller it runs as (`acting_tag`), so two
+// callers never share a result. `value` is the last result, `ok:` or `err:`
+// then its JSON, and empty before the first run; `generation` counts the
+// invalidations that reached the binding; `overtaken` counts its runs in a
+// row that an invalidation overtook, and `held_ns` is the monotonic time
+// until which a stale binding serves its stored result (0: none); `every_ns`
+// is the poll interval (0: none) and `ran_ns` the monotonic time of the last
+// run. `reads` is its read set: the other sources (a table's
+// `core.db.live:<table>`) its runs read (`live_reads`), so a write to any of
+// them re-runs it too.
 LiveRecord: struct {
     id: Int
     source: String
@@ -327,6 +330,7 @@ LiveRecord: struct {
     every_ns: Int
     ran_ns: Int
     reads: [String]
+    caller: String
 }
 
 // What `state` reads before it runs a binding: the stored result when it is
@@ -387,14 +391,18 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
 }
 
 // Runs `binding`'s source as this task's running binding, so the reads it
-// makes join the binding's read set.
+// makes join the binding's read set, and as the caller that made the
+// binding, whoever reads it now.
 live_run: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> T E! {
     me: tasks.current_task()
     live_run_begin(me, binding.id)
+    acting_begin(me, binding.acting.copy())
     value: binding.run() ?? {
+        acting_end(me)
         live_run_end(me)
         return Err(err)
     }
+    acting_end(me)
     live_run_end(me)
     Ok(value)
 }
@@ -430,24 +438,29 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
     count
 }
 
-// `live(source, args...)`: `args` are the encoded arguments.
+// `live(source, args...)`: `args` are the encoded arguments. The binding
+// runs as this task's caller.
 __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
-    Live<T, E>{id: live_register(source, live_key(args), 0), run: run}
+    acting: acting_now(tasks.current_task())
+    Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), 0), run: run, acting: acting}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
 __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
-    Live<T, E>{id: live_register(source, live_key(args), every_ns), run: run}
+    acting: acting_now(tasks.current_task())
+    Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), every_ns), run: run, acting: acting}
 }
 
 // `push(source, args..., value:)` stores `value` as that binding's result,
-// registering the binding when nothing has read it yet.
+// registering the binding when nothing has read it yet. Only the binding of
+// this task's caller gets it: a value one caller computed never reaches
+// another's binding.
 __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
     encoded: live_json.to_string<T>(value) ?? return
     key: live_key(args)
-    id: live_register(source, key, 0)
+    id: live_register(source, key, acting_tag(acting_now(tasks.current_task())), 0)
     live_store(id, "ok:{encoded}", -1, None)
 }
 
@@ -527,6 +540,135 @@ live_running: fn(task: TaskID) -> Int? {
     None
 }
 
+// Whom a task acts for. `as_caller` runs a function for an account and
+// `as_system` for the server itself. A task that runs neither acts for no
+// one, and so does a task another one spawns: a caller never passes to
+// another task. A guarded core.db table asks its row policy as this caller,
+// and as no one, never as the system, when there is none. A live binding
+// runs as the caller that made it.
+Acting: enum {
+    Account(String)
+    System
+}
+
+// The runs of `as_caller`, `as_system` and binding sources, each with its
+// task and the caller it acts for (None: no one); a task's innermost run
+// names its caller.
+ActingRun: struct {
+    task: TaskID
+    acting: Acting?
+}
+
+ActingRuns: struct {
+    runs: [ActingRun]
+}
+
+ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
+
+// Runs `run` acting for the account `account` and gives what it gives; the
+// account is `maybe_caller()` within it. `run` handles its own failures, so
+// a caller with any failure contract may call this.
+as_caller: fn<R>(account: String, run: fn() -> R Never!) -> R Never! {
+    acting_within(Val(Acting.Account(account.copy())), run)
+}
+
+// Runs `run` acting for the server itself, which no row policy limits, and
+// gives what it gives. A job or a schedule that reads every row runs so; a
+// request never does.
+as_system: fn<R>(run: fn() -> R Never!) -> R Never! { acting_within(Val(Acting.System), run) }
+
+// The account this task acts for: None when it acts for the system or for
+// no one.
+maybe_caller: fn() -> String? Never! {
+    if acting_now(tasks.current_task()) == .Val(.Account(account)) -> return Val(account)
+    None
+}
+
+priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
+    me: tasks.current_task()
+    acting_begin(me, acting)
+    defer acting_end(me)
+    run()
+}
+
+priv acting_begin: fn(task: TaskID, acting: Acting?) {
+    runs := ACTING.guard_edit()
+    runs.value.runs.push(ActingRun{task: task, acting: acting})
+}
+
+priv acting_end: fn(task: TaskID) {
+    runs := ACTING.guard_edit()
+    at := runs.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if task == runs.value.runs[at].task {
+            _: runs.value.runs.remove(at, .Slot)
+            return
+        }
+    }
+}
+
+// The caller `task` acts for now: None for no one.
+priv acting_now: fn(task: TaskID) -> Acting? {
+    runs := ACTING.guard_edit()
+    at := runs.value.runs.len()
+    loop at > 0 {
+        at -= 1
+        if runs.value.runs[at].task == task -> return runs.value.runs[at].acting.copy()
+    }
+    None
+}
+
+// A binding's registry name for the caller `acting`: empty for no one.
+priv acting_tag: fn(acting: Acting?) -> String {
+    if acting == {
+        .Val(.Account(account)) -> "account:{account}"
+        .Val(.System) -> "system"
+        .None -> ""
+    }
+}
+
+// The caller this task acts for, for core.db's row policies.
+priv(package) callers: module {
+    // Whether this task acts for the system.
+    system: fn() -> Bool Never! {
+        if acting_now(tasks.current_task()) == .Val(.System) -> return true
+        false
+    }
+
+    // The account this task acts for: None for the system or no one.
+    account: fn() -> String? Never! { maybe_caller() }
+
+    // This task acts for the system until `end`, as a row policy's own
+    // reads do.
+    begin_system: fn() Never! { acting_begin(tasks.current_task(), Val(Acting.System)) }
+
+    // Ends this task's innermost `begin_system`.
+    end: fn() Never! { acting_end(tasks.current_task()) }
+}
+
+#Test("a task acts for its innermost run's caller, and a task it spawns for no one") {
+    assert_eq(maybe_caller(), String?{None})
+    seen: as_caller<String>("ann", fn() {
+        assert(as_system(fn() { callers.system() }))
+        assert_eq(as_system(fn() { maybe_caller() }), String?{None})
+        assert_eq(as_caller("ben", fn() { maybe_caller() }), Val("ben"))
+        spawned: task { maybe_caller() ?? "no one" }
+        assert_eq(spawned.join() ?? panic("the spawned task runs"), "no one")
+        assert(!callers.system())
+        maybe_caller() ?? "no one"
+    })
+    assert_eq(seen, "ann")
+    assert_eq(maybe_caller(), String?{None})
+    as_caller("ben", fn() {
+        assert_eq(maybe_caller(), Val("ben"))
+        assert(!callers.system())
+    })
+    assert_eq(maybe_caller(), String?{None})
+    assert_eq(acting_tag(Val(Acting.Account("ann"))), "account:ann")
+    assert_eq(acting_tag(None), "")
+}
+
 LIVE_MAX_QUERIES: 1024
 
 LIVE_MAX_PAYLOAD: 4194304
@@ -578,16 +720,17 @@ live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
 
 live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
 
-// The id of the binding named by `source` and `key`, registered when absent;
-// a full registry evicts its oldest binding. Two registrations of one
-// binding poll at the shorter interval. 0 when the registry is unavailable.
-live_register: fn(source: String, key: String, every_ns: Int) -> Int {
+// The id of the binding named by `source`, `key` and `caller` (acting_tag),
+// registered when absent; a full registry evicts its oldest binding. Two
+// registrations of one binding poll at the shorter interval. 0 when the
+// registry is unavailable.
+live_register: fn(source: String, key: String, caller: String, every_ns: Int) -> Int {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return 0
         found := 0
         loop index in 0..<registry.records.len() {
-            if registry.records[index].source != source || registry.records[index].key != key {
+            if registry.records[index].source != source || registry.records[index].key != key || registry.records[index].caller != caller {
                 next
             }
             found = registry.records[index].id
@@ -611,8 +754,8 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
                 registry.records = kept
                 registry.evictions += 1
             }
-            // copy: a lost race retries with the same source and key
-            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0, reads: [String]{}})
+            // copy: a lost race retries with the same source, key and caller
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0, reads: [String]{}, caller: caller.copy()})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return found
     }
@@ -785,8 +928,8 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 
 // The cell holds the registry as length-prefixed fields: next id,
 // invalidations, changes, evictions, WebSocket pushes, capped re-runs, the
-// re-run window's start and count, then eleven fields per binding, the last
-// its read set joined by newlines.
+// re-run window's start and count, then twelve fields per binding, the
+// eleventh its read set joined by newlines and the last its caller.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
     live_put(out, "{registry.next_id}")
@@ -809,6 +952,7 @@ live_encode: fn(registry: LiveRegistry) -> [U8] {
         live_put(out, "{record.every_ns}")
         live_put(out, "{record.ran_ns}")
         live_put(out, record.reads.join("\n"))
+        live_put(out, record.caller)
     }
     out
 }
@@ -824,7 +968,7 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, capped: 0, window_ns: 0, window_runs: 0, records: [LiveRecord]{}})
     }
     fields: live_fields(raw) ?? return None
-    if fields.len() < 8 || (fields.len() - 8) % 11 != 0 -> return None
+    if fields.len() < 8 || (fields.len() - 8) % 12 != 0 -> return None
     next_id: Int.parse(fields[0]) ?? return None
     invalidations: Int.parse(fields[1]) ?? return None
     changes: Int.parse(fields[2]) ?? return None
@@ -843,8 +987,8 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         every_ns: Int.parse(fields[at + 8]) ?? return None
         ran_ns: Int.parse(fields[at + 9]) ?? return None
         reads: if fields[at + 10] == "" -> [String]{} else -> fields[at + 10].split("\n").to_list()
-        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns, reads: reads})
-        at += 11
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", generation: generation, overtaken: overtaken, held_ns: held_ns, every_ns: every_ns, ran_ns: ran_ns, reads: reads, caller: fields[at + 11]})
+        at += 12
     }
     Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, capped: capped, window_ns: window_ns, window_runs: window_runs, records: records})
 }
@@ -920,7 +1064,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         if found >= 0 -> registry.records[found].value = value else {
             id: registry.next_id + 1
             registry.next_id = id
-            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0, reads: [String]{}})
+            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: 0, ran_ns: 0, reads: [String]{}, caller: ""})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return receipt
     }

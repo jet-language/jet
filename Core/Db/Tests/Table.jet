@@ -1,5 +1,8 @@
 // A typed table stores rows under their key and reads them back in key order.
-use db: core.db
+use {
+    app
+    db: core.db
+}
 
 #Codable
 TableTask: struct {
@@ -56,11 +59,13 @@ TableNote: struct {
 }
 
 // An account reads and writes its own notes, and no write moves a note to
-// another owner. The system never reaches the policy.
+// another owner; no one reads or writes any. The system never reaches the
+// policy.
 priv table_note_policy: fn(row: TableNote, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
     if who == {
         .System -> Ok(true)
         .Account(account) -> Ok(row.owner == account)
+        .Anonymous -> Ok(false)
     }
 }
 
@@ -71,23 +76,69 @@ priv table_note_refused: fn(result: TableNote db.DBError!) -> Bool {
     }
 }
 
-#Test("a guarded table asks its row policy about each read and write") {
+priv table_note_count: fn(notes: db.Table<Int, TableNote>) -[DB.Read]> Int {
+    ((notes.query() ?? panic("the notes read")).collect() ?? panic("the rows collect")).len()
+}
+
+// The guarded notes table of `store`. A lambda owns what it captures, so
+// each run below gets a table of its own.
+priv table_notes: fn(store: db.Store) -> db.Table<Int, TableNote> {
+    store.table("notes", key: fn(row: TableNote) { row.id }).guard(table_note_policy)
+}
+
+// Whether the caller finds no note `id`, as when the policy hides it.
+priv table_note_hidden: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read]> Bool {
+    if notes.get(id) == {
+        .Val(_) -> false
+        .None -> true
+        .Err(_) -> false
+    }
+}
+
+// Whether the delete of note `id` is refused.
+priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB.Write]> Bool {
+    if notes.delete(id) == {
+        .Ok(_) -> false
+        .Err(failure) -> failure == db.DBError.Denied
+    }
+}
+
+#Test("a guarded table asks its row policy about each read and write, as the task's caller") {
     store: db.open_memory()
-    notes: store.table("notes", key: fn(row: TableNote) { row.id }).guard(table_note_policy)
-    mia: notes.acting(.Account("mia"))
-    ben: notes.acting(.Account("ben"))
-    _: mia.add(TableNote{id: 1, owner: "mia", text: "mine"}) ?? panic("mia adds her note")
-    assert(table_note_refused(ben.add(TableNote{id: 2, owner: "mia", text: "forged"})))
-    _: ben.add(TableNote{id: 2, owner: "ben", text: "his"}) ?? panic("ben adds his note")
-    assert(ben.get(1) == .None)
-    assert_eq((mia.get(1) ?? panic("mia reads her note")).text, "mine")
-    assert_eq(((ben.query() ?? panic("ben reads")).collect() ?? panic("ben's rows collect")).len(), 1)
-    assert_eq(((notes.query() ?? panic("the system reads")).collect() ?? panic("every row collects")).len(), 2)
+    mia_adds: table_notes(store)
+    assert(app.as_caller<Bool>("mia", fn() {
+        _: mia_adds.add(TableNote{id: 1, owner: "mia", text: "mine"}) ?? panic("mia adds her note")
+        app.maybe_caller() == Val("mia")
+    }))
+    ben_adds: table_notes(store)
+    assert(app.as_caller<Bool>("ben", fn() {
+        forged: table_note_refused(ben_adds.add(TableNote{id: 2, owner: "mia", text: "forged"}))
+        _: ben_adds.add(TableNote{id: 2, owner: "ben", text: "his"}) ?? panic("ben adds his note")
+        forged && table_note_hidden(ben_adds, 1) && table_note_count(ben_adds) == 1
+    }))
+    mia_reads: table_notes(store)
+    assert_eq(app.as_caller("mia", fn() { (mia_reads.get(1) ?? panic("mia reads her note")).text }), "mine")
+    // No caller is no one, never the system.
+    notes: table_notes(store)
+    assert_eq(app.maybe_caller(), String?{None})
+    assert(table_note_hidden(notes, 1))
+    assert_eq(table_note_count(notes), 0)
+    assert(table_note_refused(notes.add(TableNote{id: 3, owner: "mia", text: "anonymous"})))
+    system_counts: table_notes(store)
+    assert_eq(app.as_system(fn() { table_note_count(system_counts) }), 2)
     // A put over a row is judged on the stored row and on the new one.
-    assert(table_note_refused(ben.put(TableNote{id: 1, owner: "ben", text: "taken"})))
-    assert(table_note_refused(mia.put(TableNote{id: 1, owner: "ben", text: "given"})))
-    _: mia.put(TableNote{id: 1, owner: "mia", text: "edited"}) ?? panic("mia edits her note")
-    assert(ben.delete(1) == .Err(_))
-    mia.delete(1) ?? panic("mia deletes her note")
-    assert(notes.get(1) == .None)
+    ben_takes: table_notes(store)
+    assert(app.as_caller<Bool>("ben", fn() {
+        taken: table_note_refused(ben_takes.put(TableNote{id: 1, owner: "ben", text: "taken"}))
+        taken && table_note_kept(ben_takes, 1)
+    }))
+    mia_edits: table_notes(store)
+    assert(app.as_caller<Bool>("mia", fn() {
+        given: table_note_refused(mia_edits.put(TableNote{id: 1, owner: "ben", text: "given"}))
+        _: mia_edits.put(TableNote{id: 1, owner: "mia", text: "edited"}) ?? panic("mia edits her note")
+        mia_edits.delete(1) ?? panic("mia deletes her note")
+        given
+    }))
+    system_reads: table_notes(store)
+    assert(app.as_system(fn() { table_note_hidden(system_reads, 1) }))
 }

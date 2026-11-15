@@ -5465,13 +5465,16 @@ tasks never read or change the process registry. The module source is
 | `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
 | `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind a named `source: fn(args...) -[DB.Read, Net, Time]> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. A source that declares another effect is E0740. |
 | `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. Each table the source reads through a `DBScope` while it runs joins the binding's read set. |
-| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
+| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list, for the caller this task acts for, without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. For a source whose data the database doesn't track, such as a fetch; a database write already reaches the bindings that read its table. |
 | `watch(socket: WsConn, binding: Live<T, E>) -[Net]>` | — | Send `{"live":"invalidate","binding":<id>}` to the server-side WebSocket `socket` each time `binding` is invalidated, starting with the latest such event when there was one. While the binding is held, the event carries `"after_ms":<n>`: read it again after `n` milliseconds. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations, value changes, WebSocket pushes, the per-second re-run cap and the re-runs it held over. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
+| `as_caller<R>(account: String, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
+| `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
+| `maybe_caller() -> String?` | account | The account this task acts for: `None` for the system or no one. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -5506,6 +5509,14 @@ goes to the WebSocket live hub as topic `live:<id>`, an event that names the
 binding and carries no source or argument; only connections that `watch` the
 binding receive it, so a handler watches only a binding it read for its own
 caller, and a WebSocket route that watches nothing receives no live event.
+
+Each task acts for one caller: an account inside `as_caller(account, run)`,
+the system inside `as_system(run)`, and no one otherwise, a task that
+another one spawns included, since a caller never passes to another task. A
+guarded `core.db` table asks its row policy as that caller. A binding keeps
+the caller of the task that made it and runs its source as that caller
+whoever reads it, and the caller is part of the binding's identity, so two
+callers' bindings of one source and argument list never share a result.
 
 `Remote<S>` is the client of a service `S`. It offers only the methods of `S`
 that `#App.SignedIn` (a signed-in caller) or `#App.Public` (any caller)
@@ -6343,7 +6354,6 @@ subquery from another table) is refused.
 | `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row the caller may read, in key order, as a `core.data` query. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
-| `table.acting(who: Who) -> Table<K, T>` | table | The table acting for `Who.Account(id)` or `Who.System`, as its policy sees the caller. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
 | `policy_audit(scope: DBScope) -[DB]> String` | text | Inspect policy decisions for a scope. |
@@ -6398,18 +6408,23 @@ rollback) inside one, as for a scope's `execute`.
 
 A row policy, attached with `table.guard(policy)`, is a function from a row,
 the operation (`Op`: `Read`, `Insert`, `Update` or `Delete`), the caller
-(`Who`: `Account(id)` or `System`) and a store to a `Bool`. The table asks
-it about every call, as the caller that `table.acting(who)` names. A table
-from `store.table` acts for `System` until then, and no policy limits
-`System`: a table acting for it never asks its policy. A read is judged on the
-stored row, an `add` on the new row, a `delete` on the stored row, and a
-`put` over a stored row twice, on the stored row and on the new one; both
-must pass. A `put` under a new key is an insert. A row the policy refuses
-to read is never returned: `get` gives `None` and `query` leaves the row
-out. A refused write is `DBError.Denied`, and it writes nothing. The policy
-reads through a store on the same connection, with the system's rights, so
-it sees the transaction's earlier writes. It runs before the write it
-judges, so a write cannot vouch for itself.
+(`Who`: `Account(id)`, `System` or `Anonymous`) and a store to a `Bool`.
+The table asks it about every call, as the caller the calling task acts for:
+`Account(id)` inside `app.as_caller(id, run)`, and `Anonymous` in a task
+that acts for no one, which is every task that runs neither `as_caller` nor
+`as_system`, a task another one spawns included, so no path reaches a
+guarded table with more rights than its caller's. No policy limits
+`System`: inside `app.as_system(run)` the table never asks its policy. A
+read is judged on the stored row, an `add` on the new row, a `delete` on the
+stored row, and a `put` over a stored row twice, on the stored row and on
+the new one; both must pass. A `put` under a new key is an insert. A row the
+policy refuses to read is never returned: `get` gives `None` and `query`
+leaves the row out. A refused write is `DBError.Denied`, and it writes
+nothing. The policy runs as the system and reads through a store on the
+same connection, so it sees the transaction's earlier writes. It runs before
+the write it judges, so a write cannot vouch for itself. An `app.live`
+binding runs as the caller that made it, whoever reads it, and two callers'
+bindings of one query never share a result.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query

@@ -750,10 +750,10 @@ Store: struct {
     begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
     // The typed table `name`: rows of type `T`, each found by the key that
-    // the pure function `key` computes from it. It has no row policy and
-    // acts for `Who.System` until `guard` and `acting` say otherwise.
+    // the pure function `key` computes from it. It has no row policy until
+    // `guard` gives it one.
     table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), policy: None, who: Who.System}
+        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), policy: None}
     }
 
     // One line: where the database lives and whether it is still open.
@@ -838,13 +838,16 @@ Op: enum {
     Delete
 }
 
-// Whom a table acts for: an account, by its id, or the system, whose rights
-// are the server's own (jobs, schedules, and a row policy's own reads). No
-// row policy limits `System`; a table acting for it skips its policy.
+// Whom a row policy is asked as: the account a task acts for
+// (`app.as_caller`), by its id; the system, whose rights are the server's own
+// (`app.as_system`: jobs, schedules, and a row policy's own reads); or no one,
+// for a task that acts for neither, as a request with no signed-in caller
+// does. No row policy limits `System`, and a guarded table never asks it.
 #Equatable
 Who: enum {
     Account(String)
     System
+    Anonymous
 }
 
 // A typed table, from `store.table(name, key:)`. Each field of the key is a
@@ -855,12 +858,12 @@ Who: enum {
 // DB.Write and re-run the bindings that read the table (DBState.wrote).
 //
 // A table with a row policy (`guard`) asks it about every read and write, as
-// the caller `who` (`acting`), unless it acts for the system: a read on the
-// stored row, an add on the new row, a delete on the stored row, and a put
-// that replaces a row on the stored row and on the new one, both of which
-// must pass (a put of a new key is an insert). A row the policy refuses to
-// read is never returned, and a refused write is `Denied`. The policy reads
-// through a store on the same connection that acts for the system, so it
+// the caller the task acts for (`Who`), unless that is the system: a read on
+// the stored row, an add on the new row, a delete on the stored row, and a
+// put that replaces a row on the stored row and on the new one, both of
+// which must pass (a put of a new key is an insert). A row the policy refuses
+// to read is never returned, and a refused write is `Denied`. The policy runs
+// as the system and reads through a store on the same connection, so it
 // sees the transaction's earlier writes; it runs before the write it judges,
 // which it therefore cannot see.
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
@@ -868,15 +871,10 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv name: String
     priv key_of: fn(T) -[]> K
     priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?
-    priv who: Who
 
     // This table judged by the row policy `policy`, in place of any it had.
     guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move()), who: self.who.copy()}
-    }
-    // This table acting for `who`: its row policy judges each call as `who`'s.
-    acting: fn(self, who: Who) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: self.policy, who: who.copy()}
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move())}
     }
     // The row whose key is `key`, or None, also when the policy refuses to
     // let the caller read it.
@@ -973,13 +971,24 @@ priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
     Ok(Val(row))
 }
 
-// Whether the table's row policy lets its caller do `op` to `row`. A table
-// with no policy, or acting for the system, allows every operation. The
-// policy gets a store on the same connection, which acts for the system.
+// Whether the table's row policy lets the caller this task acts for do `op`
+// to `row`. A table with no policy, or a task acting for the system, allows
+// every operation. The policy runs as the system, so the tables it reads
+// don't ask their own policies, and gets a store on the same connection.
 priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op) -[DB.Read]> Bool DBError! {
     judge: table.policy ?? return Ok(true)
-    if table.who == Who.System -> return Ok(true)
-    judge(row, op, table.who.copy(), Store{state: table.state.copy()})
+    if app.callers.system() -> return Ok(true)
+    who: if app.callers.account() == {
+        .Val(account) -> Who.Account(account)
+        .None -> Who.Anonymous
+    }
+    app.callers.begin_system()
+    allowed: judge(row, op, who, Store{state: table.state.copy()}) ?? {
+        app.callers.end()
+        return Err(err)
+    }
+    app.callers.end()
+    Ok(allowed)
 }
 
 // `add` (replace false) and `put` (replace true): creates the table on its
