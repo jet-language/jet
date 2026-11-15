@@ -2,7 +2,7 @@
 // so a brace inside a string or comment never folds, and runs of line
 // comments and `use` lines.
 use {
-    jet_foundation.[COMMENT_PREFIX, Span, foundation_json_quote]
+    jet_foundation.[COMMENT_PREFIX, Span, foundation_byte_text, foundation_json_quote]
     jet_lexer.[Lexed, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
 }
 
@@ -50,8 +50,9 @@ lsp_indent_end: fn(bytes: [U8], line: Span) -> Int Never! {
 }
 
 lsp_line_starts_with: fn(src: String, line: Span, prefix: String) -> Bool Never! {
-    start: lsp_indent_end(src.bytes(), line)
-    start + prefix.count_bytes() <= line.end && src.slice(start, start + prefix.count_bytes()) == prefix
+    bytes: src.bytes()
+    start: lsp_indent_end(bytes, line)
+    start + prefix.count_bytes() <= line.end && foundation_byte_text(bytes, start, start + prefix.count_bytes()) == prefix
 }
 
 // A run of two or more lines starting with `prefix` folds from the first

@@ -5,6 +5,7 @@
 use {
     core.encoding.[Dyn]
     lsp_loop_term: core.term
+    jet_foundation.[foundation_byte_text]
 }
 
 // The longest message body the server reads.
@@ -18,8 +19,10 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     loop line in header.split("\r\n") {
         colon: line.find(":")
         if colon < 0 -> next
-        if line.slice(0, colon).trim().to_lower() != "content-length" -> next
-        length = Int.parse(line.slice(colon + 1, line.count_bytes()).trim()) ?? return Err(LSPRPCError{code: -32700, message: "Content-Length is not a number"})
+        // `find` counts bytes, so the name and value are cut from the bytes.
+        bytes: line.bytes()
+        if foundation_byte_text(bytes, 0, colon).trim().to_lower() != "content-length" -> next
+        length = Int.parse(foundation_byte_text(bytes, colon + 1, bytes.len()).trim()) ?? return Err(LSPRPCError{code: -32700, message: "Content-Length is not a number"})
     }
     if length < 0 -> return Err(LSPRPCError{code: -32700, message: "a message header has no Content-Length"})
     if length > LSP_MAX_MESSAGE_BYTES -> return Err(LSPRPCError{code: -32700, message: "a message is longer than {LSP_MAX_MESSAGE_BYTES} bytes"})

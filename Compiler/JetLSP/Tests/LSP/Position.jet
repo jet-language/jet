@@ -78,4 +78,8 @@ lsp_test_pos_text: fn(pos: LSPPos) -> String Never! { "{pos.line}:{pos.character
     assert_eq(lsp_uri_to_path("file:///bad%zz"), "")
     assert_eq(lsp_path_to_uri("/tmp/a b/main.jet"), "file:///tmp/a%20b/main.jet")
     assert_eq(lsp_uri_to_path(lsp_path_to_uri("/w/ü.jet")), "/w/ü.jet")
+    // An unencoded non-ASCII path: the prefix is cut by characters on both
+    // sides, so a multi-byte character does not push the end past the text.
+    assert_eq(lsp_uri_to_path("file:///w/ü/main.jet"), "/w/ü/main.jet")
+    assert_eq(lsp_uri_to_path("file:///C:/ü"), "C:/ü")
 }

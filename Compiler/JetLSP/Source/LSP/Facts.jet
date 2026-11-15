@@ -4,7 +4,7 @@
 // unchecked text answers from its tokens alone, or not at all.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, foundation_json_quote]
+    jet_foundation.[Span, foundation_byte_text, foundation_json_quote]
     jet_lexer.[Lexed, Token, TOKEN_IDENT]
     jet_semindex.[SemDef, SemIndex, SemKind, SemRef, SemSymbol]
 }
@@ -169,7 +169,7 @@ lsp_name_span: fn(source: String, span: Span, name: String) -> Span Never! {
     whole: Span{start: span.start, end: span.end}
     if span.end > bytes.len() || span.end - span.start < name.count_bytes() -> return whole
     start: span.end - name.count_bytes()
-    if source.slice(start, span.end) == name -> return Span{start: start, end: span.end}
+    if foundation_byte_text(bytes, start, span.end) == name -> return Span{start: start, end: span.end}
     whole
 }
 
