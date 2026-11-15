@@ -361,7 +361,7 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
     cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core))
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core), "", None, true)
     }
     compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true, facts.layers)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -3115,7 +3115,7 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
             if options.measure {
                 measure = Val(jet_cli_measure_plan(snapshot, false, options.profile))
             }
-            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, Val(file), path, tested)
+            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, Val(file), path, tested, true)
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))

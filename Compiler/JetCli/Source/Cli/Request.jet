@@ -2256,10 +2256,12 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 // toolchain of `core_input` (the snapshot's entry when `None`); `core_tests`
 // as JetDriverCompileRequest.core_tests, its row compiled from
 // `core_tested_source` when given (the file with its doctest claims,
-// Doctests.jet). The organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is
+// Doctests.jet); `core_entry` when the snapshot's entry is a root the
+// toolchain wrote to reach Core itself (JetDriverCompileRequest.core_entry).
+// The organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is
 // its outermost policy rung; a configured policy that can't be read is
 // refused (E3109), never skipped.
-jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_input: String?{None}, core_tests: String{""}, core_tested_source: String?{None}) -> JetCLIPrepared {
+jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_input: String?{None}, core_tests: String{""}, core_tested_source: String?{None}, core_entry: Bool{false}) -> JetCLIPrepared {
     core_sources := if jet_cli_core_sources(core_input ?? snapshot.entry_path) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
@@ -2285,6 +2287,7 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
     request.organization_deny = organization.deny.move()
     request.organization_source = organization.source.move()
     request.core_tests = core_tests
+    request.core_entry = core_entry
     JetCLIPrepared.Prepared{request: request.move(), snapshot: snapshot}
 }
 

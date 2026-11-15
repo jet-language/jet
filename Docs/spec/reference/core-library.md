@@ -329,6 +329,13 @@ handle from a made-up word. A helper Core declares `priv` is refused as any
 package's `priv` item is, with the same diagnostic: `csv.csv_row(…)` outside
 Core is **E0605**, like `dep.pad(…)` for a `priv pad` of a dependency.
 
+`jet_builtins` (`Core/Builtins/Builtins.jet`) is Core's one door to the
+compiler: the module that declares the operations, storage types and markers
+the compiler provides. A Core module reaches them through
+`use builtin: jet_builtins` and a `builtin.` path. Any other program that
+imports it gets **E1013**, and reaches the same operations through Core's
+public modules.
+
 ### `core.compiler.lang` — language declarations
 
 `core.compiler.lang` publishes the closed compiler vocabulary used by typed

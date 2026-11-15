@@ -9,6 +9,7 @@ use {
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
         BuiltinMethodLowering,
+        CORE_BUILTINS_MODULE,
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
@@ -3532,7 +3533,7 @@ jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
         .Unqualified(module_alias, _, _, _, _) -> name = module_alias
         .File(_, _) -> return None
     }
-    if name == "core" || name == "app" || name.starts_with("core.") || jet_driver_runtime_interface_module(name) {
+    if name == "core" || name == "app" || name == CORE_BUILTINS_MODULE || name.starts_with("core.") || name.starts_with("{CORE_BUILTINS_MODULE}.") || jet_driver_runtime_interface_module(name) {
         return Val(name)
     }
     None
@@ -5187,8 +5188,10 @@ jet_driver_runtime_entry_row: fn(core_sources: [JetDriverCoreSource], unit: JetD
 }
 
 // E1001 for a program outside Core that names the Core-private
-// `core.<area>.runtime` namespace (Rust `core_private_unit_diagnostic`).
+// `core.<area>.runtime` namespace (Rust `core_private_unit_diagnostic`), and
+// E1013 for one that names `jet_builtins`.
 jet_driver_core_private_unit: fn(module_name: String, span: Span) -> Diagnostic? {
+    if module_name == CORE_BUILTINS_MODULE || module_name.starts_with("{CORE_BUILTINS_MODULE}.") -> return Val(jet_driver_row_diagnostic("E1013", Val(span)))
     parts: module_name.split(".").to_list()
     if parts.len() < 3 || parts[0] != "core" || parts[2] != "runtime" -> return None
     public: "core.{parts[1]}"
@@ -5991,7 +5994,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         unit: source_units[source_unit_index].copy()
         is_core: jet_driver_unit_is_core(unit)
         is_runtime_entry: entry_module != "" && source_unit_index == (entry_index ?? 0)
-        importer_core: is_core || is_runtime_entry
+        // A Core root (JetDriverCompileRequest.core_entry) imports as Core does.
+        is_core_entry: request.core_entry && source_unit_index == (entry_index ?? -1)
+        importer_core: is_core || is_runtime_entry || is_core_entry
         deferred := [JetDriverScopedImport]{}
         parsed_unit := parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())

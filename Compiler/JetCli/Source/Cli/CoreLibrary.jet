@@ -286,7 +286,7 @@ jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
     core_library_files.write(entry, source) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't write the Core entry `{entry}`: {jet_cli_io_error_text(err)}", None, false, false)}
     prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, false, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, None, JetDriverCompileMode.Check)
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, None, JetDriverCompileMode.Check, None, "", None, true)
     }
     if prepared.move() == {
         .Refused(output) -> JetCLICoreChecked.Stopped{output: output}

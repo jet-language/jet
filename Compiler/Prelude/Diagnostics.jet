@@ -15195,6 +15195,26 @@ UpwardCoreLayerReference: struct {
     }
 }
 
+BuiltinsOutsideCore: struct {
+    impl Diagnostic {
+        code: "E1013"
+        safety_class: .Soundness
+        safety_reason: "`jet_builtins` declares what the compiler itself provides, some of it with no checked body, so an import from outside Core would reach compiler operations past the checks Core's public modules make."
+        expert_path: "none: a program reaches the compiler's operations through Core's public modules"
+        stage: [.Jet]
+        meaning: "A program outside Core imports Core's door to the compiler"
+        no_fix: .Ambiguous
+
+        what: fn(self) -> String { "`jet_builtins` is private to Core" }
+
+        why: fn(self) -> String {
+            "`jet_builtins` is Core's one door to the operations, storage types and markers the compiler provides; only Core sources import it."
+        }
+
+        fix: fn(self) -> String { "Import the public Core module that wraps the operation." }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

@@ -320,6 +320,13 @@ JetDriverCompileRequest: struct {
     // parsed and checked as the compiler embeds it (Loader.jet
     // jet_driver_parse_prelude_source), not as an ordinary user module.
     prelude_entry: Bool{false}
+    // The entry is a root the toolchain writes to reach Core itself: `jet
+    // check Core`'s and the Core library's one import of each public Core
+    // module (JetCli jet_cli_core_check_source), and `jet test` of a Core
+    // source's import of its module. It imports as a Core source does, so
+    // jet_builtins loads for it (Loader.jet `importer_core`), whatever path
+    // the root was written to.
+    core_entry: Bool{false}
     // `jet -e CODE`: the entry is the file that holds CODE as the body of
     // `run: fn`, whose last statement's value is shown (JetSema Calls/Direct.jet
     // sema_eval_entry_show).

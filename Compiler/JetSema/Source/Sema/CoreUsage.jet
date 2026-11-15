@@ -6,6 +6,7 @@
 // remain Foundation-owned (RingLayer.jet).
 use jet_foundation.[
     AST_NODE_GENERATED,
+    CORE_BUILTINS_MODULE,
     Diagnostic,
     Expr,
     ExternFn,
@@ -438,8 +439,10 @@ sema_core_import_copy: fn(imports: [SemaCoreImport]) -> [SemaCoreImport] Never! 
     result
 }
 
+// A Core module import, which calls through Core's rows: a `core` module, or
+// the door to the compiler, whose host operations have rows and no bodies.
 sema_core_import_is_core: fn(module_name: String) -> Bool Never! {
-    module_name == "core" || module_name.starts_with("core.")
+    module_name == "core" || module_name.starts_with("core.") || module_name == CORE_BUILTINS_MODULE
 }
 
 sema_core_import_find: fn(imports: [SemaCoreImport], alias: String) -> SemaCoreImport? {

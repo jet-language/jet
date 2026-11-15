@@ -3,10 +3,11 @@ use core_shipped_files: core.files
 // The Core packages the toolchain ships as machine code. A Core package
 // ships when at least one in CORE_SHIPPED_SHARE of the program files under
 // CORE_SHIPPED_PROGRAMS names it (`core.<package>`). The Prelude always
-// ships, since every program reaches it. JetCli CoreLibrary.jet lists the
-// other packages in JET_CLI_CORE_LOWERED, and the Core library leaves their
-// functions out, so a program that calls one lowers it itself. This guard
-// recounts and holds that list to the rule.
+// ships, since every program reaches it, and so does `jet_builtins`, Core's
+// door to the compiler, which only Core names. JetCli CoreLibrary.jet lists
+// the other packages in JET_CLI_CORE_LOWERED, and the Core library leaves
+// their functions out, so a program that calls one lowers it itself. This
+// guard recounts and holds that list to the rule.
 CORE_SHIPPED_PROGRAMS: [String]{"Examples", "Tools/gauntlet/entries"}
 
 // One folder per Core package, named as the package in CamelCase.
@@ -18,7 +19,7 @@ CORE_SHIPPED_LIST_OPENER: "JET_CLI_CORE_LOWERED: [String]{{"
 
 CORE_SHIPPED_SHARE: 100
 
-CORE_SHIPPED_ALWAYS: "prelude"
+CORE_SHIPPED_ALWAYS: [String]{"prelude", "builtins"}
 
 // The Core package names, sorted.
 core_shipped_packages: fn() -> [String] {
@@ -75,11 +76,11 @@ core_shipped_named: fn(text: String, packages: [String]) -> [String] {
 
 // The packages of `packages` the rule leaves to each program: every one
 // that fewer than one in CORE_SHIPPED_SHARE of `programs` files names
-// (`counts`), but the Prelude.
+// (`counts`), but the ones that always ship.
 core_shipped_lowered: fn(counts: [String:Int], packages: [String], programs: Int) -> [String] {
     lowered := [String]{}
     loop package in packages {
-        if package == CORE_SHIPPED_ALWAYS -> next
+        if CORE_SHIPPED_ALWAYS.contains(package) -> next
         if (counts.get(package) ?? 0) * CORE_SHIPPED_SHARE < programs {
             lowered.push(package.copy())
         }
@@ -120,7 +121,7 @@ core_shipped_problems: fn(listed: [String], lowered: [String], counts: [String:I
 #Test("the Core packages each program lowers itself are the ones fewer than one in a hundred program files name") {
     guards_enter_root()
     packages: core_shipped_packages()
-    assert(packages.contains(CORE_SHIPPED_ALWAYS), "{CORE_SHIPPED_PACKAGES} must hold the Prelude's folder")
+    loop always in CORE_SHIPPED_ALWAYS -> assert(packages.contains(always), "{CORE_SHIPPED_PACKAGES} must hold the `{always}` folder")
     paths := [String]{}
     loop root in CORE_SHIPPED_PROGRAMS -> core_shipped_scan(root, paths)
     assert(paths.len() > 0, "no program files under {CORE_SHIPPED_PROGRAMS}")

@@ -28,6 +28,13 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.crypto __jetc_write Int,[u8],Int,Int __JetcRaw
     core.crypto __jetc_stat Int __JetcStat
     core.crypto __jetc_link Int,Int,String __JetcRaw
+    jet_builtins jetc_open_directory|jetc_open_source|jetc_create_named String JetcRaw
+    jet_builtins jetc_open_child_directory Int,String JetcRaw
+    jet_builtins jetc_tmpfile|jetc_fsync|jetc_close Int JetcRaw
+    jet_builtins jetc_read|jetc_seek Int,Int JetcRaw
+    jet_builtins jetc_write Int,[u8],Int,Int JetcRaw
+    jet_builtins jetc_stat Int JetcStat
+    jet_builtins jetc_link Int,Int,String JetcRaw
     core.crypto __sha256_blocks &[U32],[u8],Int,Int Bool
     core.crypto __aes_blocks [u8],Int,Int,&[u8],[u8],Int,Int,&[u8] Bool
     core.crypto __ghash_blocks [u8],&[u8],[u8],Int,Int Bool
@@ -253,6 +260,16 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.testing __temp_create [U8] __TempCreate
     core.testing __text_window String,U64,U64 String
     core.testing __suite_snapshot - Test
+    jet_builtins evidence_read String EvidenceRead
+    jet_builtins record_failure String,String Unit
+    jet_builtins clear_failure - Unit
+    jet_builtins skip String Unit
+    jet_builtins temp_facts - TempFacts
+    jet_builtins temp_join String TempPath
+    jet_builtins temp_remove [U8] TempRemove
+    jet_builtins temp_create [U8] TempCreate
+    jet_builtins text_window String,U64,U64 String
+    jet_builtins suite_snapshot - Test
     core.testing world fn(DeterministicWorld;Unit) Unit
     core.testing compare [Dyn],fn(Dyn;Dyn),fn(Dyn;Dyn),String TestComparison
     core.testing assert_equal TestComparison Bool
@@ -418,6 +435,7 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.encoding.csv parse String,String,Bool,Bool Result<[[String]],String>
     core.encoding.csv to_string [[String]] String
     core.encoding.csv rows String,String,Bool,Bool Result<[CSVRow],String>
+    jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __resolve_ordered String,U16 Result<[SocketAddr],__ResolveError>
     core.net __ip_from_bytes &&[u8] IPAddr
     core.net __ip_bytes IPAddr [u8]
