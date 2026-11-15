@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6870,
-    "rev": 103239,
+    "nextNum": 6880,
+    "rev": 103250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38879,6 +38879,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:46:19.330Z"
+        },
+        {
+          "n": 16,
+          "text": "Stat that follows symlinks reports the canonical target's exact identity (device and inode or file ID) and nanosecond stamps (D-CORE-FILESTAT1=A, D-OSPATH-NATIVE1=A), and the no-follow operations stay no-follow. Proof: `jet test Compiler --profile cases --filter files/stat_follow_identity_ns`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:14.915Z"
         }
       ],
       "refs": [
@@ -38895,12 +38904,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-14T08:51:27.113Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T03:03:14.915Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 16
     },
     {
       "id": "c0ufrhm0",
@@ -101647,6 +101656,691 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:11.163Z",
       "updated": "2026-11-15T02:54:11.163Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c00bn0zc",
+      "num": 6870,
+      "title": "Lists edited in place: retain, drain, extract_if, splice and fixed-array init",
+      "body": "Destination: Core List edits in place with exact ownership: retain keeps only some items without a new list, drain, extract_if and splice own their ranges even when dropped early, a live drain excludes other access, and fixed arrays initialize slot by slot.\n\nWhy it matters: ports of Vec::retain, drain and splice otherwise allocate a second list or do quadratic removes, and an early-dropped drain that leaves the list half-edited is a silent data bug.\n\nDecisions: D-LIST-RETAIN1=A, D-ARRAY-INIT1=A. Spec: Docs/spec/core-library.md (List). The frozen #4412 holds the original retain and dedup items.\n\nSource: #5976 c1, c83-c88 (archived #3371).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`[T#N].filled(value)` and `[T#N].from_fn(make)` write slots directly (D-ARRAY-INIT1=A): `filled` with a value that is not Copy is refused with a registered error, and a `make` that fails part-way cleans up exactly the slots already written, on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter collections/array_init` and `jet test Compiler --profile ui --filter array_filled_refuses_non_copy`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        },
+        {
+          "n": 2,
+          "text": "`List.retain(keep)` removes in place, keeps order and allocates no new list (D-LIST-RETAIN1=A). Proof: `jet test Compiler --profile golden --filter collections/list_retain` and its allocation count in the measurement manifest.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        },
+        {
+          "n": 3,
+          "text": "`drain(range)` owns its removal range: `drain(1..<3)` on [1,2,3,4] yields [2,3] and leaves [1,4] even when dropped after one read. Proof: `jet test Compiler --profile golden --filter collections/destructive_iter` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        },
+        {
+          "n": 4,
+          "text": "`extract_if(pred)` removes only the visited values its predicate selects: stopped after the first odd it leaves 2,3,4; a predicate failure stops there and leaves the unvisited values in place. Proof: `jet test Compiler --profile golden --filter collections/destructive_iter`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        },
+        {
+          "n": 5,
+          "text": "`splice(range, replacements)` states when replacements are consumed: finishing gives [1,8,9,4] and cancelling leaves [1,4]. Proof: `jet test Compiler --profile golden --filter collections/destructive_iter`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        },
+        {
+          "n": 6,
+          "text": "A live drain excludes any other access or resize of its list, and an unfinished splice guard is a registered error; no clone stands in for the intended mutation. Proof: `jet test Compiler --profile ui --filter drain_live_loan` and `--filter splice_unfinished_guard`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:05.786Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "collections"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:05.786Z",
+      "updated": "2026-11-15T03:03:05.786Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0fyhb2p",
+      "num": 6871,
+      "title": "Borrowed views over collections: [View<T>] results, top-k without copies, loans that cannot escape",
+      "body": "Destination: selections over a collection (top-k, filters, groups) can return [View<T>] results that read the live records without copying them, keep the source unchanged, and cannot outlive or survive an invalidating change to their source.\n\nWhy it matters: copying move-only records to rank them is wrong (they cannot be copied) and slow; a view that outlives its source is a memory-safety hole.\n\nDecisions: D-MEM-COPYSEM1 (semantic copy for default read views). Related: #3317 (iterator capabilities and borrowed iteration).\n\nSource: #5976 c69, c70, c72 (archived #3041 c2-c5; option A of its ballot).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An input-preserving top-k returns [View<T>] results that read the actual move-only records with no payload copy (`selected[2][0].score` reads the record), leave the source unchanged, and carry the receiver's provenance through keyed and fallible producers; counts of zero or below are checked before any read. Proof: `jet test Compiler --profile golden --filter collections/topk_views` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:06.731Z"
+        },
+        {
+          "n": 2,
+          "text": "A view result that escapes its local owner, or is used after a change that invalidates its source, is refused with a registered error; an allowed write does not re-rank existing results. Proof: `jet test Compiler --profile ui --filter topk_view_escape` and `--filter topk_view_invalidated`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:06.731Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "collections",
+        "memory"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:06.731Z",
+      "updated": "2026-11-15T03:03:06.731Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0w8b7vb",
+      "num": 6872,
+      "title": "Map upsert in one hash lookup, with one spelling",
+      "body": "Destination: Map has one method that inserts or updates a value in one hash lookup (the counter idiom `counts[k] += 1` without a second lookup), chosen by ballot.\n\nWhy it matters: today Map.update takes an entries argument (a merge), so an upsert costs two lookups and every port writes it differently.\n\nSource: #5976 c63, c64, c66 (archived #1886).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:07.715Z"
+        },
+        {
+          "n": 2,
+          "text": "After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under tests/cases/corelib/ and a teaching example of the counter idiom, and core-library.md documents it; no second upsert spelling exists. Proof: `jet test Compiler --profile cases --filter corelib/map_upsert`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:07.715Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "collections"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:07.715Z",
+      "updated": "2026-11-15T03:03:07.715Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0blttm0",
+      "num": 6873,
+      "title": "core.time: one now, one sleep, one format-pattern meaning, and time zone data",
+      "body": "Destination: Core time has one Instant identity for now(), one sleep that takes a Duration, one meaning for date and time format patterns, and time zone and calendar data with exact DST behavior.\n\nWhy it matters: two sleeps (one unit-less) and two pattern meanings are the classic source of off-by-1000 and wrong-hour bugs.\n\nDecisions: D-TIME-FORMAT-CANONICAL1=A, D-CORE-ONE-NAME1=A.\n\nSource: #5976 c48, c49, c50.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`unix_ms(now())` equals the epoch milliseconds of the same instant: now and Instant share one identity. Proof: `jet test Compiler --profile cases --filter corelib/time_now_identity`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:08.645Z"
+        },
+        {
+          "n": 2,
+          "text": "Date and time format patterns have one meaning in formatting and parsing (D-TIME-FORMAT-CANONICAL1=A), driven by one pattern table. Proof: `jet test Compiler --profile golden --filter time/format_patterns` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:08.645Z"
+        },
+        {
+          "n": 3,
+          "text": "One sleep: `tasks.sleep(ms: Int)` (Core/Tasks/Tasks.jet:270, unit-less, clamps negatives) is deleted, every caller uses `time.sleep(Duration)` (D-CORE-ONE-NAME1=A), and a negative Duration behaves as core-library.md states. Proof: `git grep -n -E '^sleep: fn' -- Core` prints only Core/Time/Time.jet, and `jet test Compiler --profile cases --filter corelib/sleep_negative_duration` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:08.645Z"
+        },
+        {
+          "n": 4,
+          "text": "Time zone and calendar data: a lookup resolves a zone, a DST gap and an overlap resolve as core-library.md states, and a missing zone database is a typed error, not a crash. Proof: `jet test Compiler --profile cases --filter time/zone_data_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:08.645Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "time"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:08.645Z",
+      "updated": "2026-11-15T03:03:08.645Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0qpy1t3",
+      "num": 6874,
+      "title": "Mail and MIME parsing in Core: placement ballot, then hostile-input parsing",
+      "body": "Destination: Core (or a first-party package, by ballot) parses and formats mail and MIME data: headers, encodings and attachments, separate from sending and authentication, safe on hostile input.\n\nWhy it matters: mail parsing is a frequent attack surface; it must have no network or credential side effects and must bound its work.\n\nRelated: #6826 (outgoing mail), #3280 (the MIME quoted-string scanner).\n\nSource: #5976 c51, c52 (archived #3285, re-homed by the #6563 audit).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A research note under Docs/research and a ballot settle the library, API and placement for mail and MIME parsing; parsing and formatting stay separate from sending and authentication.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:09.559Z"
+        },
+        {
+          "n": 2,
+          "text": "Mail and MIME parsing handles hostile headers, encodings, size limits and attachment streaming, with no credential or network side effect. Proof: `jet test Compiler --profile cases --filter mime/hostile_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:09.559Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "mail"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:09.559Z",
+      "updated": "2026-11-15T03:03:09.559Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c05ghhdo",
+      "num": 6875,
+      "title": "core.io.progress: lazy, truthful progress over lists and iterators (D-PROGRESS-COUNTS1)",
+      "body": "Destination: one progress adapter wraps a List or an iterator, stays lazy, counts the items actually pulled through every adapter, renders correctly on a TTY and off one, and gives the same output on every tier.\n\nWhy it matters: a progress bar that counts what it was told instead of what was read lies exactly when it matters (early break, filters, errors).\n\nDecisions: D-PROGRESS-COUNTS1=A (truthful progress with automatic completion), D-COREIO1=A.\n\nSource: #5976 c54-c58 (archived #1402), #3549 c13-c14.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`progress` accepts List<T> and Iter<T>, stays lazy until consumed, and reports count and percent when the total is known, with no caller bookkeeping. Proof: `jet test Compiler --profile golden --filter io/progress` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:10.450Z"
+        },
+        {
+          "n": 2,
+          "text": "Counts follow actual source pulls through map, filter, step, dedup, chunk, window, flatten, intersperse, zip, take_while, skip_while, filter_map and try_collect, including natural end, early break, unknown total and a ParseError mid-stream. Proof: `jet test Compiler --profile cases --filter corelib/progress_counts_actual_pulls`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:10.450Z"
+        },
+        {
+          "n": 3,
+          "text": "On a TTY progress redraws one line; off a TTY it prints one line per update; NO_COLOR strips ANSI from custom formats; description and format are explicit options rendered by the shared renderer. Proof: `jet test Compiler --profile cases --filter corelib/progress_render_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:10.450Z"
+        },
+        {
+          "n": 4,
+          "text": "progress_each, progress_bytes (a failed buffer is not counted) and a scoped progress_task with child tasks and unknown totals share one ProgressTask model and renderer. Proof: `jet test Compiler --profile cases --filter corelib/progress_task_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:10.450Z"
+        },
+        {
+          "n": 5,
+          "text": "core-library.md and the D-COREIO1 syntax record describe the shipped adapter, with no manual-bookkeeping claim left. Proof: `git grep -n -i 'progress' -- Docs/spec/core-library.md` shows the adapter, and `jet test tests/guards --filter core_declarations` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:10.450Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "io"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:10.450Z",
+      "updated": "2026-11-15T03:03:10.450Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0kgt885",
+      "num": 6876,
+      "title": "core.db crash consistency: every write and sync boundary crashed, whole-or-absent transactions",
+      "body": "Destination: a deterministic crash harness crashes the real DB bridge at every reachable write and sync boundary (including dropped and reordered unsynced writes), and every reopen shows each transaction whole or absent; metamorphic SQL tests catch wrong queries.\n\nWhy it matters: a database that can come back with half a transaction loses data silently; only exhaustive crash schedules show it does not.\n\nRelated: #6448 (the SQL engine leaves Core for the `sql` package).\n\nSource: #5976 c99-c105 (archived #3000, #3001).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A Jet test db_crash_reopen crashes every reachable write and sync boundary of a two-transaction workload on the real emitted DB bridge under the stated storage model (including dropped and reordered unsynced writes); each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and the smallest failing schedule replays from its seed and reduces. Proof: `jet test Compiler --profile cases --filter db/crash_reopen`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:11.357Z"
+        },
+        {
+          "n": 2,
+          "text": "A timeout, an invalid oracle, unsupported storage or an incomplete schedule never counts as a pass, and network filesystems get no untested atomicity promise. Proof: `jet test Compiler --profile cases --filter db/crash_harness_refuses_incomplete`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:11.357Z"
+        },
+        {
+          "n": 3,
+          "text": "Metamorphic SQL pairs over generated data compare equal under core.testing.compare; a planted wrong query yields the first difference and a reduced replay; malformed DB or SQL input reports typed failures. Proof: `jet test Compiler --profile cases --filter db/metamorphic_sql`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:11.357Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "db",
+        "testing",
+        "durability"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:11.358Z",
+      "updated": "2026-11-15T03:03:11.358Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0zutf08",
+      "num": 6877,
+      "title": "One DataTree: duplicate keys, exact numbers, strict decode, readers and limits (D-DATATREE-RULES1)",
+      "body": "Destination: every text and binary format parses into the one DataTree with the ratified rules: duplicate keys are errors unless asked for, numbers keep their exact text, decoding is strict, binary byte strings are Bytes; readers and limits have one shape; the duplicate encoding carriers are gone.\n\nWhy it matters: a second carrier or a lenient default gives the same input two meanings.\n\nDecisions: D-DATATREE-RULES1=A (owner rulings 2026-10-05), D-ONE-CODECS1=A. The frozen #4602 holds the original per-format duplicate-key item.\n\nSource: #5976 c2, c3, c6, c7, c93.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JSON, YAML and TOML each report a duplicate object key as a parse error naming the key and both positions, and the explicit allow-duplicates option keeps the later value. Proof: `jet test Compiler --profile cases --filter encoding/duplicate_keys_`, one case per format.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 2,
+          "text": "Numbers keep their exact text (1.50 re-renders as 1.50; 1e400 and integers beyond Int survive), JSON \"42\" into an Int field is a decode error, and CBOR byte strings decode to the Bytes variant. Proof: `jet test Compiler --profile golden --filter serde/datatree_rules` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 3,
+          "text": "`json.parse_allow_duplicates` accepts custom limits the way `json.reader_allow_duplicates` does (a `limits:` parameter defaulting to EncodingLimits.safe()). Proof: a #Test in Core/Encoding/Json.jet; `jet test Core/Encoding/Json.jet` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 4,
+          "text": "`json.JSONReader` and `jsonl.JSONLReader` have one `next()` shape for text and file sources (today DataEvent for text and DataEvent? for files), as a ballot decides. Proof: `jet test Compiler --profile cases --filter encoding/reader_next_shape`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 5,
+          "text": "Lenient untyped JSON decode, declared pure, neither reads the wall clock nor writes to stderr: it runs with Time and IO denied. Proof: `jet test Compiler --profile cases --filter encoding/lenient_decode_is_pure`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        },
+        {
+          "n": 6,
+          "text": "The canonical DataTree and generated format and error source replace the duplicate encoding carriers, including the web ambient JSON, with byte and diagnostic parity. Proof: `jet test Compiler --profile golden --filter serde/` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:12.288Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "encoding"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:12.288Z",
+      "updated": "2026-11-15T03:03:12.288Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0ejfsdq",
+      "num": 6878,
+      "title": "Byte streams and the HTTP server: read_into, WebSocket routes and wss upgrade (D-NET-READINTO1, D-WS-ROUTE1)",
+      "body": "Destination: every byte stream reads into a caller-owned buffer, the HTTP server, client and TLS reader use it, and the HTTP mux has a WebSocket route kind that authenticates, validates and upgrades over TCP and TLS.\n\nWhy it matters: a fresh limit-sized buffer per read is the main allocation cost of a steady server, and WebSocket handlers returning a fake response after the socket is gone is a design defect.\n\nDecisions: D-NET-READINTO1=A (2026-11-10), D-WS-ROUTE1=A (2026-11-10). Depends on the concurrent serve loop (#4635).\n\nSource: #5976 c42, c43, c110, c112, c113.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`read_into(buffer, limit)` appends up to `limit` bytes to the caller's [U8] and returns the count, as an inherent method on TCPStream, UnixStream, TLSStream and file readers, with a deadline form; it returns 0 at end of stream and a limit below 1 is invalid input; the Reader trait is unchanged (D-NET-READINTO1=A). Proof: `jet test Compiler --profile cases --filter net/read_into_` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:13.176Z"
+        },
+        {
+          "n": 2,
+          "text": "The HTTP server, the HTTP client and the TLS record reader use read_into, and a paired cell (a read(4096) loop against read_into: wall time, allocations per read, peak memory) is in the measurement manifest with read_into strictly winning. Proof: the manifest row and `jet test Compiler --profile golden --filter Net/` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:13.176Z"
+        },
+        {
+          "n": 3,
+          "text": "`mux.websocket(pattern, handler)` and `#Server.WebSocket(path)` (D-WS-ROUTE1=A): the server runs authentication and Origin policy, then validates and upgrades, and the handler returns nothing; one adapter and handshake serve TCP and TLS; the route owns GET (an equal GET registration is refused, HEAD gets 405, OPTIONS lists GET); upgraded tasks stay inside server limits and shutdown; close codes are kept and 1011 is sent only before the transport closes; OpenAPI describes the handshake only. Proof: `jet test Compiler --profile golden --filter Net/WebSocketRoute` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:13.176Z"
+        },
+        {
+          "n": 4,
+          "text": "The HTTP server upgrades a TLS connection to WebSocket (Core/Http's upgrade path no longer needs a raw fd >= 0). Proof: `jet test Compiler --profile cases --filter net/wss_server_upgrade`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:13.176Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "net",
+        "http"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:13.176Z",
+      "updated": "2026-11-15T03:03:13.176Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0t02esm",
+      "num": 6879,
+      "title": "Core API shape: results come back as returns, no API that can never succeed, spec matches Core",
+      "body": "Destination: public Core APIs return their results instead of filling out-parameters, none of them is a stub that can never succeed, core-library.md matches the declared signatures, and module identity does not depend on file paths.\n\nWhy it matters: out-parameters and never-succeeding stubs are the API smells the owner ruled out; a spec that drifts from Core teaches the wrong surface.\n\nDecisions: D-OUTPUT-RETURNS1=A (the frozen #4561 holds the original item). Related: #6367 (API design principle), #6848 c5 (maturity as a typed fact).\n\nSource: #5976 c25, c29, c30, c35.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No public API in Core, Jetpack, Compiler or Tools has an output-only `&` parameter: each returns a value, tuple or struct, with every caller and teaching doc migrated in one cutover (D-OUTPUT-RETURNS1=A); real edits, buffer reuse, streams and foreign boundaries keep `&`. Proof: a guard that lists output-only `&` parameters reports none: `jet test tests/guards --filter output_returns`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:14.050Z"
+        },
+        {
+          "n": 2,
+          "text": "No public Core function can never succeed: one that fails with Unsupported on every target is implemented or removed. Proof: a guard over Core's public functions reports none: `jet test tests/guards --filter core_never_succeeds`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:14.050Z"
+        },
+        {
+          "n": 3,
+          "text": "core-library.md documents each public Core function with the signature Core declares (the drift found by the 2026-10-05 API comparisons is fixed). Proof: `jet test tests/guards --filter core_declarations` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:14.050Z"
+        },
+        {
+          "n": 4,
+          "text": "A Core module's identity is its module path, never its file path: moving a Core file without changing its module declaration changes no symbol, cache key or diagnostic name. Proof: `jet test Compiler --profile cases --filter core_module_identity_ignores_file_path`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:03:14.050Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "api"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:03:14.050Z",
+      "updated": "2026-11-15T03:03:14.050Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -207066,6 +207760,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:03:14.915Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#16 Stat that follows symlinks reports the canonical target's ex"
+    },
+    {
+      "at": "2026-11-15T03:03:14.051Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0t02esm",
+      "note": "Core API shape: results come back as returns, no API that can never succeed, spec matches Core"
+    },
+    {
+      "at": "2026-11-15T03:03:13.176Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0ejfsdq",
+      "note": "Byte streams and the HTTP server: read_into, WebSocket routes and wss upgrade (D-NET-READINTO1, D-WS-ROUTE1)"
+    },
+    {
+      "at": "2026-11-15T03:03:12.288Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0zutf08",
+      "note": "One DataTree: duplicate keys, exact numbers, strict decode, readers and limits (D-DATATREE-RULES1)"
+    },
+    {
+      "at": "2026-11-15T03:03:11.358Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0kgt885",
+      "note": "core.db crash consistency: every write and sync boundary crashed, whole-or-absent transactions"
+    },
+    {
+      "at": "2026-11-15T03:03:10.450Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c05ghhdo",
+      "note": "core.io.progress: lazy, truthful progress over lists and iterators (D-PROGRESS-COUNTS1)"
+    },
+    {
+      "at": "2026-11-15T03:03:09.559Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0qpy1t3",
+      "note": "Mail and MIME parsing in Core: placement ballot, then hostile-input parsing"
+    },
+    {
+      "at": "2026-11-15T03:03:08.645Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0blttm0",
+      "note": "core.time: one now, one sleep, one format-pattern meaning, and time zone data"
+    },
+    {
+      "at": "2026-11-15T03:03:07.715Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0w8b7vb",
+      "note": "Map upsert in one hash lookup, with one spelling"
+    },
+    {
+      "at": "2026-11-15T03:03:06.732Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0fyhb2p",
+      "note": "Borrowed views over collections: [View<T>] results, top-k without copies, loans that cannot escape"
+    },
+    {
+      "at": "2026-11-15T03:03:05.786Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c00bn0zc",
+      "note": "Lists edited in place: retain, drain, extract_if, splice and fixed-array init"
+    },
     {
       "at": "2026-11-15T02:57:32.051Z",
       "by": "Main",
