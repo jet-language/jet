@@ -1,0 +1,58 @@
+use {
+    db: core.db
+    files: core.files
+    app
+    core.reactive.loadable.[Loadable]
+}
+
+titles: fn(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
+    if state == {
+        .Loaded(rows) -> {
+            out := [String]{}
+            loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
+            "loaded [{out.join(",")}]"
+        }
+        .Failed(reason) -> "failed {reason.message}"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// A writer and a reader hold their own connections to one database file, as
+// two requests do. The reader's live binding re-runs while the writer's
+// transaction is open, so it reads the committed rows; the commit, not the
+// statement, is what makes it stale.
+run: fn() {
+    scratch: files.temp_dir("live-commit") ?? panic("scratch")
+    path: "{scratch.path}/tasks.sqlite"
+    writer_conn: db.open(path)
+    reader_conn: db.open(path)
+    policy: db.policy("tasks", "owner == user") ?? panic("policy")
+    writer: writer_conn.with_policy(policy, "alice")
+    reader: reader_conn.with_policy(policy, "alice")
+    _: db.migrate(writer, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
+    owner: "alice"
+    first: "old"
+    _: writer.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {first})"}) ?? panic("insert")
+    shown: reader.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    print("before {titles(app.state(shown))}")
+
+    tx: writer.begin() ?? panic("begin")
+    second: "new"
+    _: writer.execute(SQL{"UPDATE tasks SET title = {second}"}) ?? panic("update")
+    print("statement run, not committed {titles(app.state(shown))}")
+    tx.commit() ?? panic("commit")
+    print("after commit {titles(app.state(shown))}")
+
+    undone: writer.begin() ?? panic("begin again")
+    third: "undone"
+    _: writer.execute(SQL{"UPDATE tasks SET title = {third}"}) ?? panic("update again")
+    print("second statement run {titles(app.state(shown))}")
+    undone.rollback() ?? panic("rollback")
+    print("after rollback {titles(app.state(shown))}")
+
+    fourth: "autocommitted"
+    _: writer.execute(SQL{"UPDATE tasks SET title = {fourth}"}) ?? panic("autocommit")
+    print("outside a transaction {titles(app.state(shown))}")
+    _: writer_conn.close()
+    _: reader_conn.close()
+}

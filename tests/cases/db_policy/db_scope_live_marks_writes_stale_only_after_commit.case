@@ -1,0 +1,19 @@
+# A write inside a transaction marks the live bindings over its table stale
+# at the commit (or rollback), never at the statement: a binding re-run on
+# another connection while the transaction is open reads the committed rows,
+# and the commit makes it re-run again, so the old rows are never kept as
+# current. A write outside a transaction marks them at once. Same output on
+# o0/o1/o2.
+fixture: db_scope_live_marks_writes_stale_only_after_commit.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = db_scope_live_marks_writes_stale_only_after_commit.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

@@ -809,18 +809,21 @@ __db_open_is: fn(state: Shared<__DBState>, number: Int) -> Bool Never! {
 }
 // A commit that fails leaves the engine's transaction open, so it is rolled
 // back before the failure is reported: the transaction ends either way.
+// Either way every live binding over a table it wrote re-runs on its next
+// read: after a commit it reads the committed rows, and after a failed one
+// it drops anything read from the transaction's own uncommitted writes.
 __db_commit: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
     if __driver_closed(guard.value.driver) -> return Err(__db_error("could not commit: the database is closed"))
-    if __driver_commit(guard.value.driver) {
-        guard.value.written = [String]{}
-        return Ok()
+    committed: __driver_commit(guard.value.driver)
+    if !committed {
+        _: __driver_rollback(guard.value.driver)
     }
-    _: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> app.__live_invalidate_all(__live_source(table))
     guard.value.written = [String]{}
-    Err(__db_error("could not commit, so the transaction was rolled back"))
+    if !committed -> return Err(__db_error("could not commit, so the transaction was rolled back"))
+    Ok()
 }
 // A rollback undoes the writes since the last begin, so every live binding
 // over a table they touched re-runs on its next read.
@@ -839,15 +842,22 @@ __db_shutdown: fn(state: Shared<__DBState>) -> Bool Never! {
     __driver_shutdown(guard.value.driver)
 }
 
-// A write marks every live binding over its table for a re-run.
+// A write marks every live binding over its table for a re-run once the
+// write is committed: at once outside a transaction, and at the commit or
+// rollback inside one. A binding re-run on another connection before the
+// commit reads the old rows, so a mark made before the commit would leave
+// that old result stored as current.
 __scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if __driver_closed(guard.value.driver) -> return Err(__db_closed())
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if __sql_table(scoped) == .Val(table) {
-        if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
-        app.__live_invalidate_all(__live_source(table))
+        if guard.value.open != 0 {
+            if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
+        } else {
+            app.__live_invalidate_all(__live_source(table))
+        }
     }
     Ok(changed)
 }
