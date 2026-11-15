@@ -11,15 +11,17 @@
 // demand, its line count. Beside them are the text's length, a
 // 64-bit FNV-1a hash of its bytes (jet_driver_core_interface_text_hash), the
 // `{`..`}` span of each function body (jet_driver_core_body_spans), the
-// program its declaration heads parse to, and the unit's ready parses
+// program its declaration heads parse to, the unit's ready parses
 // (jet_driver_core_ready_write): per region of its text that holds a body,
 // what parsing that region gives, and per held declaration, what parsing
-// that declaration alone gives. A load whose unit text hashes the same can
-// then take the rows as the unit's own and lexes none of its text: a load
-// that reaches Core by use reads the unit's heads from its rows
+// that declaration alone gives; and its mentions of the catalog units
+// (JetSema sema_units_source_mentions). A load whose unit text hashes the
+// same can then take the rows as the unit's own and lexes none of its text:
+// a load that reaches Core by use reads the unit's heads from its rows
 // (jet_driver_parse_core_source), then reads the ready parses of the held
 // declarations it reaches (jet_driver_reach_parse_held) and of the regions
-// whose bodies it keeps (jet_driver_core_restore_bodies).
+// whose bodies it keeps (jet_driver_core_restore_bodies), and registration
+// takes the unit's mentions instead of scanning its text.
 //
 // Encoding: little-endian u32 words. The header is the magic, the version,
 // the unit count, the header's size in bytes, and one directory entry per
@@ -59,12 +61,13 @@ use {
     ]
     jet_lexer.[TOKEN_LBRACE, TOKEN_RBRACE, lex_generated_threads]
     jet_parser.[parse_lexed_with_source_threads]
+    jet_sema.[SEMA_UNITS_CATALOG, SemaUnitSourceMentions, SemaUnitSuffixMention, sema_units_catalog_names, sema_units_source_mentions]
 }
 
 // "JTCI" in little-endian byte order.
 JET_DRIVER_CORE_INTERFACE_MAGIC: 0x4943544A
 
-JET_DRIVER_CORE_INTERFACE_VERSION: 4
+JET_DRIVER_CORE_INTERFACE_VERSION: 5
 
 // One Core unit's interface rows (see above). `path` and `module_name` are
 // its JetDriverCoreSource row's. `bodies` lists each function body with
@@ -79,7 +82,9 @@ JET_DRIVER_CORE_INTERFACE_VERSION: 4
 // lazy load's program takes; a unit a load parses whole has none.
 // `fragments` are the ready parses' bytes as the build writes them after
 // the block, and `fragments_at` where they start in the interface file a
-// load reads them from.
+// load reads them from. `mentions` are the unit's mentions of the catalog
+// units (sema_units_source_mentions over its text), which registration
+// takes in place of scanning the text; a unit a load parses whole has none.
 JetDriverCoreInterfaceUnit: struct {
     path: String
     module_name: String
@@ -96,6 +101,7 @@ JetDriverCoreInterfaceUnit: struct {
     used_import_names: [String]{[String]{}}
     fragments: [U8]{[U8]{}}
     fragments_at: Int{0}
+    mentions: SemaUnitSourceMentions?{None}
 }
 
 // Where one ready parse sits among its unit's: `size` bytes from byte `at`;
@@ -149,6 +155,7 @@ jet_driver_core_interface_bytes_hash: fn(bytes: [U8]) -> U64 Never! {
 // reads lazily, its ready parses (jet_driver_core_ready_write).
 jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
     units := [JetDriverCoreInterfaceUnit]{}
+    catalog: sema_units_catalog_names(SEMA_UNITS_CATALOG)
     loop row in rows.move() {
         text: row.source()
         whole: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: false}, threads)
@@ -174,8 +181,10 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
         bodies := parsed.lazy.move()
         if !parsed.from_heads -> bodies = jet_driver_core_body_spans(text, threads)
         ready := JetDriverCoreReadyWrite{regions: [JetDriverCoreFragment]{}, held: [JetDriverCoreFragment]{}, bytes: [U8]{}, used_import_names: [String]{}}
+        mentions := SemaUnitSourceMentions?{None}
         if parsed.from_heads {
             ready = jet_driver_core_ready_write(row, text, parsed.parsed.program.items, parsed.holds, bodies, words.held, threads)
+            mentions = Val(sema_units_source_mentions(text, catalog))
         }
         heads := [U8]{}
         if parsed.from_heads && parsed.parsed.diagnostics.len() == 0 {
@@ -197,6 +206,7 @@ jet_driver_core_interface_units: fn(rows: &&[JetDriverCoreSource], threads: Comp
                 held_parses: ready.held.move(),
                 used_import_names: ready.used_import_names.move(),
                 fragments: ready.bytes.move(),
+                mentions: mentions.move(),
             },
         )
     }
@@ -572,6 +582,7 @@ jet_driver_core_interface_unit_bytes: fn(unit: JetDriverCoreInterfaceUnit) -> [U
     jet_driver_core_interface_put_fragments(out, unit.regions)
     jet_driver_core_interface_put_fragments(out, unit.held_parses)
     jet_driver_core_interface_put_strings(out, unit.used_import_names)
+    jet_driver_core_interface_put_mentions(out, unit.mentions)
     out
 }
 
@@ -580,6 +591,41 @@ jet_driver_core_interface_put_fragments: fn(out: &[U8], fragments: [JetDriverCor
     loop fragment in fragments {
         jet_driver_core_interface_put(out, fragment.at)
         jet_driver_core_interface_put(out, fragment.size)
+    }
+}
+
+// A unit's catalog mentions: a flag, then each identifier with its span,
+// the unqualified names and the suffixes, the maps' names sorted.
+jet_driver_core_interface_put_mentions: fn(out: &[U8], mentions: SemaUnitSourceMentions?) Never! {
+    if mentions == .Val(row) {
+        jet_driver_core_interface_put_flag(out, true)
+        names := row.identifiers.keys().to_list()
+        names.sort()
+        jet_driver_core_interface_put(out, names.len())
+        loop name in names {
+            jet_driver_core_interface_put_string(out, name)
+            jet_driver_core_interface_put_span(out, row.identifiers.get(name))
+        }
+        unqualified := row.unqualified.keys().to_list()
+        unqualified.sort()
+        jet_driver_core_interface_put_strings(out, unqualified)
+        jet_driver_core_interface_put(out, row.suffixes.len())
+        loop suffix in row.suffixes {
+            jet_driver_core_interface_put_string(out, suffix.text)
+            jet_driver_core_interface_put_span(out, suffix.from_span)
+            jet_driver_core_interface_put_span(out, suffix.digit_span)
+        }
+        return
+    }
+    jet_driver_core_interface_put_flag(out, false)
+}
+
+// A span or none: a flag, then its start and end.
+jet_driver_core_interface_put_span: fn(out: &[U8], span: Span?) Never! {
+    jet_driver_core_interface_put_flag(out, span != None)
+    if span == .Val(value) {
+        jet_driver_core_interface_put(out, value.start)
+        jet_driver_core_interface_put(out, value.end)
     }
 }
 
@@ -869,6 +915,7 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
     regions: jet_driver_core_interface_fragments(bytes, cursor)
     held_parses: jet_driver_core_interface_fragments(bytes, cursor)
     used_import_names: jet_driver_core_interface_strings(bytes, cursor)
+    mentions: jet_driver_core_interface_read_mentions(bytes, cursor)
     if cursor.failed || cursor.at != cursor.end || path != entry.path -> return None
     Val(JetDriverCoreInterfaceUnit{
         path: path,
@@ -885,6 +932,7 @@ jet_driver_core_interface_unit: fn(bytes: [U8], entry: JetDriverCoreInterfaceEnt
         held_parses: held_parses,
         used_import_names: used_import_names,
         fragments_at: entry.at + entry.size,
+        mentions: mentions,
     })
 }
 
@@ -896,6 +944,39 @@ jet_driver_core_interface_fragments: fn(bytes: [U8], cursor: &JetDriverCoreInter
         fragments.push(JetDriverCoreFragment{at: at, size: size})
     }
     fragments
+}
+
+jet_driver_core_interface_read_mentions: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> SemaUnitSourceMentions? Never! {
+    if !jet_driver_core_interface_flag(bytes, cursor) -> return None
+    identifiers := [String:Span]{}
+    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 8) {
+        name: jet_driver_core_interface_string(bytes, cursor)
+        span: jet_driver_core_interface_read_span(bytes, cursor) ?? return jet_driver_core_interface_no_mentions(cursor)
+        identifiers[name] = span
+    }
+    unqualified := [String:Bool]{}
+    loop name in jet_driver_core_interface_strings(bytes, cursor) -> unqualified[name] = true
+    suffixes := [SemaUnitSuffixMention]{}
+    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 12) {
+        text: jet_driver_core_interface_string(bytes, cursor)
+        from_span: jet_driver_core_interface_read_span(bytes, cursor)
+        digit_span: jet_driver_core_interface_read_span(bytes, cursor)
+        suffixes.push(SemaUnitSuffixMention{text: text, from_span: from_span, digit_span: digit_span})
+    }
+    Val(SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: suffixes.move()})
+}
+
+jet_driver_core_interface_read_span: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> Span? Never! {
+    if !jet_driver_core_interface_flag(bytes, cursor) -> return None
+    start: jet_driver_core_interface_u32(bytes, cursor)
+    end: jet_driver_core_interface_u32(bytes, cursor)
+    Val(Span{start: start, end: end})
+}
+
+// An identifier mention with no span: the read fails.
+jet_driver_core_interface_no_mentions: fn(cursor: &JetDriverCoreInterfaceCursor) -> SemaUnitSourceMentions? Never! {
+    cursor.failed = true
+    None
 }
 
 // The unit of `block`, the block of the unit at `path` a load read alone

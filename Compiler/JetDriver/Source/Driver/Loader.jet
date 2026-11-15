@@ -125,6 +125,7 @@ use {
         SemaRegistrationImportEdge,
         SemaSourceOrigin,
         SemaSourceSegment,
+        SemaUnitSourceMentions,
         sema_cli_entry_expand,
         sema_cli_entry_expand_imported,
         sema_cli_entry_module_needed,
@@ -4075,6 +4076,8 @@ JetDriverCoreIdentifierDemand: struct {
 // `holds` whether its hold held or dropped any declaration. `from_heads` is
 // whether the unit was parsed from its declaration heads, and `decoded`
 // whether that program was read from the interface instead (no text lexed).
+// `mentions` are a lazy unit's catalog unit mentions from its interface
+// rows, which its loaded module hands registration.
 JetDriverParsedUnit: struct {
     parsed: ParseResult
     demand: JetDriverCoreIdentifierDemand
@@ -4089,6 +4092,7 @@ JetDriverParsedUnit: struct {
     decoded: Bool{false}
     ready_regions: JetDriverCoreReady?{None}
     ready_held: JetDriverCoreReady?{None}
+    mentions: SemaUnitSourceMentions?{None}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4793,6 +4797,7 @@ jet_driver_core_heads_unit: fn(program: Program, rows: &&JetDriverCoreInterfaceU
     unit.parsed.program.used_import_names = rows.used_import_names.move()
     unit.ready_regions = Val(JetDriverCoreReady{at: rows.fragments_at, fragments: rows.regions.move()})
     unit.ready_held = Val(JetDriverCoreReady{at: rows.fragments_at, fragments: rows.held_parses.move()})
+    unit.mentions = rows.mentions.move()
     unit
 }
 
@@ -4884,13 +4889,15 @@ jet_driver_parse_core_text: fn(text: String, text_bytes: &&[U8], module_name: St
     bodies := [Span]{}
     ready_regions := JetDriverCoreReady?{None}
     ready_held := JetDriverCoreReady?{None}
+    mentions := SemaUnitSourceMentions?{None}
     if lazy {
         bodies = rows.bodies.move()
         parsed.program.used_import_names = rows.used_import_names.move()
         ready_regions = Val(JetDriverCoreReady{at: rows.fragments_at, fragments: rows.regions.move()})
         ready_held = Val(JetDriverCoreReady{at: rows.fragments_at, fragments: rows.held_parses.move()})
+        mentions = rows.mentions.move()
     }
-    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move(), item_ends: item_ends, holds: held.declarations.len() > 0 || held.dropped.len() > 0, from_heads: lazy, ready_regions: ready_regions.move(), ready_held: ready_held.move()}
+    JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move()), lazy: bodies.move(), item_ends: item_ends, holds: held.declarations.len() > 0 || held.dropped.len() > 0, from_heads: lazy, ready_regions: ready_regions.move(), ready_held: ready_held.move(), mentions: mentions.move()}
 }
 
 // `jet check --prelude`: a Compiler/Prelude source parsed as the compiler
@@ -6033,6 +6040,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         lazy_holds: parsed_unit.holds
         lazy_ready := parsed_unit.ready_regions.move()
         held_ready := parsed_unit.ready_held.move()
+        unit_mentions := parsed_unit.mentions.move()
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
         // the packages they use), so each member sees the whole namespace.
@@ -6629,6 +6637,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
         modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
+        modules[modules.len() - 1].units_mentions = unit_mentions.move()
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }

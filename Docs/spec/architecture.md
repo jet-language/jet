@@ -258,8 +258,10 @@ with the export list (an export without a facts row, or a facts row of a
 function the exports lack). `core.interface` (`JetDriver/Driver/CoreInterface.jet`)
 holds, for each unit of the Core built into jet, what a load learns from
 lexing and parsing its whole text (its spellings and held declarations,
-its identifier demand, its line count, the import names it spells), the
-text's length and 64-bit FNV-1a hash, the `{`..`}` span of each function
+its identifier demand, its line count, the import names it spells, its
+mentions of the catalog units, which registration takes in place of
+scanning the text), the text's length and 64-bit FNV-1a hash, the
+`{`..`}` span of each function
 body, the program its declaration heads parse to, and its ready parses:
 for each region of its text whose item holds a body, what parsing that
 region gives, and for each held declaration, what parsing that declaration

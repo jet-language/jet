@@ -105,11 +105,12 @@ sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skippe
 }
 
 // The unit mentions of every input sema_units_scanned marks, by input, and an
-// empty row for the others. A scan reads nothing but its input's source, so
-// the inputs move into the threads' shared state, up to `threads` compiler
-// threads scan the sources in place, claimed largest first, and the inputs
-// move back in order. Each row lands at its input, so the rows are the same
-// for any thread count.
+// empty row for the others. An input that holds its mentions already
+// (`units_mentions`) gives them up; the rest are scanned. A scan reads
+// nothing but its input's source, so the inputs move into the threads'
+// shared state, up to `threads` compiler threads scan the sources in place,
+// claimed largest first, and the inputs move back in order. Each row lands
+// at its input, so the rows are the same for any thread count.
 sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, names: SemaUnitsCatalogNames, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
     rows := [SemaUnitSourceMentions]{}
     jobs := [Int]{}
@@ -118,6 +119,10 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
     loop index in 0..<inputs.len() {
         rows.push(SemaUnitSourceMentions{identifiers: [String:Span]{}, unqualified: [String:Bool]{}, suffixes: [SemaUnitSuffixMention]{}})
         if !sema_units_scanned(inputs, index, skipped) -> next
+        if sema_units_held(inputs[index].units_mentions.move()) == .Val(held) {
+            rows[index] = held.move()
+            next
+        }
         bytes: inputs[index].source.count_bytes()
         jobs.push(index)
         weights.push(bytes)
@@ -137,6 +142,11 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
     sema_units_scanners(shared_state, queue, 0, workers, rows)
     sema_units_scan_take(shared_state, inputs)
     rows
+}
+
+// The mentions an input held (`units_mentions`), taken out of it.
+sema_units_held: fn(held: &&SemaUnitSourceMentions?) -> SemaUnitSourceMentions? Never! {
+    held.move()
 }
 
 // What every scanning thread reads: the inputs (moved in and back out; each

@@ -22,6 +22,7 @@ use {
         jet_driver_core_heads_program,
         jet_driver_core_interface_bytes,
         jet_driver_core_interface_entries,
+        jet_driver_core_interface_put_mentions,
         jet_driver_core_interface_text_hash,
         jet_driver_core_interface_unit,
         jet_driver_core_interface_unit_bytes,
@@ -31,6 +32,7 @@ use {
         jet_driver_runtime_interface_sources,
     ]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CompilerTraceSink, Func, Item, Program, Span, compiler_threads_single]
+    jet_sema.[SEMA_UNITS_CATALOG, sema_units_catalog_names, sema_units_source_mentions]
 }
 
 INTERFACE_FIXTURE: "Sized: trait {{\n    size: fn(self) -> Int Never! {{ 1 }}\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n    impl Sized {{\n        size: fn(self) -> Int Never! {{ self.width }}\n    }}\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nnothing: fn() Never! {{}}\n\nLIMIT: 3\n"
@@ -414,6 +416,27 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     assert((lazy.counters.get("counters.load.core_fragments") ?? 0) > 0)
     assert((lazy.counters.get("counters.load.core_fragment_bytes") ?? 0) > 0)
     assert((lazy.counters.get("counters.parse.core_tokens") ?? 0) < (eager.counters.get("counters.parse.core_tokens") ?? 0))
+    // Each lazy Core module carries the unit mentions a scan of its text
+    // gives, so registration scans none of it; an eager load carries none.
+    loop module_row in eager.load.modules {
+        assert(module_row.units_mentions == None, module_row.module_name)
+    }
+    catalog: sema_units_catalog_names(SEMA_UNITS_CATALOG)
+    carried := 0
+    loop module_row in lazy.load.modules {
+        if module_row.units_mentions == None -> next
+        path: lazy.load.source_units[module_row.source_unit_index].path
+        loop file in lazy.load.source_files {
+            if file.path != path -> next
+            scanned := [U8]{}
+            jet_driver_core_interface_put_mentions(scanned, Val(sema_units_source_mentions(file.source, catalog)))
+            held := [U8]{}
+            jet_driver_core_interface_put_mentions(held, module_row.units_mentions)
+            assert(held == scanned, path)
+            carried += 1
+        }
+    }
+    assert(carried > 0)
 }
 
 // The interface is part of the compiler: a lazy load whose ready parses
