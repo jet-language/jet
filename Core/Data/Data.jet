@@ -390,7 +390,7 @@ __QueryCell: struct<T> {
     run: fn() -> [T] DataError!
 }
 
-__QueryState: struct {
+priv QueryState: struct {
     consumed: Bool
 }
 
@@ -401,7 +401,7 @@ Query: struct<T> {
     __steps: [String]
     __one_shot: Bool
     __limits: DataLimits
-    __state: Shared<__QueryState>
+    __state: Shared<QueryState>
     __cell: Shared<__QueryCell<T>>
 }
 
@@ -710,7 +710,7 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
 }
 
 priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{__QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {

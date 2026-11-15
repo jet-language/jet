@@ -121,7 +121,7 @@ priv zfse_prev: fn(table: ZFse, symbols: Int) -> [Int] Never! {
 
 // A forward bit writer whose output a backward stream (`zback`) reads in
 // reverse: the last field written is the first read.
-__ZBits: struct {
+priv ZBits: struct {
     acc: Int
     count: Int
 
@@ -252,7 +252,7 @@ priv zenc_literals: fn(out: &[U8], size: Int) Never! {
 // match and literal extra bits, then the literal, match and offset state
 // updates, so each sequence writes those in the reverse order.
 priv zenc_sequences: fn(out: &[U8], lengths: [Int], matches: [Int], offsets: [Int], tables: ZEnc) Never! {
-    bits := __ZBits{acc: 0, count: 0}
+    bits := ZBits{acc: 0, count: 0}
     ll_state := 0
     of_state := 0
     ml_state := 0

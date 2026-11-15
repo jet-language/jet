@@ -345,7 +345,7 @@ priv sql_identifier: fn(raw: [U8]) -> Bool Never! {
 // Statements run through a scope are rewritten on bytes: one statement, no
 // comments, one simple target table, and an owner predicate when required.
 
-__SQLToken: struct {
+priv SQLToken: struct {
     start: Int
     end: Int
     word: String
@@ -419,8 +419,8 @@ priv sql_skip_quoted: fn(raw: [U8], open: Int, quote: Int, limit: Int) -> Int Ne
     }
     at
 }
-priv sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
-    tokens := [__SQLToken]{}
+priv sql_tokens: fn(raw: [U8]) -> [SQLToken] Never! {
+    tokens := [SQLToken]{}
     at := 0
     loop at < raw.len() {
         byte: Int{raw[at]}
@@ -435,7 +435,7 @@ priv sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
                     word.push(sql_lower(raw[at]))
                     at += 1
                 }
-                tokens.push(__SQLToken{start: start, end: at, word: String.from_bytes(word) ?? ""})
+                tokens.push(SQLToken{start: start, end: at, word: String.from_bytes(word) ?? ""})
             }
             else -> {
                 at += 1
@@ -463,11 +463,11 @@ priv sql_has_comment: fn(raw: [U8]) -> Bool Never! {
     }
     false
 }
-priv sql_word_index: fn(tokens: [__SQLToken], word: String) -> Int Never! {
+priv sql_word_index: fn(tokens: [SQLToken], word: String) -> Int Never! {
     loop index in 0..<tokens.len() { if tokens[index].word == word -> return index }
     -1
 }
-priv sql_count: fn(tokens: [__SQLToken], word: String) -> Int Never! {
+priv sql_count: fn(tokens: [SQLToken], word: String) -> Int Never! {
     count := 0
     loop token in tokens { if token.word == word -> count += 1 }
     count
@@ -476,11 +476,11 @@ priv sql_clause_word: fn(word: String, with_where: Bool) -> Bool Never! {
     (with_where && word == "where") || word == "order" || word == "group" || word == "limit" || word == "offset" || word == "returning"
 }
 // First ORDER/GROUP/LIMIT/OFFSET/RETURNING token starting after `after`.
-priv sql_clause_start: fn(tokens: [__SQLToken], after: Int) -> Int Never! {
+priv sql_clause_start: fn(tokens: [SQLToken], after: Int) -> Int Never! {
     loop token in tokens { if token.start > after && sql_clause_word(token.word, false) -> return token.start }
     -1
 }
-priv sql_target_index: fn(tokens: [__SQLToken], kind: String) -> Int Never! {
+priv sql_target_index: fn(tokens: [SQLToken], kind: String) -> Int Never! {
     keyword: if {
         kind == "select" || kind == "delete" -> "from"
         kind == "insert" -> "into"
@@ -490,7 +490,7 @@ priv sql_target_index: fn(tokens: [__SQLToken], kind: String) -> Int Never! {
     if found < 0 || found + 1 >= tokens.len() -> return -1
     found + 1
 }
-priv sql_simple_target: fn(raw: [U8], tokens: [__SQLToken], kind: String) -> Bool Never! {
+priv sql_simple_target: fn(raw: [U8], tokens: [SQLToken], kind: String) -> Bool Never! {
     selects: if kind == "select" -> 1 else -> 0
     froms: if kind == "select" || kind == "delete" -> 1 else -> 0
     words: [String]{"join", "union", "with", "except", "intersect", "conflict", "upsert", "replace"}
@@ -534,12 +534,12 @@ priv sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
     parts
 }
 
-__SQLInsertShape: struct {
+priv SQLInsertShape: struct {
     columns: Int
     owner: Int
 }
 
-priv sql_insert_shape: fn(raw: [U8], tokens: [__SQLToken]) -> __SQLInsertShape? Never! {
+priv sql_insert_shape: fn(raw: [U8], tokens: [SQLToken]) -> SQLInsertShape? Never! {
     into: sql_word_index(tokens, "into")
     if into < 0 || into + 1 >= tokens.len() -> return None
     values: sql_word_index(tokens, "values")
@@ -564,9 +564,9 @@ priv sql_insert_shape: fn(raw: [U8], tokens: [__SQLToken]) -> __SQLInsertShape? 
         if owner < 0 && sql_lower_text(columns[index]) == "owner" -> owner = index
     }
     if owner < 0 -> return None
-    Val(__SQLInsertShape{columns: columns.len(), owner: owner})
+    Val(SQLInsertShape{columns: columns.len(), owner: owner})
 }
-priv sql_update_mutates_owner: fn(tokens: [__SQLToken]) -> Bool Never! {
+priv sql_update_mutates_owner: fn(tokens: [SQLToken]) -> Bool Never! {
     set: sql_word_index(tokens, "set")
     if set < 0 -> return false
     first: set + 1
@@ -700,7 +700,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 // location it was opened at, for display. `written` names the tables written
 // since the last begin or commit, so a rollback can re-run their live bindings.
 // `open` numbers the transaction open on it (0: none), out of `began` so far.
-__DBState: struct {
+priv DBState: struct {
     driver: __Driver
     path: String
     written: [String]
@@ -709,7 +709,7 @@ __DBState: struct {
 }
 
 DBConnection: struct {
-    state: Shared<__DBState>
+    state: Shared<DBState>
 
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
@@ -729,7 +729,7 @@ DBConnection: struct {
     }
 }
 DBScope: struct {
-    state: Shared<__DBState>
+    state: Shared<DBState>
     policy: RowPolicy
     user: String
 
@@ -771,7 +771,7 @@ DBScope: struct {
 // it, is rolled back: it writes nothing, and the connection can begin again.
 #SingleUse
 DBTransaction: struct {
-    priv state: Shared<__DBState>
+    priv state: Shared<DBState>
     priv number: Int
 
     commit: fn(&&self) DBError! -[DB]> { db_commit(self.state) }
@@ -787,12 +787,12 @@ DBTransaction: struct {
 
 priv db_open: fn(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: Shared{__DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
+    DBConnection{state: Shared{DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}}
 }
 open: fn(path: String) -[DB]> DBConnection Never! { db_open(path, "database open failed") }
 open_memory: fn() -[DB]> DBConnection Never! { db_open(":memory:", "in-memory database open failed") }
 
-priv db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> DBTransaction DBError! {
+priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBError! {
     guard := state.guard_edit()
     if driver_closed(guard.value.driver) -> return Err(db_error("could not begin a transaction: the database is closed"))
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
@@ -803,7 +803,7 @@ priv db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> DBTransaction DB
     Ok(DBTransaction{state: state.copy(), number: guard.value.open})
 }
 // Whether transaction `number` is the one still open on `state`.
-priv db_open_is: fn(state: Shared<__DBState>, number: Int) -> Bool Never! {
+priv db_open_is: fn(state: Shared<DBState>, number: Int) -> Bool Never! {
     guard: state.guard_read()
     guard.value.open == number
 }
@@ -812,7 +812,7 @@ priv db_open_is: fn(state: Shared<__DBState>, number: Int) -> Bool Never! {
 // Either way every live binding over a table it wrote re-runs on its next
 // read: after a commit it reads the committed rows, and after a failed one
 // it drops anything read from the transaction's own uncommitted writes.
-priv db_commit: fn(state: Shared<__DBState>) DBError! {
+priv db_commit: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
     if driver_closed(guard.value.driver) -> return Err(db_error("could not commit: the database is closed"))
@@ -827,7 +827,7 @@ priv db_commit: fn(state: Shared<__DBState>) DBError! {
 }
 // A rollback undoes the writes since the last begin, so every live binding
 // over a table they touched re-runs on its next read.
-priv db_rollback: fn(state: Shared<__DBState>) DBError! {
+priv db_rollback: fn(state: Shared<DBState>) DBError! {
     guard := state.guard_edit()
     guard.value.open = 0
     if driver_closed(guard.value.driver) -> return Err(db_error("could not roll back: the database is closed"))
@@ -837,7 +837,7 @@ priv db_rollback: fn(state: Shared<__DBState>) DBError! {
     if !rolled -> return Err(db_error("could not roll back the transaction"))
     Ok()
 }
-priv db_shutdown: fn(state: Shared<__DBState>) -> Bool Never! {
+priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {
     guard := state.guard_edit()
     __driver_shutdown(guard.value.driver)
 }
@@ -921,7 +921,7 @@ priv ledger_columns: fn() -> [String] Never! {
     [String]{"sequence", "transition_key", "migration_key", "target", "target_identity", "database_identity", "source_identity", "schema_identity", "tool_identity", "operation", "status", "from_version", "to_version", "step_count", "step_ids", "checksum", "lock_mode", "risk", "started_unix_ms", "finished_unix_ms", "error"}
 }
 
-__LedgerRow: struct {
+priv LedgerRow: struct {
     transition_key: String
     migration_key: String
     target: String
@@ -955,7 +955,7 @@ priv ledger_count: fn(row: [String: DBValue], key: String) -> Int DBError! {
     }
     Err(db_error("expected an int, got {render_value(value)}"))
 }
-priv ledger_row: fn(row: [String: DBValue]) -> __LedgerRow DBError! {
+priv ledger_row: fn(row: [String: DBValue]) -> LedgerRow DBError! {
     transition_key: ledger_text(row, "transition_key") ?? return Err(err)
     migration_key: ledger_text(row, "migration_key") ?? return Err(err)
     operation: ledger_text(row, "operation") ?? return Err(err)
@@ -983,7 +983,7 @@ priv ledger_row: fn(row: [String: DBValue]) -> __LedgerRow DBError! {
         .Text(_) -> {}
         .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> return Err(db_error("expected text, got {render_value(error_value)}"))
     }
-    Ok(__LedgerRow{
+    Ok(LedgerRow{
         transition_key: transition_key, migration_key: migration_key, target: target,
         target_identity: target_identity, database_identity: database_identity,
         source_identity: source_identity, schema_identity: schema_identity,
@@ -993,7 +993,7 @@ priv ledger_row: fn(row: [String: DBValue]) -> __LedgerRow DBError! {
 }
 
 // The first reason a `direct` ledger row disagrees with canonical state.
-priv ledger_drift: fn(row: __LedgerRow, current: Int) -> String? Never! {
+priv ledger_drift: fn(row: LedgerRow, current: Int) -> String? Never! {
     key: row.transition_key
     if row.target_identity != "direct" -> return Val("migration transition `{key}` has a foreign target identity")
     if row.database_identity != "runtime" -> return Val("migration transition `{key}` has a foreign database identity")
@@ -1032,7 +1032,7 @@ priv migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBEr
         if column != canonical[index] -> return Err(db_error("migration ledger uses a non-canonical schema"))
     }
     stored: scope_query(scope, sql_raw("SELECT transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error FROM __jet_migrations ORDER BY sequence"), true) ?? return Err(err)
-    rows := [__LedgerRow]{}
+    rows := [LedgerRow]{}
     loop entry in stored {
         parsed: ledger_row(entry) ?? return Err(err)
         rows.push(parsed)
@@ -1179,7 +1179,7 @@ priv migration_transition_key: fn(name: String, checksum: String, predecessor: S
 // Admission is FIFO by ticket; waiting sleeps (`Time.Wait`) and deadlines use
 // the pure monotonic clock, so no wall-clock authority is involved.
 
-__PoolState: struct {
+priv PoolState: struct {
     url: String
     lifecycle: __PoolLifecycle
     max: Int
@@ -1198,18 +1198,18 @@ __PoolState: struct {
 }
 
 DBPool: struct {
-    state: Shared<__PoolState>
+    state: Shared<PoolState>
 
     acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
         deadline_ns: pool_deadline(deadline)
-        waiter := __PoolWaiter{pool: self.state.copy(), ticket: -1}
+        waiter := PoolWaiter{pool: self.state.copy(), ticket: -1}
         defer close(waiter)
         loop {
             claim := pool_claim(self.state, waiter.ticket, deadline_ns)
             if claim.failure == .Val(failure) -> return Err(db_error(failure.message))
             if claim.drivers.len() > 0 {
                 driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
-                return Ok(DBLease{state: Shared{__LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}}})
+                return Ok(DBLease{state: Shared{LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}}})
             }
             waiter.ticket = claim.ticket
             if !claim.retry -> time.sleep(1ms)
@@ -1239,8 +1239,8 @@ DBPool: struct {
     }
 }
 
-__LeaseState: struct {
-    pool: Shared<__PoolState>
+priv LeaseState: struct {
+    pool: Shared<PoolState>
     drivers: [__Driver]
 
     impl Close {
@@ -1255,8 +1255,8 @@ __LeaseState: struct {
 }
 // A queued acquire's place in line. Closing it leaves the queue, so an acquire
 // that ends early (its task cancelled at the wait) never blocks later waiters.
-__PoolWaiter: struct {
-    pool: Shared<__PoolState>
+priv PoolWaiter: struct {
+    pool: Shared<PoolState>
     ticket: Int
 
     impl Close {
@@ -1268,7 +1268,7 @@ __PoolWaiter: struct {
     }
 }
 DBLease: struct {
-    state: Shared<__LeaseState>
+    state: Shared<LeaseState>
 
     close: fn(self) DBError! -[DB]> {
         guard := self.state.guard_edit()
@@ -1293,7 +1293,7 @@ priv pool_state_error: fn(lifecycle: __PoolLifecycle) -> DBError Never! {
         .Drained -> db_error("database pool is drained")
     }
 }
-priv pool_receipt: fn(state: __PoolState) -> DBPoolReceipt Never! {
+priv pool_receipt: fn(state: PoolState) -> DBPoolReceipt Never! {
     DBPoolReceipt{
         lifecycle: state.lifecycle, max: state.max, available: state.available.len(), leased: state.leased,
         opening: state.opening, ready: state.lifecycle == .Open && state.available.len() + state.leased > 0,
@@ -1302,10 +1302,10 @@ priv pool_receipt: fn(state: __PoolState) -> DBPoolReceipt Never! {
         replacement_failures: state.replacement_failures,
     }
 }
-priv pool_mark_drained: fn(state: &__PoolState) Never! {
+priv pool_mark_drained: fn(state: &PoolState) Never! {
     if state.lifecycle == .Draining && state.available.len() == 0 && state.leased == 0 && state.opening == 0 -> state.lifecycle = .Drained
 }
-priv pool_remove_waiter: fn(state: &__PoolState, ticket: Int) Never! {
+priv pool_remove_waiter: fn(state: &PoolState, ticket: Int) Never! {
     loop index in 0..<state.waiters.len() {
         if state.waiters[index] == ticket {
             _: state.waiters.remove(index, .Slot)
@@ -1313,7 +1313,7 @@ priv pool_remove_waiter: fn(state: &__PoolState, ticket: Int) Never! {
         }
     }
 }
-priv pool_replace_one: fn(state: &__PoolState) Never! {
+priv pool_replace_one: fn(state: &PoolState) Never! {
     if state.lifecycle != .Open || state.available.len() + state.leased + state.opening >= state.max -> return
     driver := __driver_open(state.url) ?? {
         state.replacement_failures += 1
@@ -1328,7 +1328,7 @@ priv pool_replace_one: fn(state: &__PoolState) Never! {
     state.available.push(driver)
     state.replacements += 1
 }
-priv pool_release: fn(pool: Shared<__PoolState>, driver: &&__Driver) Never! {
+priv pool_release: fn(pool: Shared<PoolState>, driver: &&__Driver) Never! {
     held := driver.move()
     fit: __driver_reset(held)
     guard := pool.guard_edit()
@@ -1344,7 +1344,7 @@ priv pool_release: fn(pool: Shared<__PoolState>, driver: &&__Driver) Never! {
     if !fit -> pool_replace_one(guard.value)
 }
 
-__PoolClaim: struct {
+priv PoolClaim: struct {
     drivers: [__Driver]
     failure: DBError?
     ticket: Int
@@ -1353,8 +1353,8 @@ __PoolClaim: struct {
 
 // One admission attempt under the pool lock: lease a healthy idle driver,
 // open a new one within `max`, or queue the ticket to wait.
-priv pool_claim: fn(pool: Shared<__PoolState>, ticket: Int, deadline_ns: Int) -> __PoolClaim Never! {
-    claim := __PoolClaim{drivers: [__Driver]{}, failure: None, ticket: ticket, retry: false}
+priv pool_claim: fn(pool: Shared<PoolState>, ticket: Int, deadline_ns: Int) -> PoolClaim Never! {
+    claim := PoolClaim{drivers: [__Driver]{}, failure: None, ticket: ticket, retry: false}
     guard := pool.guard_edit()
     if guard.value.lifecycle != .Open {
         if ticket >= 0 -> pool_remove_waiter(guard.value, ticket)
@@ -1428,7 +1428,7 @@ priv pool_claim: fn(pool: Shared<__PoolState>, ticket: Int, deadline_ns: Int) ->
     claim
 }
 
-priv pool_drain_step: fn(pool: Shared<__PoolState>, deadline_ns: Int) -> DBPoolReceipt? DBError! {
+priv pool_drain_step: fn(pool: Shared<PoolState>, deadline_ns: Int) -> DBPoolReceipt? DBError! {
     guard := pool.guard_edit()
     if guard.value.lifecycle == .Open -> guard.value.lifecycle = .Draining
     loop guard.value.available.len() > 0 {
@@ -1445,7 +1445,7 @@ priv pool_drain_step: fn(pool: Shared<__PoolState>, deadline_ns: Int) -> DBPoolR
 }
 
 // 0: not open, 1: already serving leases, 2: needs a probe lease.
-priv pool_ready_state: fn(pool: Shared<__PoolState>) -> Int Never! {
+priv pool_ready_state: fn(pool: Shared<PoolState>) -> Int Never! {
     guard: pool.guard_read()
     if guard.value.lifecycle != .Open -> return 0
     if guard.value.leased > 0 -> return 1
@@ -1454,7 +1454,7 @@ priv pool_ready_state: fn(pool: Shared<__PoolState>) -> Int Never! {
 
 pool: fn(url: String, *, max: Int) -[DB]> DBPool DBError! {
     if max <= 0 -> return Err(db_error("database pool max must be greater than zero"))
-    Ok(DBPool{state: Shared{__PoolState{
+    Ok(DBPool{state: Shared{PoolState{
         url: url.copy(), lifecycle: .Open, max: max, available: [__Driver]{}, leased: 0, opening: 0,
         waiters: [Int]{}, next_ticket: 0, acquires: 0, releases: 0, timeouts: 0, open_failures: 0,
         unhealthy: 0, replacements: 0, replacement_failures: 0,
