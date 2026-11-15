@@ -1,0 +1,126 @@
+use core.mem
+
+// A seeded run of allocate, resize and free over up to LIVE blocks. Each
+// block holds its mark in every byte but the last, which holds the mark plus
+// one; a resize claims a fresh block, moves the bytes both sizes share and
+// releases the old one, as a List's growth does. Every byte is checked
+// before a block is resized or released, so a block that lost its bytes, an
+// overlap between two live blocks or a misaligned block shows as `wrong`.
+OPS: 2000
+LIVE: 24
+ALIGNS: [Int]{1, 2, 4, 8, 16, 64, 4096}
+
+next_seed: fn(seed: Int) -> Int Never! {
+    (seed * 1103515245 + 12345) % 2147483648
+}
+
+// The byte at `at` of a block of `size` bytes holding `mark`.
+expected_byte: fn(mark: Int, size: Int, at: Int) -> Int Never! {
+    if at == size - 1 -> (mark + 1) % 256 else -> mark
+}
+
+// The number of the `size` bytes at `address` that differ from a block
+// holding `mark`.
+wrong_bytes: fn(address: Int, mark: Int, size: Int) -> Int Never! {
+    wrong := 0
+    #Unsafe("`address` starts a live block of `size` bytes") {
+        bytes: mem.Ptr<U8>.from_addr(address)
+        loop at in 0..<size {
+            byte: Int{bytes.byte_offset(at).*}
+            if byte != expected_byte(mark, size, at) -> wrong += 1
+        }
+    }
+    wrong
+}
+
+// A fresh block of `size` bytes at `align`, holding `mark`, by its address.
+claim: fn(size: Int, align: Int, mark: Int) -> Int Never! {
+    #Unsafe("the block is written only inside its `size` bytes, and released once by `release`") {
+        block: mem.alloc_raw(size, align) ?? panic("no memory for {size} bytes")
+        mem.fill<U8>(block, U8{mark}, size - 1)
+        mem.volatile_write<U8>(block.byte_offset(size - 1), U8{(mark + 1) % 256})
+        mem.address_of(block.*)
+    }
+}
+
+release: fn(address: Int) Never! {
+    #Unsafe("`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once") {
+        block: mem.Ptr<U8>.from_addr(address)
+        mem.free_raw(block)
+    }
+}
+
+run: fn() {
+    seed := 20261115
+    addresses := [Int]{}
+    sizes := [Int]{}
+    aligns := [Int]{}
+    marks := [Int]{}
+    allocs := 0
+    resizes := 0
+    frees := 0
+    wrong := 0
+    checked := 0
+    loop _ in 0..<OPS {
+        seed = next_seed(seed)
+        choice: seed % 10
+        seed = next_seed(seed)
+        size: if seed % 16 == 0 -> 4000 + seed % 70000 else -> 1 + seed % 600
+        seed = next_seed(seed)
+        align: ALIGNS[seed % ALIGNS.len()]
+        mark: seed % 256
+        if (addresses.len() < LIVE && (choice < 4 || addresses.len() == 0)) {
+            address: claim(size, align, mark)
+            if address % align != 0 -> wrong += 1
+            addresses.push(address)
+            sizes.push(size)
+            aligns.push(align)
+            marks.push(mark)
+            allocs += 1
+        } else if choice < 7 {
+            at: seed % addresses.len()
+            old: addresses[at]
+            old_size: sizes[at]
+            kept: marks[at]
+            wrong += wrong_bytes(old, kept, old_size)
+            checked += old_size
+            // The fresh block starts with another mark, so only the move
+            // gives it the old block's bytes.
+            fresh: claim(size, aligns[at], (kept + 128) % 256)
+            shared: if size < old_size -> size - 1 else -> old_size - 1
+            #Unsafe("both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`") {
+                bytes: mem.Ptr<U8>.from_addr(fresh)
+                mem.copy<U8>(bytes, mem.Ptr<U8>.from_addr(old), shared)
+                mem.fill<U8>(bytes.byte_offset(shared), U8{kept}, size - 1 - shared)
+                mem.volatile_write<U8>(bytes.byte_offset(size - 1), U8{(kept + 1) % 256})
+            }
+            release(old)
+            if fresh % aligns[at] != 0 -> wrong += 1
+            addresses[at] = fresh
+            sizes[at] = size
+            resizes += 1
+        } else {
+            at: seed % addresses.len()
+            wrong += wrong_bytes(addresses[at], marks[at], sizes[at])
+            checked += sizes[at]
+            release(addresses[at])
+            last: addresses.len() - 1
+            addresses[at] = addresses[last]
+            sizes[at] = sizes[last]
+            aligns[at] = aligns[last]
+            marks[at] = marks[last]
+            _: addresses.pop()
+            _: sizes.pop()
+            _: aligns.pop()
+            _: marks.pop()
+            frees += 1
+        }
+    }
+    loop at in 0..<addresses.len() {
+        wrong += wrong_bytes(addresses[at], marks[at], sizes[at])
+        checked += sizes[at]
+        release(addresses[at])
+        frees += 1
+    }
+    print("allocs {allocs} resizes {resizes} frees {frees} checked {checked} wrong {wrong}")
+}

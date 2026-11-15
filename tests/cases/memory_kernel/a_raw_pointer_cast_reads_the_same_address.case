@@ -15,6 +15,15 @@ stdout: = "2\n1\n259\n"
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "2\n1\n259\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "2\n1\n259\n"
+end when
 step misalignednone: jet run -O0 misaligned.jet
 exit: 70
 stdout: empty

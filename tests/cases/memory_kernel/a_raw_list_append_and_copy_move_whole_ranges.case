@@ -22,6 +22,15 @@ stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left r
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+end when
 step appendnone: jet run -O0 past_append.jet
 exit: 70
 stdout: = "0\n"

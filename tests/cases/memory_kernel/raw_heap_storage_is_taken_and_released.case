@@ -19,6 +19,15 @@ stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "7 9 7 9\n0\n8 shapes\nempty refused\nodd align refused\n"
+end when
 step keptnone: jet run -O0 kept.jet
 exit: 70
 stdout: = "5\n"

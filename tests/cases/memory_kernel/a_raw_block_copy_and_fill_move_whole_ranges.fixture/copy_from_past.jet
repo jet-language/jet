@@ -1,0 +1,15 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("the copy reads one Int past the source block") {
+        source: mem.alloc_raw(16, 8) ?? panic("no memory")
+        target: mem.alloc_raw(32, 8) ?? panic("no memory")
+        mem.fill<Int>(source.cast<Int>(), 3, 2)
+        mem.copy<Int>(target.cast<Int>(), source.cast<Int>(), 2)
+        print(target.cast<Int>().*)
+        mem.copy<Int>(target.cast<Int>(), source.cast<Int>(), 3)
+        print("copied")
+        mem.free_raw(source)
+        mem.free_raw(target)
+    }
+}

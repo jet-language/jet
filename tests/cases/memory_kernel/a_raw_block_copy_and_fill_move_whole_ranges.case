@@ -1,0 +1,69 @@
+# `mem.copy(to, from, count)` moves `count` Ts as one move of their bytes, so
+# overlapping ranges copy as if through a buffer either way, and
+# `mem.fill(to, value, count)` stores a copy of `value` in each of `count`
+# places, for plain Ints and for Strings, on every tier; a count of zero
+# touches nothing. The sentry checks each whole range before any byte moves:
+# a fill one Int past its storage, and a copy that reads past its source block
+# or writes past its target block, is a located R0801 fault.
+fixture: a_raw_block_copy_and_fill_move_whole_ranges.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+end when
+step pastnone: jet run -O0 past.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:8:13, in #Unsafe gate" # the fault is located at the call's `fill`
+stderr: ~ "raw `fill` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int fill overruns
+step pastfull: jet run -O2 past.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:8:13, in #Unsafe gate" # the fault is located at the call's `fill`
+stderr: ~ "raw `fill` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int fill overruns
+step copyfromnone: jet run -O0 copy_from_past.jet
+exit: 70
+stdout: = "3\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "copy_from_past.jet:10:13, in #Unsafe gate" # the fault is located at the copy that reads past its source
+stderr: ~ "raw `copy` outside" # the gate's audit text follows
+stderr: ~ "(16 bytes) and runs past its end" # the source block's two Ints, which the three-Int copy overruns
+step copyfromfull: jet run -O2 copy_from_past.jet
+exit: 70
+stdout: = "3\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "copy_from_past.jet:10:13, in #Unsafe gate" # the fault is located at the copy that reads past its source
+step copytonone: jet run -O0 copy_to_past.jet
+exit: 70
+stdout: = "3\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "copy_to_past.jet:10:13, in #Unsafe gate" # the fault is located at the copy that writes past its target
+stderr: ~ "raw `copy` outside" # the gate's audit text follows
+stderr: ~ "(16 bytes) and runs past its end" # the target block's two Ints, which the three-Int copy overruns
+step copytofull: jet run -O2 copy_to_past.jet
+exit: 70
+stdout: = "3\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "copy_to_past.jet:10:13, in #Unsafe gate" # the fault is located at the copy that writes past its target

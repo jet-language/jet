@@ -1,0 +1,10 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("the read starts one byte into the block, so its Int is not aligned") {
+        block: mem.alloc_raw(16, 8) ?? panic("no memory")
+        mem.fill<U8>(block, U8{1}, 16)
+        print(mem.volatile_read<Int>(block.byte_offset(1).cast<Int>()))
+        mem.free_raw(block)
+    }
+}

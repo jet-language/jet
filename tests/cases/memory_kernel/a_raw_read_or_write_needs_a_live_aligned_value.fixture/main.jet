@@ -1,0 +1,18 @@
+// Volatile reads and writes, and a pointer remade from an address, of live,
+// aligned values of a raw block pass on every tier.
+use core.mem
+
+run: fn() {
+    #Unsafe("every address names a live, aligned value of the block, which outlives each access") {
+        block: mem.alloc_raw(24, 8) ?? panic("no memory")
+        words: block.cast<Int>()
+        loop at in 0..<3 -> mem.volatile_write<Int>(words.offset(at), at * 7 + 1)
+        print("{mem.volatile_read<Int>(words)} {mem.volatile_read<Int>(words.offset(1))} {mem.volatile_read<Int>(words.offset(2))}")
+        again: mem.Ptr<Int>.from_addr(mem.address_of(block.*))
+        mem.volatile_write<Int>(again.offset(1), 40)
+        print("{again.*} {again.offset(1).*} {mem.volatile_read<Int>(words.offset(1))}")
+        bytes: block.byte_offset(8)
+        print(Int{mem.volatile_read<U8>(bytes)})
+        mem.free_raw(block)
+    }
+}

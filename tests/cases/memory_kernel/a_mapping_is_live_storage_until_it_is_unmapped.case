@@ -17,6 +17,15 @@ stdout: = "3 4 5\n1 block kept\n"
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "3 4 5\n1 block kept\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "3 4 5\n1 block kept\n"
+end when
 step closednone: jet run -O0 after_close.jet
 exit: 70
 stdout: = "closed\n"

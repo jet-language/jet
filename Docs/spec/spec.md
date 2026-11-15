@@ -3134,6 +3134,11 @@ require `use core.mem` and an audited region. `mem.address_of(x)` produces an
 inert address value and can be named outside the audit gate, but using that
 address as a pointer still requires the gate. `mem.volatile_read(p)` and
 `mem.volatile_write(p, value)` provide explicit typed volatile/MMIO access.
+Under the memory sentry each is a checked raw access, as a read or write
+through `p.*` is: a misaligned `p` is a located R0803 fault, a value past the
+end of its live storage R0801, and one in released storage R0802, the same
+for a pointer remade from an address with `Ptr.from_addr`. See
+`tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.case`.
 
 An address into a current stack frame has a runtime sentry whose registration
 expires when that Jet frame ends. Heap, static, and foreign storage retain their
@@ -3227,7 +3232,7 @@ negative, and either way the result is a `*T`. Both are E3101 outside
 where it is made. Under the memory sentry (D-MEM-SENTRY1), a read or write
 through the stepped pointer is checked like any raw access, so a read that
 runs past the end of a live local is a located R0801 fault. See
-`tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.case`.
+`tests/cases/memory_kernel/a_raw_pointer_steps_by_elements_or_bytes.case`.
 (D-RAWPTR2=A)
 
 `p.cast<U>()` is the same address as `p`, typed as a `*U`. It takes one type
@@ -3236,7 +3241,7 @@ moves no bytes and checks nothing where it is made. A read or write through
 the `*U` is a raw access at `U`'s size and alignment, so under the memory
 sentry a cast pointer that is not aligned for `U` is a located R0803 fault
 where it is read. See
-`tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.case`.
+`tests/cases/memory_kernel/a_raw_pointer_cast_reads_the_same_address.case`.
 (D-RAWPTR2=A)
 
 `mem.copy(to, from, count)` moves the bytes of `count` `T`s from `from` to
@@ -3249,7 +3254,7 @@ A `count` of zero or less touches nothing. Both are E3101 outside `#Unsafe`.
 Under the memory sentry, each whole range (`count` times `T`'s List stride
 bytes) is checked before any byte moves, so a range that runs past a live
 local is a located R0801 fault. See
-`tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.case`.
+`tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.case`.
 (D-RAWPTR2=A)
 
 `mem.list_append(values, from, count)` grows the List `values` by the
@@ -3264,7 +3269,7 @@ appends nothing. A `list_copy` range that is not inside the List stops the
 run as the slice `values[start..<start + count]` does. Both are E3101
 outside `#Unsafe`, and under the memory sentry the whole raw range is
 checked before any byte moves. See
-`tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.case`.
+`tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.case`.
 
 `mem.alloc_raw(size, align)` takes a byte size and a byte alignment and gives
 `mem.Ptr<U8>?`: `size` fresh, uncleared heap bytes at an `align` boundary, or
@@ -3276,7 +3281,7 @@ binding is gone after the call and a second release of it is E0209. Both are
 E3101 outside `#Unsafe`. Under the memory sentry the bytes are a live
 allocation until their release and are quarantined after it, so a read
 through a kept copy of the pointer is a located R0802 fault. See
-`tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.case`.
+`tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.case`.
 (D-RAWPTR2=A)
 
 `mem.mapped(address, bytes)` and `mem.unmapping(address, bytes)` keep the
@@ -3290,7 +3295,7 @@ only the kernel's mapping primitives may call them: `Region.reserve` and
 `close`, and JetBackend's `os_map`, `os_map_with` and `os_unmap`
 (`Source/OS/Linux.jet`). Any other caller, a kernel file or a single program
 included, is E3113. See
-`tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.case`.
+`tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.case`.
 
 `mem.window(owner, p, len)` gives a `View<T>` over the `len` `T`s at `p`,
 tied to `owner` as a declared view is tied to its source (`-> View<T> from
@@ -3302,7 +3307,7 @@ moved, consumed or closed (E0212), nor leave the scope that holds `owner`
 (E2305), so a kernel names the handle that owns the memory and every View it
 hands out ends with that handle. `mem.window` is E3101 outside `#Unsafe`,
 while reading the View it gives is not. See
-`tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.case`.
+`tests/cases/memory_kernel/a_raw_window_checks_each_index.case`.
 (D-RAWPTR2=A)
 
 ### Allocator families

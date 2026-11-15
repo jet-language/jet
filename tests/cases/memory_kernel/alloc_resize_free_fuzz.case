@@ -1,0 +1,27 @@
+# A seeded run of 2000 allocate, resize and free steps over up to 24 raw
+# heap blocks of 1 to 74000 bytes at aligns from 1 to 4096: every block
+# keeps its alignment and every byte it was given, a resize moves exactly the
+# bytes both sizes share, and every block is released once. O0, O1, O2 and
+# web run the same sequence to the same counts.
+fixture: alloc_resize_free_fuzz.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "allocs 627 resizes 768 frees 627 checked 2919326 wrong 0\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "allocs 627 resizes 768 frees 627 checked 2919326 wrong 0\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "allocs 627 resizes 768 frees 627 checked 2919326 wrong 0\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "allocs 627 resizes 768 frees 627 checked 2919326 wrong 0\n"
+end when

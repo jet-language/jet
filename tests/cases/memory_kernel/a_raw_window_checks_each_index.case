@@ -17,6 +17,15 @@ stdout: = "4 11 44\n20\npast refused\n0\n"
 step o2: jet run -O2 main.jet
 exit: 0
 stdout: = "4 11 44\n20\npast refused\n0\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "4 11 44\n20\npast refused\n0\n"
+end when
 step pastnone: jet run -O0 past.jet
 exit: 70
 stdout: = "33\n"

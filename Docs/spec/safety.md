@@ -237,7 +237,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1424,
+  "total": 1436,
   "counts": {
     "Compiler": 651,
     "Core": 178,
@@ -245,7 +245,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     "Examples": 42,
     "Jetpack": 8,
     "Tools": 11,
-    "tests": 524
+    "tests": 536
   },
   "regions": [
     {
@@ -7131,6 +7131,286 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
+      "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the program claims pages it never mapped"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "the block holds three Ints of the open region's fresh pages"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_from_past.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the copy reads one Int past the source block"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_to_past.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the copy writes one Int past the target block"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "every range stays inside the `values` tuple, which outlives each access"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet",
+      "line": 16,
+      "column": 5,
+      "reason": "both Strings stay inside `names`; the static texts they replace need no drop"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the fill runs one Int past the tuple, so the sentry stops it before any write"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet",
+      "line": 14,
+      "column": 5,
+      "reason": "every fill and read stays inside the block's `room` bytes, and the block is freed once after them"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "every move and every byte written or read stays inside the block, which is freed once after the moves"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "every raw range stays inside the `values` tuple, which outlives each access"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "each append reads the Ints `many` holds, which move before their old buffer goes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "both ranges stay inside `names`; every String is a static text, which needs no single owner"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the two Ints of `cell` take the copy"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the append reads one Int past the tuple, so the sentry stops it before the List changes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the copy writes one Int past the tuple, so the sentry stops it before any byte moves"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "each cast names the live local cell, at an alignment its type allows"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the cast Int starts one byte into the cell, so the sentry stops the read"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_pointer_steps_by_elements_or_bytes.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "every step stays inside the `values` tuple, which outlives each read"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_pointer_steps_by_elements_or_bytes.fixture/past.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "the step runs one Int past the local cell, so the sentry stops the read"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/fromaddrfreed.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the address names an Int of a block already released"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/main.jet",
+      "line": 6,
+      "column": 5,
+      "reason": "every address names a live, aligned value of the block, which outlives each access"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/misaligned.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read starts one byte into the block, so its Int is not aligned"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/readfreed.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read takes an Int of a block already released"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/readpast.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the read takes the Int just past the block"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/writepast.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the write stores the Int just past the block"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/main.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/past.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 10,
+      "column": 9,
+      "reason": "`base` names `count` live I64s while the capability lives"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "the block is used only through this capability and released once by `release`"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet",
+      "line": 26,
+      "column": 5,
+      "reason": "`address` starts a live block of `size` bytes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the block is written only inside its `size` bytes, and released once by `release`"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet",
+      "line": 47,
+      "column": 5,
+      "reason": "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet",
+      "line": 91,
+      "column": 13,
+      "reason": "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/aliased.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/kept.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "a copy of the pointer is read after its block is released, so the sentry stops the read"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "each block is used only through pointers derived from it, and released once"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/twice.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "the second release is refused before the program runs"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet",
       "line": 318,
       "column": 5,
@@ -7313,174 +7593,6 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the program claims pages it never mapped"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet",
-      "line": 15,
-      "column": 5,
-      "reason": "the block holds three Ints of the open region's fresh pages"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "every range stays inside the `values` tuple, which outlives each access"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet",
-      "line": 16,
-      "column": 5,
-      "reason": "both Strings stay inside `names`; the static texts they replace need no drop"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the fill runs one Int past the tuple, so the sentry stops it before any write"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "every fill and read stays inside the block's `room` bytes, and the block is freed once after them"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet",
-      "line": 15,
-      "column": 5,
-      "reason": "every move and every byte written or read stays inside the block, which is freed once after the moves"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "every raw range stays inside the `values` tuple, which outlives each access"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "each append reads the Ints `many` holds, which move before their old buffer goes"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "both ranges stay inside `names`; every String is a static text, which needs no single owner"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the two Ints of `cell` take the copy"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the two Ints of `cell` take the copy"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the append reads one Int past the tuple, so the sentry stops it before the List changes"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the copy writes one Int past the tuple, so the sentry stops it before any byte moves"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "each cast names the live local cell, at an alignment its type allows"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the cast Int starts one byte into the cell, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "every step stays inside the `values` tuple, which outlives each read"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/past.jet",
-      "line": 6,
-      "column": 5,
-      "reason": "the step runs one Int past the local cell, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/main.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/past.jet",
-      "line": 5,
-      "column": 5,
-      "reason": "the window covers exactly the tuple's four Ints, which outlive it"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
-      "line": 10,
-      "column": 9,
-      "reason": "`base` names `count` live I64s while the capability lives"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
-      "line": 17,
-      "column": 5,
-      "reason": "the block is used only through this capability and released once by `release`"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once"
-    },
-    {
-      "package": "tests",
       "file": "tests/cases/unsafe_and_runtime/a_sentry_fault_names_the_access_and_the_range.fixture/steps.jet",
       "line": 5,
       "column": 5,
@@ -7625,34 +7737,6 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 6,
       "column": 5,
       "reason": "writes the one Int the arena allocated"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/aliased.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/kept.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "a copy of the pointer is read after its block is released, so the sentry stops the read"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/main.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "each block is used only through pointers derived from it, and released once"
-    },
-    {
-      "package": "tests",
-      "file": "tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/twice.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "the second release is refused before the program runs"
     },
     {
       "package": "tests",
@@ -10230,8 +10314,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 11 |
-| tests | 524 |
-| **total** | **1424** |
+| tests | 536 |
+| **total** | **1436** |
 
 ### Regions
 
@@ -11220,6 +11304,46 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 8:5 | "probe" |
 | tests | tests/cases/memory/sentry_policy_off_skips_r0801.fixture/checked.jet | 13:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
 | tests | tests/cases/memory/sentry_policy_off_skips_r0801.fixture/off.jet | 13:5 | "target's buffer holds eight Ints: its three items and spare capacity past them" |
+| tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet | 19:5 | "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves" |
+| tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet | 6:5 | "the program claims pages it never mapped" |
+| tests | tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet | 15:5 | "the block holds three Ints of the open region's fresh pages" |
+| tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_from_past.jet | 4:5 | "the copy reads one Int past the source block" |
+| tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/copy_to_past.jet | 4:5 | "the copy writes one Int past the target block" |
+| tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
+| tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 16:5 | "both Strings stay inside `names`; the static texts they replace need no drop" |
+| tests | tests/cases/memory_kernel/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
+| tests | tests/cases/memory_kernel/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet | 14:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
+| tests | tests/cases/memory_kernel/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet | 15:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 6:5 | "every raw range stays inside the `values` tuple, which outlives each access" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 17:5 | "each append reads the Ints `many` holds, which move before their old buffer goes" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 27:5 | "both ranges stay inside `names`; every String is a static text, which needs no single owner" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet | 6:5 | "the two Ints of `cell` take the copy" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet | 6:5 | "the append reads one Int past the tuple, so the sentry stops it before the List changes" |
+| tests | tests/cases/memory_kernel/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet | 6:5 | "the copy writes one Int past the tuple, so the sentry stops it before any byte moves" |
+| tests | tests/cases/memory_kernel/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
+| tests | tests/cases/memory_kernel/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
+| tests | tests/cases/memory_kernel/a_raw_pointer_steps_by_elements_or_bytes.fixture/main.jet | 5:5 | "every step stays inside the `values` tuple, which outlives each read" |
+| tests | tests/cases/memory_kernel/a_raw_pointer_steps_by_elements_or_bytes.fixture/past.jet | 6:5 | "the step runs one Int past the local cell, so the sentry stops the read" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/fromaddrfreed.jet | 4:5 | "the address names an Int of a block already released" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/main.jet | 6:5 | "every address names a live, aligned value of the block, which outlives each access" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/misaligned.jet | 4:5 | "the read starts one byte into the block, so its Int is not aligned" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/readfreed.jet | 4:5 | "the read takes an Int of a block already released" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/readpast.jet | 4:5 | "the read takes the Int just past the block" |
+| tests | tests/cases/memory_kernel/a_raw_read_or_write_needs_a_live_aligned_value.fixture/writepast.jet | 4:5 | "the write stores the Int just past the block" |
+| tests | tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/main.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
+| tests | tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/past.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
+| tests | tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet | 10:9 | "`base` names `count` live I64s while the capability lives" |
+| tests | tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet | 17:5 | "the block is used only through this capability and released once by `release`" |
+| tests | tests/cases/memory_kernel/a_raw_window_checks_each_index.fixture/released.jet | 27:5 | "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once" |
+| tests | tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet | 26:5 | "`address` starts a live block of `size` bytes" |
+| tests | tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet | 38:5 | "the block is written only inside its `size` bytes, and released once by `release`" |
+| tests | tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet | 47:5 | "`address` came unchanged from `alloc_raw` in `claim`, and its block is released here once" |
+| tests | tests/cases/memory_kernel/alloc_resize_free_fuzz.fixture/main.jet | 91:13 | "both blocks are live, `old` holds at least `shared` bytes and `fresh` holds `size`" |
+| tests | tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/aliased.jet | 4:5 | "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it" |
+| tests | tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/kept.jet | 4:5 | "a copy of the pointer is read after its block is released, so the sentry stops the read" |
+| tests | tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/main.jet | 4:5 | "each block is used only through pointers derived from it, and released once" |
+| tests | tests/cases/memory_kernel/raw_heap_storage_is_taken_and_released.fixture/twice.jet | 4:5 | "the second release is refused before the program runs" |
 | tests | tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet | 318:5 | "the exit callback only reads its captured List" |
 | tests | tests/cases/memory_semantics/unsafe_address_keeps_string_alive_to_block_end.fixture/main.jet | 9:5 | "label is live on this frame until this block ends" |
 | tests | tests/cases/module_storage/module_globals_start_laid_out_unless_they_hold_a_handle.fixture/main.jet | 118:5 | "one task writes the globals" |
@@ -11246,30 +11370,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
-| tests | tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/after_close.jet | 19:5 | "the copy writes into pages the region unmapped, so the sentry stops it before any byte moves" |
-| tests | tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/keeper.jet | 6:5 | "the program claims pages it never mapped" |
-| tests | tests/cases/unsafe_and_runtime/a_mapping_is_live_storage_until_it_is_unmapped.fixture/main.jet | 15:5 | "the block holds three Ints of the open region's fresh pages" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 5:5 | "every range stays inside the `values` tuple, which outlives each access" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/main.jet | 16:5 | "both Strings stay inside `names`; the static texts they replace need no drop" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.fixture/past.jet | 5:5 | "the fill runs one Int past the tuple, so the sentry stops it before any write" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_byte_fill_writes_exactly_its_range.fixture/main.jet | 14:5 | "every fill and read stays inside the block's `room` bytes, and the block is freed once after them" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_byte_move_matches_a_buffered_move_at_every_size_and_overlap.fixture/main.jet | 15:5 | "every move and every byte written or read stays inside the block, which is freed once after the moves" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 6:5 | "every raw range stays inside the `values` tuple, which outlives each access" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 17:5 | "each append reads the Ints `many` holds, which move before their old buffer goes" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/main.jet | 27:5 | "both ranges stay inside `names`; every String is a static text, which needs no single owner" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/negative.jet | 6:5 | "the two Ints of `cell` take the copy" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/outside.jet | 6:5 | "the two Ints of `cell` take the copy" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_append.jet | 6:5 | "the append reads one Int past the tuple, so the sentry stops it before the List changes" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_list_append_and_copy_move_whole_ranges.fixture/past_copy.jet | 6:5 | "the copy writes one Int past the tuple, so the sentry stops it before any byte moves" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/main.jet | 6:5 | "each cast names the live local cell, at an alignment its type allows" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.fixture/misaligned.jet | 6:5 | "the cast Int starts one byte into the cell, so the sentry stops the read" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/main.jet | 5:5 | "every step stays inside the `values` tuple, which outlives each read" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.fixture/past.jet | 6:5 | "the step runs one Int past the local cell, so the sentry stops the read" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/main.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/past.jet | 5:5 | "the window covers exactly the tuple's four Ints, which outlive it" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 10:9 | "`base` names `count` live I64s while the capability lives" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 17:5 | "the block is used only through this capability and released once by `release`" |
-| tests | tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.fixture/released.jet | 27:5 | "`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once" |
 | tests | tests/cases/unsafe_and_runtime/a_sentry_fault_names_the_access_and_the_range.fixture/steps.jet | 5:5 | "the second read steps one Int past the tuple, so the sentry stops it there" |
 | tests | tests/cases/unsafe_and_runtime/an_optional_raw_pointer_is_none_when_null.fixture/main.jet | 12:5 | "each pointer names the live local cell, or is null and never read" |
 | tests | tests/cases/unsafe_and_runtime/deref_place_lends_the_pointee_to_a_write_parameter.fixture/main.jet | 15:5 | "c lives in place until `run` returns" |
@@ -11291,10 +11391,6 @@ file in a `Tests/` tree. The ratchet refuses either.
 | tests | tests/cases/unsafe_and_runtime/fixtures/volatile_write_emit_is_byte_exact/main.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/cases/unsafe_and_runtime/hardened_profile_stops_an_out_of_bounds_raw_access_at_every_level.fixture/read/read.jet | 6:5 | "reads the one Int the arena allocated" |
 | tests | tests/cases/unsafe_and_runtime/hardened_profile_stops_an_out_of_bounds_raw_access_at_every_level.fixture/write/write.jet | 6:5 | "writes the one Int the arena allocated" |
-| tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/aliased.jet | 4:5 | "a second release through a copy of the pointer, which the ownership check cannot see, so the runtime stops it" |
-| tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/kept.jet | 4:5 | "a copy of the pointer is read after its block is released, so the sentry stops the read" |
-| tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/main.jet | 4:5 | "each block is used only through pointers derived from it, and released once" |
-| tests | tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.fixture/twice.jet | 4:5 | "the second release is refused before the program runs" |
 | tests | tests/cases/unsafe_and_runtime/raw_pointer_tools_keep_their_checks_in_hardened_builds.fixture/freed.jet | 4:5 | "no copy of the pointer is read after the block is released" |
 | tests | tests/cases/unsafe_and_runtime/raw_pointer_tools_keep_their_checks_in_hardened_builds.fixture/misaligned.jet | 5:5 | "every Int read starts on an Int boundary" |
 | tests | tests/cases/unsafe_and_runtime/raw_pointer_tools_keep_their_checks_in_hardened_builds.fixture/range.jet | 5:5 | "the steps stay inside the tuple's four Ints" |
