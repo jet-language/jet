@@ -8,8 +8,11 @@ release.
 
 `jet check` of the files it touched and a single-file `jet run` or `jet test`
 of a test it wrote, one at a time, under `nice`, with the admitted seed or the
-batch compiler the orchestrator last announced. Anything that needs a freshly
-built compiler goes in the submission's `tests`.
+batch compiler the orchestrator last announced. A submission that touches
+`Compiler/` or `Core/` also runs the three guards a census most often fails
+on, on the worker's composed tree: `tests/guards/closed_lists.jet`,
+`tests/guards/copy_ratchet.jet` and `tests/guards/core_builtins_door.jet`.
+Anything that needs a freshly built compiler goes in the submission's `tests`.
 
 The worker never builds the compiler and never runs the submission gate,
 suites, censuses or chains. It submits and moves straight on to its next task.
