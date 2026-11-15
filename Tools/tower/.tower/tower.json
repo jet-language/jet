@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6968,
-    "rev": 105750,
+    "rev": 105769,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95575,11 +95575,12 @@
         {
           "n": 8,
           "text": "Portable math in Jet (#4732): Each function has a gauntlet speed cell against the platform libm (was #4732 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:53:59.677Z"
+          "evidence": "Merged into #6736 c1: c1 now covers every portable math function",
+          "at": "2026-11-15T05:36:51.931Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -95590,7 +95591,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:58:54.754Z",
-      "updated": "2026-11-15T05:36:15.797Z",
+      "updated": "2026-11-15T05:36:51.931Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 8
     },
@@ -98658,12 +98659,12 @@
         },
         {
           "n": 3,
-          "text": "Scaling: on the #5479 c1 cell (32 hardware threads, cold, n=3 median), average parallelism (CPU-s / wall) is at least 24, 32 threads beat 16, no global allocator or queue lock shows in a perf profile, and throughput is at least 400K lines/s. #5479 c6 is met from this evidence.",
+          "text": "Scaling: on the #5479 c1 cell (32 hardware threads, cold, n=3 median), average parallelism (CPU-s / wall) is at least 24, 32 threads beat 16, no global allocator or queue lock shows in a perf profile, and throughput is at least 400K lines/s. #5479 c6 is met from this evidence. Proof: the #5479 c1 cell receipt with a perf profile.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T14:47:42.235Z"
+          "at": "2026-11-15T05:36:28.141Z"
         }
       ],
       "refs": [],
@@ -98674,7 +98675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-15T05:36:26.353Z",
+      "updated": "2026-11-15T05:36:28.141Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 3
     },
@@ -98699,39 +98700,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/audits/*copy-and-patch*\"` names the design note and its passing review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:09.919Z"
+          "at": "2026-11-15T05:36:29.546Z"
         },
         {
           "n": 2,
-          "text": "O0 code generation emits every IR opcode by copying and patching a toolchain-built stencil, with no instruction selection or register allocation at O0. The stencil set is built by Compiler/build.jet and embedded in the jet binary, with no file I/O per compile.",
+          "text": "O0 code generation emits every IR opcode by copying and patching a toolchain-built stencil, with no instruction selection or register allocation at O0. The stencil set is built by Compiler/build.jet and embedded in the jet binary, with no file I/O per compile. Proof: `jet test Compiler --profile cases --filter backend/o0_stencil_emit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:13.726Z"
+          "at": "2026-11-15T05:36:30.793Z"
         },
         {
           "n": 3,
-          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier. Proof: the chain fixed point, then `jet test Compiler --profile golden`, `--profile ui` and `--profile cases` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:14.700Z"
+          "at": "2026-11-15T05:36:32.120Z"
         },
         {
           "n": 4,
-          "text": "Measured: O0 backend CPU time per function falls at least 10× on the #5479 c1 cell, and a second program (jetc-trace) shows the same gain. Run-time speed of O0 code is reported beside it and stays within 1.5× of the current O0 backend.",
+          "text": "Measured: O0 backend CPU time per function falls at least 10× on the #5479 c1 cell, and a second program (jetc-trace) shows the same gain. Run-time speed of O0 code is reported beside it and stays within 1.5× of the current O0 backend. Proof: the #5479 c1 cell receipt and a jetc-trace receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:15.751Z"
+          "at": "2026-11-15T05:36:33.415Z"
         }
       ],
       "refs": [],
@@ -98742,8 +98743,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-13T15:03:15.751Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:36:33.415Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -98767,39 +98768,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/audits/*parallel-lex-parse*\"` names the design note and its passing review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:10.850Z"
+          "at": "2026-11-15T05:36:34.716Z"
         },
         {
           "n": 2,
-          "text": "A file is lexed and parsed in parallel chunks split at top-level declaration boundaries found by a SIMD pre-scan, and joined in source order. Any language rule this needs is ratified on a ballot first.",
+          "text": "A file is lexed and parsed in parallel chunks split at top-level declaration boundaries found by a SIMD pre-scan, and joined in source order. Any language rule this needs is ratified on a ballot first. Proof: `jet test Compiler --profile cases --filter parse/parallel_chunks_source_order`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:16.803Z"
+          "at": "2026-11-15T05:36:35.976Z"
         },
         {
           "n": 3,
-          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier. Proof: the chain fixed point, then `jet test Compiler --profile golden`, `--profile ui` and `--profile cases` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:17.913Z"
+          "at": "2026-11-15T05:36:37.054Z"
         },
         {
           "n": 4,
-          "text": "Measured: front-end wall time on the largest single module of the #5479 c1 cell scales with threads (16 threads at least 8× faster than 1), and a second large file shows the same scaling.",
+          "text": "Measured: front-end wall time on the largest single module of the #5479 c1 cell scales with threads (16 threads at least 8× faster than 1), and a second large file shows the same scaling. Proof: the #5479 c1 cell front-end receipt at 1 and 16 threads, and the same for a second large file.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:19.012Z"
+          "at": "2026-11-15T05:36:38.207Z"
         },
         {
           "n": 5,
@@ -98819,7 +98820,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-15T05:29:10.629Z",
+      "updated": "2026-11-15T05:36:38.207Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 5
     },
@@ -98844,39 +98845,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/audits/*shared-generic*\"` names the design note and its passing review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:11.797Z"
+          "at": "2026-11-15T05:36:39.424Z"
         },
         {
           "n": 2,
-          "text": "At O0, each generic function is compiled once and receives its type information (size, alignment, trait method tables) as a hidden argument. O1 and O2 keep per-type specialization.",
+          "text": "At O0, each generic function is compiled once and receives its type information (size, alignment, trait method tables) as a hidden argument. O1 and O2 keep per-type specialization. Proof: `jet test Compiler --profile cases --filter backend/o0_shared_generic_body`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:19.939Z"
+          "at": "2026-11-15T05:36:40.598Z"
         },
         {
           "n": 3,
-          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier. Proof: the chain fixed point, then `jet test Compiler --profile golden`, `--profile ui` and `--profile cases` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:21.100Z"
+          "at": "2026-11-15T05:36:41.863Z"
         },
         {
           "n": 4,
-          "text": "Measured: O0 compile time and code bytes for a generic-heavy program (for example Core collections used at 20 element types) against per-type specialization, plus a second program. Run-time cost at O0 is reported beside it.",
+          "text": "Measured: O0 compile time and code bytes for a generic-heavy program (for example Core collections used at 20 element types) against per-type specialization, plus a second program. Run-time cost at O0 is reported beside it. Proof: a committed receipt for both programs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:22.050Z"
+          "at": "2026-11-15T05:36:43.075Z"
         }
       ],
       "refs": [],
@@ -98887,8 +98888,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:56.559Z",
-      "updated": "2026-11-13T15:03:22.050Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:36:43.075Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -98912,39 +98913,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/audits/*comptime-child*\"` names the design note and its passing review.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:12.736Z"
+          "at": "2026-11-15T05:36:44.346Z"
         },
         {
           "n": 2,
-          "text": "One compile-time child runs per compile, stays warm for that compile only, and exits with it. Compile-time functions are compiled on the copy-and-patch O0 path (#6795), and values cross through a shared-memory region with no serialization.",
+          "text": "One compile-time child runs per compile, stays warm for that compile only, and exits with it. Compile-time functions are compiled on the copy-and-patch O0 path (#6795), and values cross through a shared-memory region with no serialization. Proof: `jet test Compiler --profile cases --filter comptime/one_warm_child_per_compile`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:22.998Z"
+          "at": "2026-11-15T05:36:45.781Z"
         },
         {
           "n": 3,
-          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier. Proof: the chain fixed point, then `jet test Compiler --profile golden`, `--profile ui` and `--profile cases` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:23.926Z"
+          "at": "2026-11-15T05:36:47.466Z"
         },
         {
           "n": 4,
-          "text": "Measured: compile-time cost (comptime.bodies plus the re-finalize) of check RunColdContext and jetc-trace before and after, each showing the gain.",
+          "text": "Measured: compile-time cost (comptime.bodies plus the re-finalize) of check RunColdContext and jetc-trace before and after, each showing the gain. Proof: a committed before-and-after receipt for both programs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T15:03:24.843Z"
+          "at": "2026-11-15T05:36:49.070Z"
         }
       ],
       "refs": [],
@@ -98955,8 +98956,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:58.056Z",
-      "updated": "2026-11-13T15:03:24.843Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:36:49.070Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 4
     },
     {
@@ -101296,12 +101297,12 @@
         },
         {
           "n": 5,
-          "text": "A full gauntlet rerun on the current dev jet is recorded and posted to the owner: the per-entry, per-peer table and the list of losses on each metric.",
+          "text": "A full gauntlet rerun on the current dev jet is recorded and posted to the owner: the per-entry, per-peer table and the list of losses on each metric. Proof: a full `node Tools/gauntlet/harness/run.mjs` run on the dev jet, its receipt committed and the table logged on this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T00:14:32.532Z"
+          "at": "2026-11-15T05:36:50.542Z"
         },
         {
           "n": 6,
@@ -101321,8 +101322,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T00:14:11.855Z",
-      "updated": "2026-11-14T16:00:46.517Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T05:36:50.542Z",
+      "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 6
     },
     {
@@ -217599,6 +217600,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:36:51.931Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c03obxd3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T05:36:50.542Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0w0b4wd",
+      "note": "#5: proof; was: A full gauntlet rerun on the current dev jet is recorded and posted to the owner: the per-entry, per-peer table and the list of losses on each metric."
+    },
+    {
+      "at": "2026-11-15T05:36:49.070Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0zupuj4",
+      "note": "#4: proof; was: Measured: compile-time cost (comptime.bodies plus the re-finalize) of check RunColdContext and jetc-trace before and after, each showing the gain."
+    },
+    {
+      "at": "2026-11-15T05:36:47.466Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0zupuj4",
+      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
+    },
+    {
+      "at": "2026-11-15T05:36:45.781Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0zupuj4",
+      "note": "#2: proof; was: One compile-time child runs per compile, stays warm for that compile only, and exits with it. Compile-time functions are compiled on the copy-and-patch O0 path (#6795), and values cross through a shar"
+    },
+    {
+      "at": "2026-11-15T05:36:44.346Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0zupuj4",
+      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
+    },
+    {
+      "at": "2026-11-15T05:36:43.075Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b3gyq2",
+      "note": "#4: proof; was: Measured: O0 compile time and code bytes for a generic-heavy program (for example Core collections used at 20 element types) against per-type specialization, plus a second program. Run-time cost at O0"
+    },
+    {
+      "at": "2026-11-15T05:36:41.863Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b3gyq2",
+      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
+    },
+    {
+      "at": "2026-11-15T05:36:40.598Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b3gyq2",
+      "note": "#2: proof; was: At O0, each generic function is compiled once and receives its type information (size, alignment, trait method tables) as a hidden argument. O1 and O2 keep per-type specialization."
+    },
+    {
+      "at": "2026-11-15T05:36:39.424Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0b3gyq2",
+      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
+    },
+    {
+      "at": "2026-11-15T05:36:38.207Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0okfgjw",
+      "note": "#4: proof; was: Measured: front-end wall time on the largest single module of the #5479 c1 cell scales with threads (16 threads at least 8× faster than 1), and a second large file shows the same scaling."
+    },
+    {
+      "at": "2026-11-15T05:36:37.054Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0okfgjw",
+      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
+    },
+    {
+      "at": "2026-11-15T05:36:35.976Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0okfgjw",
+      "note": "#2: proof; was: A file is lexed and parsed in parallel chunks split at top-level declaration boundaries found by a SIMD pre-scan, and joined in source order. Any language rule this needs is ratified on a ballot first"
+    },
+    {
+      "at": "2026-11-15T05:36:34.716Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0okfgjw",
+      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
+    },
+    {
+      "at": "2026-11-15T05:36:33.415Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00g7rk8",
+      "note": "#4: proof; was: Measured: O0 backend CPU time per function falls at least 10× on the #5479 c1 cell, and a second program (jetc-trace) shows the same gain. Run-time speed of O0 code is reported beside it and stays wit"
+    },
+    {
+      "at": "2026-11-15T05:36:32.121Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00g7rk8",
+      "note": "#3: proof; was: Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier."
+    },
+    {
+      "at": "2026-11-15T05:36:30.793Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00g7rk8",
+      "note": "#2: proof; was: O0 code generation emits every IR opcode by copying and patching a toolchain-built stencil, with no instruction selection or register allocation at O0. The stencil set is built by Compiler/build.jet a"
+    },
+    {
+      "at": "2026-11-15T05:36:29.546Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c00g7rk8",
+      "note": "#1: proof; was: A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations "
+    },
+    {
+      "at": "2026-11-15T05:36:28.141Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0hkdzht",
+      "note": "#3: proof; was: Scaling: on the #5479 c1 cell (32 hardware threads, cold, n=3 median), average parallelism (CPU-s / wall) is at least 24, 32 threads beat 16, no global allocator or queue lock shows in a perf profile,"
+    },
     {
       "at": "2026-11-15T05:36:26.353Z",
       "by": "TowerKeeper-1",
