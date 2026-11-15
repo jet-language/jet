@@ -40,7 +40,7 @@ use {
     loop _ in 1..<(length /% 4096) -> client.write_bytes(chunk) ?? panic("remaining write")
     parts := [String]{}
     loop {
-        part: client.read_text(8192) ?? panic("response read")
+        part: client.read(8192) ?? panic("response read")
         if part == "" -> break
         parts.push(part)
     }

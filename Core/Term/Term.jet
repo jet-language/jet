@@ -33,8 +33,6 @@ Reader: struct {
     impl Reader {
         read_bytes: fn(&self, limit: Int) -> [U8] IOError! { __cursor_read(self, limit) }
 
-        read: fn(&self, limit: Int) -> [U8] IOError! { __cursor_read(self, limit) }
-
         read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
             bytes: __cursor_read(self, limit) ?? return Err(err)
             count: bytes.len()
@@ -71,10 +69,6 @@ StdinHandle: struct {
         read_bytes: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
             if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
             __take_bytes(limit)
-        }
-
-        read: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
-            self.read_bytes(limit)
         }
 
         read_into: fn(&self, buffer: &[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {

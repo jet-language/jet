@@ -548,7 +548,7 @@ jet_spec: fn(argv: [String], cwd: String) -> ProcessSpec {
 // Runs `spec` with `input` as its whole stdin.
 run_command: fn(spec: ProcessSpec, input: String) -> Outcome {
     child: spec.stdin(.Stream).spawn() ?? return NOT_STARTED
-    child.stdin.write_text(input) ?? ()
+    child.stdin.write(input) ?? ()
     child.stdin.close()
     started(child.wait() ?? return NOT_STARTED)
 }

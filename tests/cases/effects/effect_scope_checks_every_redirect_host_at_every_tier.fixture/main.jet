@@ -30,10 +30,10 @@ run: fn() (Closed | NetError | TaskFailure)! {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address")) ?? panic("send")
         first: listener.accept() ?? panic("accept")
-        _: first.read_text(8192) ?? panic("request")
+        _: first.read(8192) ?? panic("request")
         net.tcp_reply(first, "200 OK", "inside") ?? panic("reply")
         second: listener.accept() ?? panic("accept")
-        _: second.read_text(8192) ?? panic("request")
+        _: second.read(8192) ?? panic("request")
         port: (listener.local_addr() ?? panic("address")).split(":").to_list()[1]
         second.write_bytes("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()) ?? panic("redirect")
     }

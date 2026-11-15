@@ -115,7 +115,7 @@ read_request: fn(stream: TCPStream) -> Asked {
     text := ""
     loop {
         if complete(text) == .Val(asked) -> return asked
-        chunk: stream.read_text(8192) ?? ""
+        chunk: stream.read(8192) ?? ""
         if chunk == "" -> return Asked{method: "", target: "", body: ""}
         text = "{text}{chunk}"
     }

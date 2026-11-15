@@ -37,13 +37,13 @@ run: fn() {
     address: net.listener_local_socket_addr(listener) ?? panic("listener addr")
     client := net.tcp_connect_addr(address) ?? panic("connect")
     server := net.tcp_accept(listener) ?? panic("accept")
-    client.write_text("ping") ?? panic("client write")
+    client.write("ping") ?? panic("client write")
     net.tcp_shutdown(client, NetShutdown.Write) ?? panic("shutdown")
     first: net.tcp_read_text(server, 64) ?? panic("server read")
     print("tcp server read:{first}")
     eof: net.tcp_read_text(server, 64) ?? panic("server eof read")
     print("tcp server after half-close:[{eof}]")
-    server.write_text("pong") ?? panic("server write")
+    server.write("pong") ?? panic("server write")
     reply: net.tcp_read_text(client, 64) ?? panic("client read")
     print("tcp client still reads:{reply}")
 
@@ -55,7 +55,7 @@ run: fn() {
 
     // Close, then misuse.
     client.close() ?? panic("client close")
-    if client.write_text("late") == {
+    if client.write("late") == {
         .Ok(_) -> print("tcp write after close:accepted")
         .Err(error) -> print("tcp write after close:{net.error_operation(error)}:{net.error_message(error)}")
     }

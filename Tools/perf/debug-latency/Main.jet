@@ -90,7 +90,7 @@ latency_median: fn(values: [Int]) -> Int Never! {
 latency_time: fn(argv: [String], work: String, input: String) -[Exec, Time, Time.Wait]> Int Err! {
     watch: time.start()
     child: process.cmd(argv).cwd(work).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err("{argv[0]} did not start: {err}")
-    child.stdin.write_text(input) ?? return Err("{argv[0]} took no input: {err}")
+    child.stdin.write(input) ?? return Err("{argv[0]} took no input: {err}")
     child.stdin.close()
     receipt: child.wait() ?? return Err("{argv[0]} did not finish: {err}")
     elapsed: time.elapsed(watch).ns /% 1000000

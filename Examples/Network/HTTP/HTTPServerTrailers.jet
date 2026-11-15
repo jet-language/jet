@@ -38,7 +38,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     }
     wire_stream.write_bytes(raw_request) ?? panic("request")
     loop _ in 0..32 {
-        chunk = wire_stream.read_text(8192) ?? panic("response")
+        chunk = wire_stream.read(8192) ?? panic("response")
         if chunk == "" -> break
         raw_response = "{raw_response}{chunk}"
     }

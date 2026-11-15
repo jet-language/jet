@@ -12,11 +12,11 @@ run: fn() {
     auth := ""
     if args[2] != "-" -> auth = "Authorization: Bearer {args[2]}{crlf}"
     request: "GET {args[1]} HTTP/1.1{crlf}Host: {args[0]}{crlf}{auth}Connection: close{crlf}{crlf}"
-    stream.write_text(request) ?? return
+    stream.write(request) ?? return
     if args[3] == "write" -> net.tcp_shutdown(stream, .Write) ?? return
     response := ""
     loop {
-        text: stream.read_text(8192, deadline: 250ms) ?? break
+        text: stream.read(8192, deadline: 250ms) ?? break
         if text.len() == 0 -> break
         response = "{response}{text}"
     }

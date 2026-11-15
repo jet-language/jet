@@ -15,7 +15,7 @@ run: fn() (Closed | NetError | RangeError | TaskFailure)! {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address")) ?? panic("send")
         stream: listener.accept(deadline: budget) ?? panic("accept")
-        _request: stream.read_text(8192, deadline: budget) ?? panic("request")
+        _request: stream.read(8192, deadline: budget) ?? panic("request")
         response: [U8]{
             72,
             84,
@@ -137,7 +137,7 @@ run: fn() (Closed | NetError | RangeError | TaskFailure)! {
         10
     }
     client.write_bytes(request, deadline: budget) ?? panic("request")
-    response: client.read_text(8192, deadline: budget) ?? panic("response")
+    response: client.read(8192, deadline: budget) ?? panic("response")
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
     server.join() ?? panic("server")

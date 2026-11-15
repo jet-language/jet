@@ -78,7 +78,7 @@ send: fn(addr: String, who: String, mode: String, deadline: Int) -> TCPStream Ne
 reply: fn(client: TCPStream) -> String {
     parts := [String]{}
     loop {
-        part: client.read_text(8192) ?? break
+        part: client.read(8192) ?? break
         if part == "" -> break
         parts.push(part)
     }

@@ -30,7 +30,7 @@ run: fn() {
     interrupt.interrupt() ?? panic("interrupt failed")
     interrupt_result: interrupt.wait() ?? panic("interrupt wait failed")
     print(interrupt_result.success)
-    if interrupt.stdin.write_text("late") == {
+    if interrupt.stdin.write("late") == {
         .Ok(_) -> panic("interrupt cleanup left stdin open")
         .Err(error) -> {
             if error == {
@@ -46,7 +46,7 @@ run: fn() {
     terminate.terminate() ?? panic("terminate failed")
     terminate_result: terminate.wait() ?? panic("terminate wait failed")
     print(terminate_result.success)
-    if terminate.stdin.write_text("late") == {
+    if terminate.stdin.write("late") == {
         .Ok(_) -> panic("terminate cleanup left stdin open")
         .Err(error) -> {
             if error == {
@@ -62,7 +62,7 @@ run: fn() {
     kill.kill() ?? panic("kill failed")
     kill_result: kill.wait() ?? panic("kill wait failed")
     print(kill_result.success)
-    if kill.stdin.write_text("late") == {
+    if kill.stdin.write("late") == {
         .Ok(_) -> panic("kill cleanup left stdin open")
         .Err(error) -> {
             if error == {

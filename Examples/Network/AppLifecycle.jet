@@ -34,7 +34,7 @@ place_order: fn(pool: DBPool) -> HTTPResponse HTTPError! {
 read_all: fn(stream: TCPStream) -> String {
     parts := [String]{}
     loop {
-        part: stream.read_text(8192) ?? break
+        part: stream.read(8192) ?? break
         if part == "" -> break
         parts.push(part)
     }

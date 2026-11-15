@@ -58,7 +58,7 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
     child: canvas_html_test_process.cmd([String]{node, "-e", CANVAS_HTML_TEST_ENGINE, "canvas-{scenario}-{index}.js"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("Canvas bootstrap {scenario}: node could not start")
-    child.stdin.write_text(script) ?? panic("Canvas bootstrap HTML input failed")
+    child.stdin.write(script) ?? panic("Canvas bootstrap HTML input failed")
     child.stdin.close()
     receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
     if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")

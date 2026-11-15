@@ -13,7 +13,7 @@ canvas_javascript_test_syntax: fn(node: String, label: String, path: String, inp
     child: canvas_javascript_test_process.cmd([String]{node, "--check", path})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("{label}: node --check could not start")
-    child.stdin.write_text(input) ?? panic("{label}: node --check input failed")
+    child.stdin.write(input) ?? panic("{label}: node --check input failed")
     child.stdin.close()
     receipt: child.wait() ?? panic("{label}: node --check failed to finish")
     if !receipt.success -> panic("{label}: node --check failed\n{receipt.errors}")

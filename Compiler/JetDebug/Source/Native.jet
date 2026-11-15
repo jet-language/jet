@@ -118,7 +118,7 @@ NativeSession: struct {
         text := ""
         loop command in commands -> text = "{text}{command}\n"
         text = "{text}script print(\"{NATIVE_DEBUG_SENTINEL}\")\n"
-        self.child.stdin.write_text(text) ?? return Err(NativeDebugError{detail: "LLDB stopped reading commands: {err}"})
+        self.child.stdin.write(text) ?? return Err(NativeDebugError{detail: "LLDB stopped reading commands: {err}"})
         lines := [String]{}
         loop line in self.child.stdout.lines() {
             if line == NATIVE_DEBUG_SENTINEL -> return Ok(lines.join("\n"))
@@ -244,7 +244,7 @@ NativeSession: struct {
 
     // End the program, if it still runs, and LLDB.
     close: fn(&self) Never! {
-        if self.child.stdin.write_text("process kill\nquit\n") == {
+        if self.child.stdin.write("process kill\nquit\n") == {
             .Err(_) -> {
                 if self.child.kill() == {
                     .Err(_) -> {}

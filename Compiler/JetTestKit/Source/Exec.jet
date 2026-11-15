@@ -378,9 +378,9 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
                 } else if event.kind == "close" {
                     // Like closing a pipe, ending input after the child has
                     // exited is no error.
-                    child.stdin.write_text(eof).drop("the child may have exited before its input ended")
+                    child.stdin.write(eof).drop("the child may have exited before its input ended")
                 } else {
-                    child.stdin.write_text(event.text) ?? {
+                    child.stdin.write(event.text) ?? {
                         if input_error == "" -> input_error = "terminal input: {err}"
                         ()
                     }

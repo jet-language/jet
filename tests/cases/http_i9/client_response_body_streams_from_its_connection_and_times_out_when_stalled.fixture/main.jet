@@ -16,7 +16,7 @@ use {
 
 answer: fn(listener: TCPListener, head: String, body: String) {
     stream: listener.accept() ?? panic("accept")
-    _request: stream.read_text(8192) ?? panic("request")
+    _request: stream.read(8192) ?? panic("request")
     stream.write_bytes("{head}\r\n\r\n{body}".bytes()) ?? panic("write")
 }
 
@@ -34,13 +34,13 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
         // has read that half: a client that buffered the whole body first
         // would time out instead.
         half: listener.accept() ?? panic("accept")
-        _half_request: half.read_text(8192) ?? panic("request")
+        _half_request: half.read(8192) ?? panic("request")
         half.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nfirst".bytes()) ?? panic("write")
         _ := go.receive() ?? panic("go")
         half.write_bytes("-last".bytes()) ?? panic("write")
         // A body that stalls after three of its ten bytes.
         stalled: listener.accept() ?? panic("accept")
-        _stalled_request: stalled.read_text(8192) ?? panic("request")
+        _stalled_request: stalled.read(8192) ?? panic("request")
         stalled.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".bytes()) ?? panic("write")
         _ := done.receive() ?? panic("done")
     }

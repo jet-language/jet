@@ -35,7 +35,7 @@ run: fn() {
             held.write_bytes("Host: test{crlf()}{crlf()}".bytes()) ?? process.fail(1, "write: {err}")
             parts := [String]{}
             loop {
-                part: held.read_text(8192) ?? process.fail(1, "read: {err}")
+                part: held.read(8192) ?? process.fail(1, "read: {err}")
                 if part == "" -> break
                 parts.push(part)
             }

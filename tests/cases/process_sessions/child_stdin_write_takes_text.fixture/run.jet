@@ -1,11 +1,12 @@
 use process: core.process
 
-// `write` on a child's stdin takes text as well as bytes: given a `String`
-// it writes every byte of it, so nothing comes back to count.
+// `write` on a child's stdin takes text and writes every byte of it, so
+// nothing comes back to count; `write_some` is the partial byte write that
+// reports the count taken.
 run: fn() {
     child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
     child.stdin.write("hello, ") ?? panic("text write failed")
-    taken: child.stdin.write("pipe\n".bytes()) ?? panic("byte write failed")
+    taken: child.stdin.write_some("pipe\n".bytes()) ?? panic("byte write failed")
     child.stdin.close()
     received := [U8]{}
     loop {

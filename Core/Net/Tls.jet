@@ -1092,12 +1092,12 @@ __send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.
         slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
         sent := 0
         if at == 0 {
-            sent = tls.tcp.write(tls.ssl.bio.tx, deadline: slice) ?? {
+            sent = tls.tcp.write_some(tls.ssl.bio.tx, deadline: slice) ?? {
                 if !__timed_out(err) -> return Ok(__socket_status(err, C_NET_SEND_FAILED))
                 next
             }
         } else {
-            sent = tls.tcp.write(__slice(tls.ssl.bio.tx, at, total), deadline: slice) ?? {
+            sent = tls.tcp.write_some(__slice(tls.ssl.bio.tx, at, total), deadline: slice) ?? {
                 if !__timed_out(err) -> return Ok(__socket_status(err, C_NET_SEND_FAILED))
                 next
             }
@@ -1353,7 +1353,7 @@ __flush_each: fn(&tls: __TLSState, wait: Duration) -[Net]> Int NetError! {
     total: tls.ssl.bio.tx.len()
     at := 0
     loop at < total {
-        sent: tls.tcp.write(__slice(tls.ssl.bio.tx, at, total), deadline: wait) ?? {
+        sent: tls.tcp.write_some(__slice(tls.ssl.bio.tx, at, total), deadline: wait) ?? {
             tls.ssl.bio.tx.clear()
             if __timed_out(err) -> return Err(__deadline_error("tls read"))
             if __stopped(err) -> return Err(err)

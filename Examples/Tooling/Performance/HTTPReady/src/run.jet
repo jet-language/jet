@@ -93,7 +93,7 @@ run: fn() (NetError | RangeError | TaskFailure)! {
         print("ready")
         loop {
             stream: listener.accept(deadline: budget)
-            _request: stream.read_text(8192, deadline: budget)
+            _request: stream.read(8192, deadline: budget)
             stream.write_bytes(http_response(), deadline: budget)
         }
     }
@@ -104,7 +104,7 @@ run: fn() (NetError | RangeError | TaskFailure)! {
     budget: 1000ms
     server: task {
         stream: listener.accept(deadline: budget)
-        _request: stream.read_text(8192, deadline: budget)
+        _request: stream.read(8192, deadline: budget)
         response: [U8]{
             72,
             84,
@@ -209,7 +209,7 @@ run: fn() (NetError | RangeError | TaskFailure)! {
         10
     }
     client.write_bytes(request, deadline: budget)
-    response: client.read_text(8192, deadline: budget)
+    response: client.read(8192, deadline: budget)
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
     completed: server.join() ?? return Err(err)

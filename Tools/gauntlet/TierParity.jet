@@ -167,10 +167,10 @@ run_batch: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
 // None when the service does not take the connection.
 ask: fn(address: String, send: String) -> String? {
     stream := net.tcp_connect(address) ?? return None
-    stream.write_text(send) ?? return None
+    stream.write(send) ?? return None
     answer := ""
     loop {
-        part: stream.read_text(1024) ?? return None
+        part: stream.read(1024) ?? return None
         if part == "" -> break
         answer = "{answer}{part}"
     }

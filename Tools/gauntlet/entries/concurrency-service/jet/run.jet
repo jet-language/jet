@@ -39,9 +39,9 @@ run: fn(args: Args) {
         listener: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
             stream := listener.accept()
-            command: "{stream.read_text(1024).trim()}"
+            command: "{stream.read(1024).trim()}"
             reply: response(command, jobs_sender.copy(), results_receiver.copy())
-            stream.write_text("{reply}\n")
+            stream.write("{reply}\n")
             stream.close()
             if command == "shutdown" {
                 jobs_sender.close()

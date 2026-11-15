@@ -40,7 +40,7 @@ fetch: fn(addr: String, request_line: String) -> String {
     wire.write_bytes(request) ?? panic("request failed")
     raw := ""
     loop _ in 0..32 {
-        chunk: wire.read_text(8192) ?? panic("response failed")
+        chunk: wire.read(8192) ?? panic("response failed")
         if chunk == "" -> break
         raw = "{raw}{chunk}"
     }

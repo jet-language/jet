@@ -5340,14 +5340,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 690,
+      "line": 685,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 758,
+      "line": 753,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -10873,8 +10873,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XmlEngine.jet | 175:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2676:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 457:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 690:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 758:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 685:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 753:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 650:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 134:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 139:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |

@@ -51,7 +51,7 @@ run_bounded_pipeline: fn() {
 run_worker: fn(args: [String]) {
     address: args.get(1) ?? panic("missing listener address")
     stream: net.tcp_connect(address) ?? panic("worker connect failed")
-    request: stream.read_text(8192) ?? panic("worker read failed")
+    request: stream.read(8192) ?? panic("worker read failed")
     value: request.trim().to_int() ?? panic("TCP request was not an Int")
     stream.write_bytes((value * value).to_string().bytes()) ?? panic("worker write failed")
     stream.close() ?? panic("worker close failed")
@@ -77,8 +77,8 @@ run_tcp_parent: fn() {
     second_connection: listener.accept() ?? panic("second accept failed")
     first_connection.write_bytes("7".bytes()) ?? panic("first request failed")
     second_connection.write_bytes("11".bytes()) ?? panic("second request failed")
-    first_result: first_connection.read_text(8192) ?? panic("first response failed")
-    second_result: second_connection.read_text(8192) ?? panic("second response failed")
+    first_result: first_connection.read(8192) ?? panic("first response failed")
+    second_result: second_connection.read(8192) ?? panic("second response failed")
     first_connection.close() ?? panic("first connection close failed")
     second_connection.close() ?? panic("second connection close failed")
 

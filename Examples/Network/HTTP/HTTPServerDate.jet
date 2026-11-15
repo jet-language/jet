@@ -56,7 +56,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     raw := ""
     chunk := ""
     loop _ in 0..32 {
-        chunk = wire.read_text(8192) ?? panic("response failed")
+        chunk = wire.read(8192) ?? panic("response failed")
         if chunk == "" -> break
         raw = "{raw}{chunk}"
     }

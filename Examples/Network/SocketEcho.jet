@@ -23,7 +23,7 @@ use {
         server := listener.move()
         ready_tx.send(addr_text) ?? panic("ready")
         stream: server.accept() ?? panic("accept")
-        msg: stream.read_text(8192) ?? panic("read")
+        msg: stream.read(8192) ?? panic("read")
         stream.write_bytes("tcp:{msg}".bytes()) ?? panic("write")
     }
     addr: ready_rx.receive() ?? panic("ready")
@@ -36,7 +36,7 @@ use {
     print("ttl:{hops}")
     print("socket_type:{net.socket_type(client)}")
     client.write_bytes("ping".bytes()) ?? panic("write")
-    print(client.read_text(8192) ?? panic("read"))
+    print(client.read(8192) ?? panic("read"))
     sf_path: "{os.temp_dir()}/jet-socket-echo-sf-{time.now()}.txt"
     fs.write(sf_path, "sf") ?? panic("write file")
     sent: net.sendfile(client, sf_path) ?? panic("sendfile")
