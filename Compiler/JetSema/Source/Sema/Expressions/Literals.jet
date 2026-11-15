@@ -1502,9 +1502,9 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Named(name) -> {
-            if program.registration_graph == None -> return true
+            graph: program.registration_graph ?? return true
             if sema_call_reflection_named_displayable(name, ty, environment, program) -> return true
-            return sema_expr_unit_fact(ty, environment, program) != None || sema_expression_interpolation_derived(ty, environment, program)
+            return sema_registration_unit_member_type(graph, ty) || sema_expression_interpolation_derived(ty, environment, program)
         }
         .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_displayable(inner, environment, program)
         .Result(ok, err) -> return sema_expression_displayable(ok, environment, program) && sema_expression_displayable(err, environment, program)

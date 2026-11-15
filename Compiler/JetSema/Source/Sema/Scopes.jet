@@ -148,6 +148,10 @@ SemaScopeBinding: struct {
     // use refuses the name's type, it reads as the literal written there
     // (Expressions/NumberNames.jet).
     number_literal: Expr?{None}
+    // A `:` name bound to a unit value whose magnitude is a literal (`3meter`,
+    // `Double.from_float(-2.0)`) keeps that magnitude: an implicit conversion
+    // of the name proves its exactness from it (sema_expr_unit_concrete_value).
+    unit_magnitude: Float?{None}
     // A `:` name bound to a lambda this body writes keeps that lambda's effect
     // facts: a call through the name from inside another lambda's body adds
     // them to that lambda's row (sema_expression_lambda_add_effect_facts).
@@ -2673,6 +2677,14 @@ sema_scope_mark_number_literal: fn(table: &SemaScopeTable, name: String, literal
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
     table.bindings[index].number_literal = literal
+}
+
+// Keeps the literal magnitude of the unit value bound to `name` (see
+// SemaScopeBinding.unit_magnitude).
+sema_scope_mark_unit_magnitude: fn(table: &SemaScopeTable, name: String, magnitude: Float) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].unit_magnitude = Val(magnitude)
 }
 
 // Keeps the ClosureInfo `info` on the binding `name` just declared (see

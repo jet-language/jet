@@ -357,6 +357,26 @@ sema_registration_unit_fact_for_type: fn(graph: SemaRegistrationGraph, ty: Type)
     None
 }
 
+// A type a `#UnitFamily` member minted. A nominal family (`#UnitFamily(Currency)
+// { usd }`) has no conversion or dimension fact, yet its `Usd` is a unit
+// value all the same: it shows its magnitude and the member that minted it.
+sema_registration_unit_member_type: fn(graph: SemaRegistrationGraph, ty: Type) -> Bool Never! {
+    if sema_registration_unit_fact_for_type(graph, ty) != None -> return true
+    name: sema_registration_unit_leaf_name(ty) ?? return false
+    owner: if sema_registration_unit_type_is_qualified(ty) -> sema_registration_unit_type_package(graph, ty) else -> None
+    loop module_row_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+            if graph.modules[module_row_index].program.items[item_index] == .UnitFamily(definition) {
+                if owner == .Val(package) && definition.resolved_owner != Val(package) -> next
+                loop minted in sema_registration_unit_family_type_names(definition) {
+                    if minted.name == name -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
 // The package identity of the module declaring the qualified nominal `ty`
 // (`{module_name}::{name}`), or None when no registered nominal is spelled so.
 sema_registration_unit_type_package: fn(graph: SemaRegistrationGraph, ty: Type) -> String? Never! {

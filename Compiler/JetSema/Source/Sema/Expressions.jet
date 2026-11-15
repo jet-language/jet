@@ -2114,10 +2114,14 @@ sema_expr_unit_conversion_method: fn(fact: SemaRegistrationUnitFact) -> String N
     "from_{snake}"
 }
 
-sema_expr_unit_concrete_value: fn(value: TExpr, context: SemaCheckContext) -> Float? {
+// The literal magnitude `value` carries, when its check proves one: a number
+// literal, its negation, a unit or distinct conversion of one, or a `:` name
+// bound to one (SemaScopeBinding.unit_magnitude).
+sema_expr_unit_concrete_value: fn(value: TExpr, scopes: SemaScopeTable, context: SemaCheckContext) -> Float? {
     if value.kind == {
         .IntLit(number, _) -> return Val(approx(number))
-        .Flat(index) -> return sema_expr_unit_concrete_node(index, context)
+        .Flat(index) -> return sema_expr_unit_concrete_node(index, scopes, context)
+        .Local(local) -> return sema_expr_unit_local_magnitude(local.name, scopes)
         .CtLit(comptime_value) -> {
             if comptime_value == {
                 .Int(number) -> return Val(approx(number))
@@ -2127,37 +2131,44 @@ sema_expr_unit_concrete_value: fn(value: TExpr, context: SemaCheckContext) -> Fl
         }
         .Unary(op, operand) -> {
             if op == TUnaryOp.Neg {
-                concrete: sema_expr_unit_concrete_value(operand, context) ?? return None
+                concrete: sema_expr_unit_concrete_value(operand, scopes, context) ?? return None
                 return Val(-concrete)
             }
         }
-        .UnitConvert(argument, _, _, _, _, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_value(argument, context)
+        .UnitConvert(argument, _, _, _, _, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_value(argument, scopes, context)
         .MethodCall(_, method, _, args) -> {
             if method.name == "from_float" && args.len() == 1 {
-                return sema_expr_unit_concrete_value(args[0].value, context)
+                return sema_expr_unit_concrete_value(args[0].value, scopes, context)
             }
         }
-        .StrLit(_) | .Local(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .TraitBox(_, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
+        .StrLit(_) | .InlineBlock(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .TraitBox(_, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
     None
 }
 
 // The literal value behind arena row `index`: a numeric literal, its negation,
-// or a distinct conversion (`Double.from_float(-1.0)`) of one.
-sema_expr_unit_concrete_node: fn(index: Int, context: SemaCheckContext) -> Float? {
+// a distinct conversion (`Double.from_float(-1.0)`) of one, or a `:` name
+// bound to one.
+sema_expr_unit_concrete_node: fn(index: Int, scopes: SemaScopeTable, context: SemaCheckContext) -> Float? {
     if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
         .FloatLit(number) -> return Val(number)
         .IntLit(number, _) -> return Val(approx(number))
+        .Local(local) -> return sema_expr_unit_local_magnitude(local.name, scopes)
         .Unary(op, operand) -> {
             if op == TUnaryOp.Neg {
-                concrete: sema_expr_unit_concrete_node(operand, context) ?? return None
+                concrete: sema_expr_unit_concrete_node(operand, scopes, context) ?? return None
                 return Val(-concrete)
             }
         }
-        .DistinctConvert(_, argument, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_node(argument, context)
-        .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .DistinctConvert(_, argument, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_node(argument, scopes, context)
+        .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     None
+}
+
+sema_expr_unit_local_magnitude: fn(name: String, scopes: SemaScopeTable) -> Float? Never! {
+    index: sema_scope_resolve_index(scopes, name) ?? return None
+    scopes.bindings[index].unit_magnitude
 }
 
 sema_expr_unit_exact_proof: fn(concrete: Float, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool? {
@@ -2190,7 +2201,7 @@ sema_expr_unit_conversion_gate: fn(value: TExpr, source: SemaRegistrationUnitFac
     }
     if !sema_expr_unit_is_symbolic(source) && !sema_expr_unit_is_symbolic(destination) && !sema_expr_unit_conversion_total(source, destination) {
         exact := false
-        concrete := sema_expr_unit_concrete_value(value, context)
+        concrete := sema_expr_unit_concrete_value(value, scopes, context)
         if concrete != None {
             exact = sema_expr_unit_exact_proof(concrete ?? 0.0, source, destination, environment, program, context) ?? return false
         }
@@ -2856,6 +2867,9 @@ sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environme
         }
         .Unit(_) -> {
             if sema_expr_scalable_unit_type(ty, environment, program) -> return true
+            if program.registration_graph == .Val(graph) {
+                if sema_registration_unit_member_type(graph, ty) -> return true
+            }
             diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
         }
         .Display | .Debug | .Pretty | .Count -> return true

@@ -5980,6 +5980,9 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(scopes, binding.name)
     if !binding.mutable && binding.sigil_span == .Val(sigil) -> sema_scope_mark_binding_sigil(scopes, binding.name, Span{start: binding.name_span.end, end: sigil.end})
     if number_literal != None -> sema_scope_mark_number_literal(scopes, binding.name, number_literal)
+    if !binding.mutable && sema_expr_unit_fact(init.ty, environment, program) != None {
+        if sema_expr_unit_concrete_value(init, scopes, context) == .Val(magnitude) -> sema_scope_mark_unit_magnitude(scopes, binding.name, magnitude)
+    }
     sema_ownership_note_frozen_binding(state, key, binding.init, scopes)
     // A bound lambda that takes a capture runs once; one that writes a
     // capture changes it at each call.
