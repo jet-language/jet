@@ -1,0 +1,12 @@
+#!/usr/bin/env jet
+use {
+    files: core.files
+    process: core.process
+}
+// `gen WORD_FILE --out=<path>` writes a program that prints the word to `path`.
+run: fn() {
+    args: process.args()
+    word: files.read(args[0]) ?? panic("read {args[0]}: {err}")
+    out: args[1].removeprefix("--out=")
+    files.write(out, "run: fn() {{ print(\"{word}\") }}\n") ?? panic("write {out}: {err}")
+}

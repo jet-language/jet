@@ -6827,7 +6827,10 @@ that make its inputs, the targets it runs as `b.host` tools, and its target's
 dependencies' steps; a target waits for its own and its dependencies' steps
 and the steps that make its sources. Every step's grant is checked and every
 probe runs before anything else does. Then whatever is ready runs: the ready
-steps together, up to `--threads` at once, then a ready target compiles. A
+steps together, up to `--threads` at once, and a ready target compiles while
+they run when it reads nothing they write (a script target reads only its
+own file, any other target every file under its source root); otherwise it
+compiles after them. A
 failure stops only what waits on it, the rest of the graph still runs, and
 every failure is reported. Steps and targets that wait on each other are
 refused (E3502) before anything runs. A step's key covers its declared input

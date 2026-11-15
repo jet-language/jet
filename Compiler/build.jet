@@ -4,11 +4,14 @@
 // the sources that copy or project other sources (Toolchain/PreludeSources.jet,
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
 // rewritten and a hand edit is refused. That compile is `jet-bare`. The
-// `runtime` step lowers jet's runtime pack with it into jet-runtime/
-// (Toolchain/RuntimePack.jet), with IDENTITY, jet-bare's identity: its
-// bytes name the compiler, and no C compiler runs. It also fails when the
-// jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
-// disagrees with the one the runtime source renders. The same step checks
+// `runtime` step lowers jet's runtime pack with it into jet-runtime/, run by
+// `runtime-pack`, Toolchain/RuntimePack.jet built for this machine: a script
+// target reads only itself, so it compiles while the generators run, and the
+// step starts the moment jet-bare links. It writes IDENTITY, jet-bare's
+// identity: its bytes name the compiler, and no C compiler runs. It also
+// fails when the jet.runtime interface jet embeds (JetFoundation
+// Registry/RuntimeInterface.jet) disagrees with the one the runtime source
+// renders. The same step checks
 // Core and the Prelude once, with jet-bare, and builds the Core library
 // below from that check (JetCli CoreLibrary.jet). The `core-embed` step then
 // writes `jet`, the same executable with each runtime file and jet's own
@@ -72,11 +75,8 @@ build: fn(b: Build) -[Exec, FS]> {
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
         bare: b.add_executable("jet-bare", ["JetCli/run.jet"], [prelude, keywords])
-        runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
-        runtime.arg("run")
-        runtime.arg("--allow=Env,Exec,FS")
-        runtime.input("Toolchain/RuntimePack.jet")
-        runtime.arg("--")
+        pack: b.add_executable("runtime-pack", ["Toolchain/RuntimePack.jet"], [])
+        runtime: b.run("runtime", b.host(pack), ["Exec", "FS"])
         runtime.arg("pack")
         runtime.file(b.host(bare), flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")

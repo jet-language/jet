@@ -1,0 +1,19 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run a step beside a script target's compile") {
+    // `word` and the compile of `gen` start together: gen's script reads
+    // nothing word writes. `table` runs gen on word's output, then `show`
+    // compiles what table wrote.
+    shell: b.probe("shell", "find_program", "sh")
+    word: b.run("word", b.found(shell), ["Exec", "FS"])
+    word.arg("-c")
+    word.arg("printf forty-two > word.txt")
+    word.writes("word.txt")
+    gen: b.add_executable("gen", ["tools/gen.jet"], [])
+    table: b.run("table", b.host(gen), ["Exec", "FS"])
+    table.input("word.txt")
+    table.output("show.jet", flag: "--out=")
+    show: b.add_executable("show", ["show.jet"], [])
+    b.default(show)
+    }
+}
+run: fn() {}
