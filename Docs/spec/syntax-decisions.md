@@ -1025,6 +1025,18 @@ D-ARMHEAD-PAREN1=A. Pattern heads remain `==`-only. Statement and expression
 position share one table spelling; expression tables unify arm values or yield
 `()`.
 
+**D-IFHOLE1=A — header holes** *(ratified 2026-09-11, card #3067)*: an `if`
+header that holds one statically typed `_` hole, followed by `{`, is a hole
+table: `if n % _ == 0 { 15 -> "FizzBuzz" else -> "{n}" }`. Each non-else arm
+head is a candidate that fills the hole. The header is evaluated per attempted
+candidate, a candidate runs at most once, and skipped candidates have no
+effect. Guards keep ordinary `&&`/`||` after a candidate, `(a | b)` groups
+alternatives, and a Bool candidate is parenthesized. `subject == _` keeps
+pattern, range and binding arms and exhaustiveness. A second hole is E0946,
+`_` outside a hole table header is E0947, and a pattern or range arm under any
+other header is E0948. Holeless `if subject == {` tables stay until the
+owner settles the conflicting distributed-header removal against D-IF3.
+
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary

@@ -585,6 +585,20 @@ When the subject of `if subject == { … }` is not a plain name — a call or a
 field access, for example — the arms refer to it as `it`, as in
 `it == .Ok(n)`.
 
+A header that holds one `_` hole makes a hole table:
+`if n % _ == 0 { 15 -> "FizzBuzz", 3 -> "Fizz", else -> "{n}" }`. Each arm
+head is a candidate that fills the hole, so an arm reads as the header with
+its candidate in place of `_`, tried in order. The header is evaluated again
+for each candidate tried, and a candidate that is never reached never runs.
+A group `(2 | 3)` tries its candidates in turn. After a candidate, `&&` and
+`||` are ordinary operators (`2 && ready || emergency` reads
+`(H[2] && ready) || emergency`), and a Bool candidate is written in
+parentheses. A payload-free case (`.Green`) or `None` fills the hole as a
+value. `subject == _` (or `subject OP _`) is the comparison table over
+`subject`, so its arms keep patterns, ranges, bindings and coverage. Any
+other header refuses a pattern or range arm (E0948). A header holds exactly one
+`_` (E0946), and `_` has a value nowhere else (E0947) (D-IFHOLE1=A).
+
 `#Through` after a match arm's body runs the next arm's body (or the `else`
 body) after it (D-JAI-SMALL1=A): `.Error -> page() #Through` then
 `.Warn -> log()`. The next body runs in a scope of its own, without either

@@ -354,8 +354,10 @@ sema_unknown_name_jet_spelling_fix: fn(name: String, spelling: String) -> String
 
 // E0107 with the most useful fix: the Core import a module-style name
 // misses, up to three near visible names (the nearest as the rename edit, as
-// E0102's near function name carries one), or declaring it.
+// E0102's near function name carries one), or declaring it. `_` is never a
+// name: read as a value it is a hole outside a hole table's header (E0947).
 sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    if name == "_" -> return sema_error("E0947", span, "`_` stands for an arm's candidate only in the header of an `if` table", "in `if header {{ candidate -> body }}` each candidate takes the place of the header's `_`; nowhere else does `_` have a value", "write the value here, or move the test into an `if` header followed by `{{` and its arms")
     what: "nothing named `{name}` exists here"
     why: "a name must be declared before it's used"
     if core_module_for_alias(name) == .Val(owner) -> return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")

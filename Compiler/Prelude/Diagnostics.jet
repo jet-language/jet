@@ -1608,6 +1608,65 @@ DispatchMissingComparison: struct {
     }
 }
 
+DispatchHoleCount: struct {
+    impl Diagnostic {
+        code: "E0946"
+        safety_class: .Soundness
+        safety_reason: "Each candidate fills one hole, so a second `_` in the header would have no value."
+        expert_path: "none: a hole table header holds one hole"
+        stage: [.Parse]
+        meaning: "A hole table header with more than one `_`"
+        detail: true
+
+        what: fn(self) -> String { "An `if` table header holds one `_` hole, and this one has 2" }
+
+        why: fn(self) -> String {
+            "Each arm's candidate takes the place of the one `_`, so a second `_` would stand for nothing."
+        }
+
+        fix: fn(self) -> String { "Keep one `_` and write the other value out in the header." }
+    }
+}
+
+DispatchHoleOutsideTable: struct {
+    impl Diagnostic {
+        code: "E0947"
+        safety_class: .Soundness
+        safety_reason: "`_` has a value only as an arm's candidate, so anywhere else it would read a value that does not exist."
+        expert_path: "none: `_` is a value only in a hole table header"
+        meaning: "A `_` read as a value outside the header of an `if` table"
+        detail: true
+
+        what: fn(self) -> String { "`_` stands for an arm's candidate only in the header of an `if` table" }
+
+        why: fn(self) -> String {
+            "In `if header {{ candidate -> body }}` each candidate takes the place of the header's `_`; nowhere else does `_` have a value."
+        }
+
+        fix: fn(self) -> String { "Write the value here, or move the test into an `if` header followed by `{{` and its arms." }
+    }
+}
+
+DispatchHoleCandidatePattern: struct {
+    impl Diagnostic {
+        code: "E0948"
+        safety_class: .Soundness
+        safety_reason: "A pattern or range is not a value, so it can't fill the hole of a header that uses its candidate as a value."
+        expert_path: "none: patterns and ranges match against the subject of `subject == _`"
+        stage: [.Parse]
+        meaning: "A pattern or range arm in a hole table whose header is not `subject == _`"
+        detail: true
+
+        what: fn(self) -> String { "A pattern or range arm needs a `subject == _` header" }
+
+        why: fn(self) -> String {
+            "Only `subject == _` matches each arm against the subject; any other header puts the candidate in the hole as a value, and a pattern or range is not a value."
+        }
+
+        fix: fn(self) -> String { "Write the header as `subject == _`, or write this arm's candidate as a value." }
+    }
+}
+
 RetiredPredicateArmHead: struct {
     impl Diagnostic {
         code: "E0993"

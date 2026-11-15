@@ -14,6 +14,34 @@ hole_same_as: fn(hole: String, reference: String) {
     assert_eq(hole_structure(hole), hole_structure(reference))
 }
 
+// The error codes a source parses with, in report order.
+hole_error_codes: fn(source: String) -> String {
+    parsed: parse_source(source.bytes())
+    codes := ""
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> codes = if codes == "" -> "{diagnostic.code}" else -> "{codes},{diagnostic.code}"
+    }
+    codes
+}
+
+#Test("a header with two holes is refused") {
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % _ == _ {{\n        3 -> print(\"three\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0946")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if both(_, _) {{\n        true -> 1\n        else -> 2\n    }}\n}}\n"), "E0946")
+}
+
+#Test("a range or payload pattern arm needs a subject == _ header") {
+    assert_eq(hole_error_codes("run: fn(n: Int) {{\n    if n % _ == 0 {{\n        2..4 -> print(\"small\")\n        else -> print(\"other\")\n    }}\n}}\n"), "E0948")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if find(_) > n {{\n        .Val(x) -> x\n        else -> 0\n    }}\n}}\n"), "E0948")
+    assert_eq(hole_error_codes("pick: fn(n: Int) -> Int {{\n    return if n == _ {{\n        2..4 -> 1\n        else -> 0\n    }}\n}}\n"), "")
+}
+
+#Test("None fills the hole as a value") {
+    hole_same_as(
+        "pick: fn(key: String) -> Int {{\n    return if lookup(_) == key {{\n        None -> 0\n        else -> 1\n    }}\n}}\n",
+        "pick: fn(key: String) -> Int {{\n    return if {{\n        lookup(None) == key -> 0\n        else -> 1\n    }}\n}}\n",
+    )
+}
+
 #Test("a statement hole table is the guard table of filled headers") {
     hole_same_as(
         "pick: fn(n: Int) {{\n    if n % _ == 0 {{\n        15 -> print(\"FizzBuzz\")\n        3 -> print(\"Fizz\")\n        else -> print(\"{{n}}\")\n    }}\n}}\n",

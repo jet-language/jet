@@ -692,16 +692,30 @@ parser_dispatch_hole_filled: fn(state: &JetParserState, candidate: &&Expr) -> Ex
     parser_dispatch_hole_fill(state, header.move(), candidate)
 }
 
-// A bare `.Case` head reads as a pattern; outside `subject == _` the case is
-// the candidate value. Any other pattern stays a pattern test.
+// A bare `.Case` (or `None`) head reads as a pattern; outside `subject == _`
+// the case is the candidate value. Any other pattern is no value to fill the
+// hole with.
 parser_dispatch_hole_pattern: fn(state: &JetParserState, subject: Expr, pattern: ParsedPattern) -> Expr {
     if pattern.pattern == .Variant(variant, bindings, leading_dot, span) {
-        if bindings.len() == 0 && leading_dot {
-            case_value: Expr.EnumLit{type_name: "", variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: true, span: span, id: parser_node_id(state)}
+        if bindings.len() == 0 && (leading_dot || variant == "None") {
+            case_value: Expr.EnumLit{type_name: "", variant: variant, variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: leading_dot, span: span, id: parser_node_id(state)}
             return parser_dispatch_hole_filled(state, case_value)
         }
     }
+    parser_dispatch_hole_candidate_pattern(state, pattern.span)
     Expr.PatternTest{subject: subject, pattern: pattern.pattern, span: pattern.span, id: parser_node_id(state)}
+}
+
+// E0946: a hole table header holds exactly one hole.
+parser_dispatch_hole_check_header: fn(state: &JetParserState, header: Expr) {
+    count: parser_dispatch_hole_count(header)
+    if count > 1 -> parser_add_error_code(state, "E0946", expr_span(header), "an `if` table header holds one `_` hole, and this one has {count}", "each arm's candidate takes the place of the one `_`, so a second `_` would stand for nothing", "keep one `_` and write the other value out in the header")
+}
+
+// E0948: a pattern or range arm in a hole table whose header uses the
+// candidate as a value.
+parser_dispatch_hole_candidate_pattern: fn(state: &JetParserState, span: Span) {
+    parser_add_error_code(state, "E0948", span, "a pattern or range arm needs a `subject == _` header", "only `subject == _` matches each arm against the subject; any other header puts the candidate in the hole as a value, and a pattern or range is not a value", "write the header as `subject == _`, or write this arm's candidate as a value")
 }
 
 // `subject OP _` (or `_ == subject`, `_ != subject`) is the comparison table
@@ -729,6 +743,7 @@ parser_expression_form_dispatch_op_kind: fn(op: BinOp) -> Bool Never! {
 // marker, so each arm's atoms become filled headers; it needs an `else` like
 // any table with comparison heads.
 parser_expression_form_parse_hole_table: fn(state: &JetParserState, header: &&Expr, start: Span, depth: Int) -> ParsedExpr {
+    parser_dispatch_hole_check_header(state, header)
     compared: parser_dispatch_hole_comparison(header)
     if compared == .Val(table) -> return parser_expression_form_parse_dispatch_table(state, table.subject, table.op, start, depth + 1)
     saved_else_arms: state.else_arms.len()
