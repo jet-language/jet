@@ -31,7 +31,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0002 | UnterminatedText | Compiler/JetLexer/Source/Lexer/Payload.jet:845 | no opt-in decides where unterminated text ends |
 | E0003 | InvalidStatement | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:54 | no opt-in gives an incomplete statement a meaning |
 | E0029 | DuplicateAccessMarker | Compiler/JetParser/Source/Parser/Items.jet:935 | one parameter has one access mode; write the one meant |
-| E0035 | InvalidEnumDiscriminant | Compiler/JetSema/Source/Sema/CheckProgram.jet:9904 | the layout needs a known number that fits the representation |
+| E0035 | InvalidEnumDiscriminant | Compiler/JetSema/Source/Sema/CheckProgram.jet:9908 | the layout needs a known number that fits the representation |
 | E0064 | InvalidForeignBody | Compiler/JetParser/Source/Parser/Items.jet:1563 | the foreign body is the code; no opt-in supplies it |
 | E0067 | ReservedDunderName | Compiler/JetSema/Source/Sema/Calls/Core.jet:1506 | the reserved names belong to generated code |
 | E0072 | CollectingLoopNotFinite | Compiler/JetParser/Source/Parser/ExpressionForms/Loops.jet:286 | no opt-in finishes a loop that has no exit |
@@ -112,7 +112,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0332 | CaseGroupAsValue | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:947 | a value is one variant |
 | E0336 | PatchableGenericStruct | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2504 | the patch type is generated for a concrete struct |
 | E0337 | PatchableFunctionField | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2509 | store a callable handle type, which a patch can hold |
-| E0338 | ComputedFieldCycle | Compiler/JetSema/Source/Sema/CheckProgram.jet:9924 | no opt-in gives a cyclic formula a value |
+| E0338 | ComputedFieldCycle | Compiler/JetSema/Source/Sema/CheckProgram.jet:9928 | no opt-in gives a cyclic formula a value |
 | E0339 | ComputedFieldAssigned | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:676 | write the stored fields the formula reads |
 | E0343 | SwitchOffAsExpression | Compiler/JetParser/Source/Parser/Expressions.jet:1140 | `#Off` applies to whole statements |
 | E0344 | DuplicateSwitchOff | Compiler/JetParser/Source/Parser/Statements.jet:2194 | one statement has one switch |
@@ -177,7 +177,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0616 | SetupNotFirst | Compiler/JetSema/Source/Sema/ScopeMembers.jet:329 | `.setup` is the test's first statement |
 | E0617 | ScopeMemberArgumentMismatch | Compiler/JetSema/Source/Sema/Statements.jet:7496 | a member takes its declared arguments |
 | E0618 | NestedScopeMember | Compiler/JetSema/Source/Sema/ScopeMembers.jet:339 | members sit at the top level of the marker block |
-| E0621 | TopLevelStatementsBesideRun | Compiler/JetSema/Source/Sema/CheckProgram.jet:11151 | a program has one entry |
+| E0621 | TopLevelStatementsBesideRun | Compiler/JetSema/Source/Sema/CheckProgram.jet:11244 | a program has one entry |
 | E0622 | ModuleGlobalNotLiteral | Compiler/JetSema/Source/Sema/Registration/Checked.jet:4153 | a global without `#Persist` may compute its starting value |
 | E0624 | DuplicatePackageName | Compiler/JetDriver/Source/Driver/Loader.jet:3065 | each top-level name belongs to one file of the package |
 | E0625 | RunInLibrary | Compiler/JetDriver/Source/Driver/Loader.jet:3078 | an executable package declares the entry |
@@ -328,7 +328,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1003 | IntegerOutOfRange | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:2836 | the value fits the width, or stays an exact `Int` |
 | E1004 | UnknownCoreItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:514 | no opt-in imports an item the module does not define |
 | E1005 | InvalidOverflowOptIn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:50 | the opt-in wraps exactly one integer operation or narrowing conversion |
-| E1006 | RuntimeCeilingExceeded | Compiler/JetSema/Source/Sema/CheckProgram.jet:10068 | the ceiling is raised where the package declares it |
+| E1006 | RuntimeCeilingExceeded | Compiler/JetSema/Source/Sema/CheckProgram.jet:10072 | the ceiling is raised where the package declares it |
 | E1007 | InvalidBitWidth | Compiler/JetParser/Source/Parser/Patterns.jet:221 | holes are `U<1..64>` with an optional `be` or `le` |
 | E1008 | InvalidEndianSuffix | Compiler/JetSema/Source/Sema/Patterns.jet:1136 | multi-byte reads state `be` or `le` |
 | E1009 | MisplacedRestCapture | Compiler/JetParser/Source/Parser/Patterns.jet:331 | the rest capture is the pattern's last part |
