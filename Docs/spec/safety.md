@@ -4262,7 +4262,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/WsRoutes.jet",
-      "line": 500,
+      "line": 505,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -10733,7 +10733,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 23:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 28:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 185:5 | "written under the vault test backup mutex" |
-| Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 500:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 505:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 71:5 | "first's private header names its live slab, whose arena word is fixed" |
