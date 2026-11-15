@@ -340,6 +340,19 @@ sema_serde_items_secret: fn(field: Field) -> Bool Never! {
     false
 }
 
+// An owned copy of the type a codec decodes for a value of type `ty`: a
+// `#Secret T` value decodes as `T`, so no decode result or slot a derived
+// body switches on carries the fixed-timing tag (E0737); the value gains the
+// tag where the struct literal stores it.
+sema_serde_items_decoded_type: fn(ty: Type) -> Type Never! {
+    if ty == .Tagged(marker, inner) {
+        if marker == .User(name) {
+            if name == "Secret" -> return inner.copy()
+        }
+    }
+    ty.copy()
+}
+
 // A struct with a stored `#Secret` field, whose derived codecs also have the
 // storage codec methods `encode_stored` and `decode_stored`.
 sema_serde_items_has_secret: fn(definition: StructDef) -> Bool Never! {
@@ -951,7 +964,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], st
             value_name: "jet_serde_decoded_value_{index}"
             ok_value: "jet_serde_ok_value_{index}"
             error_name: "jet_serde_field_errors_{index}"
-            body.push(sema_serde_items_binding(slot, Val(Type.Option{inner: field.ty.copy()}), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
+            body.push(sema_serde_items_binding(slot, Val(Type.Option{inner: sema_serde_items_decoded_type(field.ty)}), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
             body.push(sema_serde_items_binding(result, None, sema_serde_items_codec_call(sema_serde_items_ident("tree", span), codec, field.ty, span), false, span))
             body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}, error_name, sema_serde_items_decode_error_body(error_name, None, None, span), span))
             decoded_slots.push(slot)
@@ -1832,9 +1845,10 @@ sema_serde_items_enum_read_failed: fn(failed: String, span: Span) -> Stmt Never!
 }
 
 // The type of a decoded field's slot: an optional field's own type, else
-// that type made optional (Absent until the field decodes).
+// that type made optional (Absent until the field decodes); a `#Secret T`
+// field's slot holds `T`.
 sema_serde_items_slot_type: fn(ty: Type) -> Type Never! {
-    owned: ty.copy()
+    owned: sema_serde_items_decoded_type(ty)
     if owned == .Option(_) -> return owned
     Type.Option{inner: owned}
 }
@@ -1884,9 +1898,10 @@ sema_serde_items_decode_call: fn(receiver: Expr, ty: Type, span: Span) -> Expr N
     sema_serde_items_codec_call(receiver, "decode", ty, span)
 }
 
-// `receiver.<method><ty>()`: `decode`, or the storage codec's `decode_stored`.
+// `receiver.<method><ty>()`: `decode`, or the storage codec's `decode_stored`
+// (of `T` for a `#Secret T`).
 sema_serde_items_codec_call: fn(receiver: Expr, method: String, ty: Type, span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{ty.copy()}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_serde_items_decoded_type(ty)}, args: [CallArg]{}, id: AST_NODE_GENERATED}
 }
 
 // `FieldError.under(path, value)`.
