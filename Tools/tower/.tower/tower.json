@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6977,
-    "rev": 106438,
+    "rev": 106445,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42732,20 +42732,20 @@
         {
           "n": 16,
           "text": "`#Policy(failures: .Explicit)` at block, function, module or package level makes each call that can pass a failure up need `?` or `?(text)`, with a registered error naming the call, and `jet fmt` inserts the marks (D-FAIL-VISIBLE1=A, mirroring `copies: .Explicit`). Proof: `jet test Compiler --profile ui --filter failures_explicit_policy` and `jet test Compiler --profile cases --filter fmt_inserts_failure_marks`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:03.501Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: ui --filter failures_explicit_policy 6/6 PASS; cases --filter fmt_inserts_failure_marks 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:06.661Z"
         },
         {
           "n": 17,
           "text": "`jet review` and `jet diff` list a change's failure points and flag a function that newly can fail (D-FAIL-VISIBLE1=A). Proof: `jet test Compiler --profile cases --filter review_flags_new_failure_point`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:04.430Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter review_flags_new_failure_point 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:07.661Z"
         },
         {
           "n": 18,
@@ -42759,11 +42759,11 @@
         {
           "n": 19,
           "text": "`jet fix --pin-failures` writes each function's inferred failure set into its source as a written contract (D-FAIL-PUBSIG1=A). Proof: `jet test Compiler --profile cases --filter fix_pin_failures`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:42:06.216Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter fix_pin_failures 1/1 PASS (landed 6c592c93eb)",
+          "at": "2026-11-15T14:48:08.776Z"
         },
         {
           "n": 20,
@@ -42840,7 +42840,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-15T13:43:26.289Z",
+      "updated": "2026-11-15T14:48:08.776Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -99798,11 +99798,11 @@
         {
           "n": 4,
           "text": "get, put, insert and query carry DB.Read and DB.Write: a put in a function without DB.Write is an effect error. Proof: `jet test Compiler --profile ui --filter table_put_without_db_write`. The table declaration form follows open decision D-DB-TABLE1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:01.626Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: ui --filter table_put_without_db_write 1/1 PASS (landed d95870d428)",
+          "at": "2026-11-15T14:48:09.859Z"
         }
       ],
       "refs": [],
@@ -99813,7 +99813,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-15T14:06:25.597Z",
+      "updated": "2026-11-15T14:48:09.859Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101819,6 +101819,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p184 proofs (dev 61b4ee98a7): golden CallableCatalog fails at o0/o1/o2 with E0118 (name bound already taken, run.jet:165), and golden DeclarationFacts is an ICE (exit 101). ReflectionRungs ICEs on p183 and p184 (comptime.build unlowered: argument type TypeInfo) but runs on p182, so it is a regression from p182 to p183; suspects are e90813862d typeid-signature and bce840440f core-bodies-load. GoalsA-1-4 is fixing all three as one SUB ahead of reflect-value."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-15, within D-META-REFLECT2=A), for c2: one typed record per declaration kind, not a single DeclarationInfo. definitions() entries carry a closed DeclarationKind enum in place of the String kind (fixed by the grammar; its row goes in the closed-list kernel ledger as grammar), plus identity and scope. TraitInfo, ConstantInfo and SettingInfo gain identity and scope. ProgramInfo.complete() reports completeness next to the revision. Owner: GoalsA-1-4. c1 SUB GoalsA-1-4-typeid-signature (TypeId.signature gives the CallableSignature) is queued for the next batch."
         },
         {
@@ -101949,7 +101954,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:40.964Z",
-      "updated": "2026-11-15T13:27:32.464Z",
+      "updated": "2026-11-15T14:48:12.693Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -104296,11 +104301,11 @@
         {
           "n": 1,
           "text": "Table.guard(fn(db.Op, db.Who, db.Store) -> Bool) judges a read on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the transaction's earlier writes but not the write being judged, and a row the caller may not read is never returned. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:11.163Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter db/row_policy_judges_each_operation 1/1 PASS (landed e0ea647fe1)",
+          "at": "2026-11-15T14:48:10.814Z"
         },
         {
           "n": 2,
@@ -104323,11 +104328,11 @@
         {
           "n": 4,
           "text": "A policy that does not type-check, or that reads a table it may not, is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile ui --filter row_policy_invalid_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:54:11.163Z"
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: ui --filter row_policy_invalid_ 2/2 PASS (landed 66248e8f83)",
+          "at": "2026-11-15T14:48:11.775Z"
         }
       ],
       "refs": [],
@@ -104342,7 +104347,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:11.163Z",
-      "updated": "2026-11-15T14:13:10.400Z",
+      "updated": "2026-11-15T14:48:11.775Z",
       "updatedBy": "Main"
     },
     {
@@ -218040,6 +218045,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T14:48:12.693Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0apk7x9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T14:48:11.775Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ems7zb",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T14:48:10.814Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ems7zb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T14:48:09.859Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0429qak",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T14:48:08.776Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T14:48:07.661Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T14:48:06.661Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flvd7x",
+      "note": "#16"
+    },
     {
       "at": "2026-11-15T14:13:11.339Z",
       "by": "Main",
