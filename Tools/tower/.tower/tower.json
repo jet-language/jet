@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6862,
-    "rev": 103116,
+    "nextNum": 6864,
+    "rev": 103125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84939,12 +84939,12 @@
         },
         {
           "n": 8,
-          "text": "#6615, the D-HOST-LEAF1=E work, is done: the runtime is an ordinary library and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted. (was #6111 c6)",
+          "text": "The runtime is an ordinary library (D-HOST-LEAF1=E) and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted, so Core's runtime calls take the ordinary call path. Proof: `git grep -n -E 'IR_RUNTIME_ROUTES|route\\.export' -- Compiler` prints nothing and `jet test Compiler --profile golden` passes on o0, o1 and o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:02:38.346Z"
+          "at": "2026-11-15T02:47:01.266Z"
         },
         {
           "n": 9,
@@ -85046,7 +85046,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-15T02:46:04.850Z",
+      "updated": "2026-11-15T02:47:01.266Z",
       "updatedBy": "TowerKeeper-1",
       "criteriaLastN": 18
     },
@@ -85924,6 +85924,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:34:37.089Z"
+        },
+        {
+          "n": 11,
+          "text": "`jet notebook --app` starts a loopback server that renders the notebook's cell outputs, layouts and controls from the running notebook kernel, with no second evaluator. Proof: `jet test Compiler --profile cases --filter notebook_app_serves_cells`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:16.041Z"
+        },
+        {
+          "n": 12,
+          "text": "Two browser tabs on one notebook app get separate typed session state, run callbacks in a fixed order, and reset or reconnect independently; one tab cannot read or change the other's state. Proof: `jet test Compiler --profile cases --filter notebook_app_tabs_are_isolated`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:17.719Z"
+        },
+        {
+          "n": 13,
+          "text": "Editing the notebook or one of its typed functions under `jet dev` updates the running app, keeps state whose type did not change, and names the reason when it resets state or shows a stale output. Proof: `jet test Compiler --profile cases --filter notebook_app_dev_keeps_state`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:19.034Z"
+        },
+        {
+          "n": 14,
+          "text": "The notebook app binds to loopback only unless sharing is asked for, and prints a machine-readable receipt of its bind address, sharing, data it reads and trust grants. Proof: `jet test Compiler --profile cases --filter notebook_app_receipt`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:20.341Z"
         }
       ],
       "refs": [],
@@ -85934,9 +85970,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:24:24.911Z",
-      "updated": "2026-11-13T02:22:58.074Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 10
+      "updated": "2026-11-15T02:49:20.341Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 14
     },
     {
       "id": "c065d1d5",
@@ -97662,6 +97698,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T18:17:37.554Z"
+        },
+        {
+          "n": 6,
+          "text": "A job whose worker disconnects before acknowledging it is delivered again, and a duplicate delivery runs under the job's declared idempotency key, so its effect happens once. Proof: `jet test Compiler --profile cases --filter web_app/job_redelivered_once`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:21.473Z"
+        },
+        {
+          "n": 7,
+          "text": "After a server restart, queued jobs (stored in the database) still run, while local schedule state is rebuilt, never replayed; a retried job's outcome follows its declared retry policy. Proof: `jet test Compiler --profile cases --filter web_app/jobs_survive_restart`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:22.478Z"
         }
       ],
       "refs": [],
@@ -97672,9 +97726,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-14T03:25:38.877Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5
+      "updated": "2026-11-15T02:49:22.478Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 7
     },
     {
       "id": "c0b5xq4b",
@@ -100772,6 +100826,138 @@
       "needsAcceptance": false,
       "created": "2026-11-15T02:45:50.027Z",
       "updated": "2026-11-15T02:45:50.027Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0rwl15m",
+      "num": 6862,
+      "title": "Typed data loaders: deterministic snapshots, exact invalidation, no leaked credentials",
+      "body": "Destination: a typed data loader (`file<T>(path, format, limits)` and the archive, parameter and provider forms) yields one canonical snapshot with provenance and schema identity, is invalidated by exactly its inputs, and never exposes credential-sensitive metadata.\n\nWhy it matters: notebooks, apps and data scripts all read data through loaders; a loader that caches wrongly or leaks a credential into public state breaks every one of them.\n\nDecisions: D-DATA-READER1=A (Arrow reader behind the format boundary), D-COLUMNAR-BOUNDARY1. Spec: Docs/spec/core-library.md (data loaders). Related: #5968 (dataframes), #6619 (notebook).\n\nSource: #5985 c9-c12 (archived #2448 c1-c4, re-added by the 2026-11 precut audit as unproven).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Loading the same input twice gives the same canonical snapshot content, provenance and schema identity, and the result is marshalled into the declared type T, on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter data_loader_snapshot_is_deterministic`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:13.746Z"
+        },
+        {
+          "n": 2,
+          "text": "A change to the loader's input file, archive member, parameter or authority invalidates its cached result, and a change to anything else does not. Proof: `jet test Compiler --profile cases --filter data_loader_invalidation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:13.746Z"
+        },
+        {
+          "n": 3,
+          "text": "Credential-sensitive loader metadata never appears in public loader state or output, and a provider payload the loader's authority does not cover is refused with a registered error. Proof: `jet test Compiler --profile cases --filter data_loader_redacts_credentials`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:13.746Z"
+        },
+        {
+          "n": 4,
+          "text": "Loader preview, status and cleanup read and remove only the state of their own invocation; an app or notebook using a loader goes through the same loader, not a second copy. Proof: `jet test Compiler --profile cases --filter data_loader_preview_status_cleanup`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:13.746Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "data",
+        "core"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:49:13.746Z",
+      "updated": "2026-11-15T02:49:13.746Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c07b6pyn",
+      "num": 6863,
+      "title": "jet new adds services, routes, jobs and migrations to an app, with preview and undo",
+      "body": "Destination: inside an app package, `jet new` generates a service, a route, a job or a migration from explicit inputs, shows a preview first, and can undo what it generated from its receipt. Generated code uses the ratified app APIs (D-WEBAPP-SHAPE1=A: #App.Job, app.enqueue) and the migration CLI (D-DX-MIGRATE1=A), and compiles as written.\n\nWhy it matters: generators are how most people start a backend feature; generated code that does not compile or cannot be undone teaches the wrong shape.\n\nSource: #5985 c16-c19 (archived #2458 c1-c4, re-added by the 2026-11 precut audit as unproven). Related: #6825 (jobs), #6552 (web framework).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet new service|route|job|migration <name>` in an app package writes the generated files from explicit inputs, and `--preview` prints the exact files and contents without writing. Proof: `jet test Compiler --profile cases --filter jet_new_app_generators`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:14.678Z"
+        },
+        {
+          "n": 2,
+          "text": "Every generated service, route, job and migration compiles unchanged and uses the ratified app APIs (#App.Job, app.enqueue, the migration form of D-DX-MIGRATE1=A), with deterministic file and declaration names. Proof: `jet test Compiler --profile cases --filter jet_new_app_generated_code_compiles`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:14.678Z"
+        },
+        {
+          "n": 3,
+          "text": "Undo removes exactly the files its receipt lists, refuses when one was edited since (integrity check), and a regenerated migration reuses its version number. Proof: `jet test Compiler --profile cases --filter jet_new_app_generator_undo`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:49:14.678Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "cli",
+        "scaffold"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:49:14.678Z",
+      "updated": "2026-11-15T02:49:14.678Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -206192,6 +206378,69 @@
   ],
   "events": [
     {
+      "at": "2026-11-15T02:49:22.478Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0se7lpr",
+      "note": "#7 After a server restart, queued jobs (stored in the database)"
+    },
+    {
+      "at": "2026-11-15T02:49:21.473Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0se7lpr",
+      "note": "#6 A job whose worker disconnects before acknowledging it is de"
+    },
+    {
+      "at": "2026-11-15T02:49:20.341Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0xhxet9",
+      "note": "#14 The notebook app binds to loopback only unless sharing is as"
+    },
+    {
+      "at": "2026-11-15T02:49:19.034Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0xhxet9",
+      "note": "#13 Editing the notebook or one of its typed functions under `je"
+    },
+    {
+      "at": "2026-11-15T02:49:17.720Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0xhxet9",
+      "note": "#12 Two browser tabs on one notebook app get separate typed sess"
+    },
+    {
+      "at": "2026-11-15T02:49:16.041Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0xhxet9",
+      "note": "#11 `jet notebook --app` starts a loopback server that renders t"
+    },
+    {
+      "at": "2026-11-15T02:49:14.678Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c07b6pyn",
+      "note": "jet new adds services, routes, jobs and migrations to an app, with preview and undo"
+    },
+    {
+      "at": "2026-11-15T02:49:13.746Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0rwl15m",
+      "note": "Typed data loaders: deterministic snapshots, exact invalidation, no leaked credentials"
+    },
+    {
+      "at": "2026-11-15T02:47:01.266Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0bbj6h3",
+      "note": "#8: strip debris; state the outcome without self-reference; add proof; was: #6615, the D-HOST-LEAF1=E work, is done: the runtime is an ordinary library and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted. (was #6111 "
+    },
+    {
       "at": "2026-11-15T02:46:42.761Z",
       "by": "TowerKeeper-1",
       "action": "card.update",
@@ -209662,713 +209911,6 @@
       "action": "card.criteria-meet",
       "ref": "c0c3gh6u",
       "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:06:00.091Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-15T01:05:59.129Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-15T01:05:58.179Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-15T01:05:57.168Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-15T01:04:39.805Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0e5gz4o",
-      "note": "#3 A log sink set with log.otlp_file on the main thread receive"
-    },
-    {
-      "at": "2026-11-15T01:04:38.482Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e5gz4o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:02:47.487Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02vkuef",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:02:46.429Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0429qak",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T01:02:06.203Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r2eell",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:02:04.344Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0r2eell",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T01:02:03.312Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0r2eell",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-15T01:01:41.437Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0604fz5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:01:39.868Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ba2y7a",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T01:01:38.322Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tl2yuc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-15T00:54:12.127Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oo8eeq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-15T00:48:01.419Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m58g8t",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-15T00:36:38.347Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T00:36:37.416Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#11 Owner order 2026-11-14: the kernel is safe and at the theore"
-    },
-    {
-      "at": "2026-11-15T00:25:31.886Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dhc7rh",
-      "note": "#22 Examples/Memory/Allocation/ContextAllocatorRead.jet passes i"
-    },
-    {
-      "at": "2026-11-15T00:25:30.977Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gelll3",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-15T00:24:38.577Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0n7cs1p",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T00:22:57.406Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MEM-CHOKEPOINT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-15T00:22:36.767Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gelll3",
-      "note": "#13 A one-line `#Context(allocator: x) { ... }` block means the "
-    },
-    {
-      "at": "2026-11-15T00:22:10.963Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0n7cs1p",
-      "note": ""
-    },
-    {
-      "at": "2026-11-15T00:18:18.672Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xb6zik",
-      "note": "#15 A user enum whose cases are named Ok/Err: `.Ok(x) -> x` on a"
-    },
-    {
-      "at": "2026-11-15T00:09:14.389Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p39lw2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T00:09:13.308Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0p39lw2",
-      "note": "#25 If D-IFHOLE2 ratifies A: E0948's fix text no longer says 'wr"
-    },
-    {
-      "at": "2026-11-15T00:09:12.242Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0p39lw2",
-      "note": "#24 The hole table's read count matches the ruling D-IFHOLE2 rat"
-    },
-    {
-      "at": "2026-11-15T00:09:11.051Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-IFHOLE2",
-      "note": "Keep the plain table header for comparing one value, or require a hole in every table?"
-    },
-    {
-      "at": "2026-11-15T00:04:07.134Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-15T00:00:03.520Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-15T00:00:03.520Z"
-    },
-    {
-      "at": "2026-11-14T23:42:33.048Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#10 A value bound by a pattern (if/match .Val(x)) keeps its clos"
-    },
-    {
-      "at": "2026-11-14T23:42:31.932Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#9 A mem.Window (and every view a handle hands out) cannot be r"
-    },
-    {
-      "at": "2026-11-14T23:42:31.061Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#8 A #SingleUse value (and any struct, list or enum payload tha"
-    },
-    {
-      "at": "2026-11-14T23:42:30.206Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:42:29.327Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oo8eeq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T23:42:12.433Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MEM-CHOKEPOINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-14T23:42:11.192Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-MEM-CHOKEPOINT1",
-      "note": "Memory chokepoint: kernel files with owners and checked views; kernel files with single-use handles; a kernel of raw primitives; today's blocks plus a report; or Core only"
-    },
-    {
-      "at": "2026-11-14T23:34:34.351Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gelll3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:34:33.470Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00ys8fj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T23:34:32.529Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-14T23:34:31.586Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-14T23:34:30.631Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-14T23:34:29.684Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tl2yuc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:34:28.752Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tl2yuc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T23:34:27.839Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m4deiq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-14T23:34:26.937Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m4deiq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:29:20.738Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p39lw2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:25:16.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-14T23:25:15.259Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tl2yuc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T23:17:28.050Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0c3gh6u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:17:27.182Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0c3gh6u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T23:17:26.275Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0604fz5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T23:17:25.353Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ba2y7a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-14T23:16:43.953Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:16:13.909Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:16:01.992Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08zzpo5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:16:00.902Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08zzpo5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T23:14:50.380Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0in2dft",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:12:09.059Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h18kyi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T23:12:05.679Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#56"
-    },
-    {
-      "at": "2026-11-14T23:12:03.846Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-14T23:12:02.010Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:11:39.686Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h18kyi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:11:25.962Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0in2dft",
-      "note": "Known-failing ledger: the remaining failing cases and their three open criteria"
-    },
-    {
-      "at": "2026-11-14T23:10:50.917Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:06:06.057Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T23:06:04.692Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-14T23:05:27.259Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xb6zik",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-14T23:05:26.255Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0r2eell",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-14T23:04:18.985Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-14T23:04:17.613Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w6dky2",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-14T23:04:16.597Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-14T23:04:15.546Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#97"
-    },
-    {
-      "at": "2026-11-14T23:04:14.446Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-14T23:04:13.459Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-14T23:04:12.390Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-14T23:04:11.359Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0flvd7x",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-14T22:59:44.639Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T22:59:43.714Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T22:58:36.262Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06y0cef",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-14T22:57:42.227Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0exjsbx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T22:54:11.905Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-14T22:54:11.905Z"
-    },
-    {
-      "at": "2026-11-14T22:54:02.726Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#55"
-    },
-    {
-      "at": "2026-11-14T22:52:57.165Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m58g8t",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-14T22:52:32.580Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05c458o",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T22:52:30.393Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ku1nvb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-14T22:52:28.403Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-14T22:52:27.480Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-14T22:52:26.594Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c05c458o",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T22:52:25.704Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ku1nvb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-14T22:51:50.037Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oo8eeq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-14T22:51:49.032Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#14 Removing copies never makes Jet slower. Each copy-removal ba"
-    },
-    {
-      "at": "2026-11-14T22:51:48.150Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#13 No copy ceiling ever rises. No SUB, rebase or lander fix-up "
-    },
-    {
-      "at": "2026-11-14T22:51:47.236Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#12 Implicit copies count too. The compiler reports every deep c"
-    },
-    {
-      "at": "2026-11-14T22:51:46.331Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxsy7l",
-      "note": "#11 Zero unjustified copies (owner order 2026-11-14). Every .cop"
-    },
-    {
-      "at": "2026-11-14T22:51:38.155Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#7 Each primitive has a test per stated precondition, plus a fu"
-    },
-    {
-      "at": "2026-11-14T22:51:37.142Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#6 Zero cost: kernel primitives inline at O1/O2. A paired two-p"
-    },
-    {
-      "at": "2026-11-14T22:51:36.154Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#5 Codegen emits raw memory instructions for checked code only "
-    },
-    {
-      "at": "2026-11-14T22:51:35.161Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#4 Cutover: every Compiler, runtime, Core and Jetpack caller is"
-    },
-    {
-      "at": "2026-11-14T22:51:33.989Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oo8eeq",
-      "note": "#3 One memory kernel module holds the only implementations of t"
     }
   ],
   "nextNum": 368,
