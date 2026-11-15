@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 105950,
+    "rev": 105975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39830,12 +39830,12 @@
         },
         {
           "n": 5,
-          "text": "The 41 tests/cases rows REFUSED for kit pty, pty-send, pty-resize and pty-close (Tools/testkit/Steps.jet:564-570 refuses them outright) run against the ratified ProcessSpec.terminal session and none is REFUSED; compares lose 0 rows.",
+          "text": "The 41 tests/cases rows REFUSED for kit pty, pty-send, pty-resize and pty-close (Tools/testkit/Steps.jet:564-570 refuses them outright) run against the ratified ProcessSpec.terminal session and none is REFUSED; compares lose 0 rows. Proof: `jet test Compiler --profile cases --filter pty` shows the 41 rows pass with none REFUSED.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T15:17:45.099Z"
+          "at": "2026-11-15T05:46:02.159Z"
         },
         {
           "n": 6,
@@ -39866,48 +39866,48 @@
         },
         {
           "n": 9,
-          "text": "Isolation: Core can run a child in new Linux namespaces (user, mount, net) and exec in place, on every tier, refusing clearly on hosts without them. Compiler/JetTestKit's no-nix.sh and KIT_NETNS_RAISE sh are replaced by it and deleted.",
+          "text": "Isolation: Core can run a child in new Linux namespaces (user, mount, net) and exec in place, on every tier, refusing clearly on hosts without them. Compiler/JetTestKit's no-nix.sh and KIT_NETNS_RAISE sh are replaced by it and deleted. Proof: `jet test Compiler --profile cases --filter process/isolate_namespaces` and `git ls-files \"Compiler/JetTestKit/*no-nix.sh\"` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:03:38.366Z"
+          "at": "2026-11-15T05:46:03.047Z"
         },
         {
           "n": 10,
-          "text": "CPU affinity: a ProcessSpec can pin the child to a CPU set, applied before exec, on every tier. The taskset -c calls in the chain stages, build-slot, publish-base and Land.jet run_heavy use it instead.",
+          "text": "CPU affinity: a ProcessSpec can pin the child to a CPU set, applied before exec, on every tier. The taskset -c calls in the chain stages, build-slot, publish-base and Land.jet run_heavy use it instead. Proof: `jet test Compiler --profile cases --filter process/cpu_affinity` and `git grep -n \"taskset -c\" -- Tools` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:17:42.981Z"
+          "at": "2026-11-15T05:46:03.941Z"
         },
         {
           "n": 11,
-          "text": "Per-child usage: a ProcessReceipt reports that one child's peak RSS and its user and system CPU time (wait4 rusage), on every tier. sys.usage(.Children) is a running maximum over all waited children, so it can't attribute a peak to one stage. The time -v and time -f %M wrappers in chain stage rows and the slot ledger read the receipt instead.",
+          "text": "Per-child usage: a ProcessReceipt reports that one child's peak RSS and its user and system CPU time (wait4 rusage), on every tier. sys.usage(.Children) is a running maximum over all waited children, so it can't attribute a peak to one stage. The time -v and time -f %M wrappers in chain stage rows and the slot ledger read the receipt instead. Proof: `jet test Compiler --profile cases --filter process/receipt_usage` and `git grep -n -E \"time -v|time -f %M\" -- Tools` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:17:43.942Z"
+          "at": "2026-11-15T05:46:04.823Z"
         },
         {
           "n": 12,
-          "text": "I/O priority and cgroup placement: a ProcessSpec can set the child's I/O priority class (idle included) and place the child in its own cgroup v2 scope with memory.high, memory.max, memory.swap.max and an oomd kill policy, refusing clearly where cgroups are unavailable. build-slot.sh's ionice -c3 and systemd-run scope, and publish-base's detached golden worker unit, use it instead.",
+          "text": "I/O priority and cgroup placement: a ProcessSpec can set the child's I/O priority class (idle included) and place the child in its own cgroup v2 scope with memory.high, memory.max, memory.swap.max and an oomd kill policy, refusing clearly where cgroups are unavailable. build-slot.sh's ionice -c3 and systemd-run scope, and publish-base's detached golden worker unit, use it instead. Proof: `jet test Compiler --profile cases --filter process/ionice_cgroup` and `git grep -n -E \"ionice -c3|systemd-run\" -- Tools` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:17:44.871Z"
+          "at": "2026-11-15T05:46:05.714Z"
         },
         {
           "n": 13,
-          "text": "Isolation mappings: isolate() can map the caller's uid and gid 1:1 as well as to 0, and bind-mount SRC onto DST before exec. chain.sh inroot (the canonical build root the compiler embeds) replaces unshare -r -m, mount --bind and unshare --map-user with it.",
+          "text": "Isolation mappings: isolate() can map the caller's uid and gid 1:1 as well as to 0, and bind-mount SRC onto DST before exec. chain.sh inroot (the canonical build root the compiler embeds) replaces unshare -r -m, mount --bind and unshare --map-user with it. Proof: `jet test Compiler --profile cases --filter process/isolate_mappings` and `git grep -n -E \"unshare -r -m|mount --bind\" -- Tools` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:17:45.840Z"
+          "at": "2026-11-15T05:46:06.610Z"
         },
         {
           "n": 14,
@@ -39929,21 +39929,21 @@
         },
         {
           "n": 16,
-          "text": "w07 (spawn) and the pipeline `git log --oneline | grep fix | wc -l` run as native process pipelines with no `sh -c`; a file name with spaces and `; rm -rf x` stays one argv element (test), which the Bash version with an unquoted `$f` does not. (moved from #4954 c6)",
+          "text": "w07 (spawn) and the pipeline `git log --oneline | grep fix | wc -l` run as native process pipelines with no `sh -c`; a file name with spaces and `; rm -rf x` stays one argv element (test), which the Bash version with an unquoted `$f` does not. Proof: `jet test Compiler --profile cases --filter process/native_pipeline_argv`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:22.622Z"
+          "at": "2026-11-15T05:46:07.491Z"
         },
         {
           "n": 17,
-          "text": "A child that exits non-zero, or any failed stage of a pipeline, fails the call with an IOError that carries the exit code and the last lines of the child's stderr. Today `process.getoutput` with `git log --oneline bogus` prints an empty line, drops git's stderr and exits 0 (Core/Process/Process.jet:119-122; probe work/p/g/gl.jet). `getoutput` has 0 callers in the repo and is deleted. Bash without `set -o pipefail` and Python `subprocess.run` without `check=True` both miss this. (moved from #4954 c9)",
+          "text": "A child that exits non-zero, or any failed stage of a pipeline, fails the call with an IOError that carries the exit code and the last lines of the child's stderr. Today `process.getoutput` with `git log --oneline bogus` prints an empty line, drops git's stderr and exits 0 (Core/Process/Process.jet:119-122; probe work/p/g/gl.jet). `getoutput` has 0 callers in the repo and is deleted. Bash without `set -o pipefail` and Python `subprocess.run` without `check=True` both miss this. Proof: `jet test Compiler --profile cases --filter process/failed_stage_ioerror` and `git grep -n getoutput -- Core` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:23.939Z"
+          "at": "2026-11-15T05:46:08.383Z"
         },
         {
           "n": 18,
@@ -39970,7 +39970,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-15T05:46:01.049Z",
+      "updated": "2026-11-15T05:46:08.383Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -55597,39 +55597,39 @@
         },
         {
           "n": 2,
-          "text": "Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) as an implicit input to every function, under D-CONTEXT-EFFECT1=F: a read adds nothing to an effect row and needs no grant, a pure -[]> function may read context, and goldens on O0/O1/O2 through the one shared runtime prove it.",
+          "text": "Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) as an implicit input to every function, under D-CONTEXT-EFFECT1=F: a read adds nothing to an effect row and needs no grant, a pure -[]> function may read context, and goldens on O0/O1/O2 through the one shared runtime prove it. Proof: `jet test Compiler --profile golden --filter context/read_fields` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T02:21:35.830Z"
+          "at": "2026-11-15T05:46:09.314Z"
         },
         {
           "n": 3,
-          "text": "#ContextKey typed keys: packages declare keys, #Context(name: v) sets them for a region, context.get(name) reads them, and spawned tasks inherit the task-owned context; goldens and UI snapshots.",
+          "text": "#ContextKey typed keys: packages declare keys, #Context(name: v) sets them for a region, context.get(name) reads them, and spawned tasks inherit the task-owned context; goldens and UI snapshots. Proof: `jet test Compiler --profile golden --filter context/typed_keys` on O0, O1 and O2 and `jet test Compiler --profile ui --filter context/typed_keys`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-29T13:59:13.496Z"
+          "at": "2026-11-15T05:46:10.356Z"
         },
         {
           "n": 4,
-          "text": "D-CONTEXT1=A scratch blocks: `#Context(allocator: context.scratch) { … }` (or any mem.Arena) sends every allocation in the block, including in libraries, to the task's scratch arena (one contiguous reservation per task, pages committed on touch). Block exit rewinds to the entry mark, and nested blocks are nested marks. `&arena.reset()` inside the block is E0204. A value that leaves the block (a store into older data, return, a task hand-off or an escaping closure) first moves into the destination's own allocator, found by the one subtract-and-compare address test, and an older container grows from its owner's allocator. No reset call and no mark are user-visible, and dropping a scratch value frees nothing. Goldens on O0, O1 and O2 through the one shared runtime, plus UI snapshots for E0204.",
+          "text": "D-CONTEXT1=A scratch blocks: `#Context(allocator: context.scratch) { … }` (or any mem.Arena) sends every allocation in the block, including in libraries, to the task's scratch arena (one contiguous reservation per task, pages committed on touch). Block exit rewinds to the entry mark, and nested blocks are nested marks. `&arena.reset()` inside the block is E0204. A value that leaves the block (a store into older data, return, a task hand-off or an escaping closure) first moves into the destination's own allocator, found by the one subtract-and-compare address test, and an older container grows from its owner's allocator. No reset call and no mark are user-visible, and dropping a scratch value frees nothing. Goldens on O0, O1 and O2 through the one shared runtime, plus UI snapshots for E0204. Proof: `jet test Compiler --profile golden --filter context/scratch_block` on O0, O1 and O2 and `jet test Compiler --profile ui --filter E0204`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T02:21:32.200Z"
+          "at": "2026-11-15T05:46:11.305Z"
         },
         {
           "n": 6,
-          "text": "`context.trace` reads an owned list of SourceLocation records (D-JAI-SITE1), innermost first, from the same frame source as panic and fault reports, and prints the same text on every supported target; golden on o0, o1 and o2. (From #6377, Blow talk 10:23-11:56; D-JAI-CONTEXT1=A names `.trace` without a contract; probe t08_context_trace.jet gets E0107 today.)",
+          "text": "`context.trace` reads an owned list of SourceLocation records (D-JAI-SITE1), innermost first, from the same frame source as panic and fault reports, and prints the same text on every supported target; golden on o0, o1 and o2. Proof: `jet test Compiler --profile golden --filter context/trace` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T21:07:04.196Z"
+          "at": "2026-11-15T05:46:12.256Z"
         },
         {
           "n": 8,
@@ -55642,12 +55642,12 @@
         },
         {
           "n": 9,
-          "text": "The escape cost the D-CONTEXT1 claim rests on is measured: a paired two-program perf cell (scratch block against plain allocation) for a frame-style workload (and a second program that uses scratch differently) shows the address test costs nothing measurable outside scratch blocks and that scratch beats the plain form inside them, recorded in the canonical manifest (AGENTS.md, Performance gate).",
+          "text": "The escape cost the D-CONTEXT1 claim rests on is measured: a paired two-program perf cell (scratch block against plain allocation) for a frame-style workload (and a second program that uses scratch differently) shows the address test costs nothing measurable outside scratch blocks and that scratch beats the plain form inside them, recorded in the canonical manifest (AGENTS.md, Performance gate). Proof: `node Tools/gauntlet/harness/run.mjs --entry context-scratch` and its manifest row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T02:21:35.688Z"
+          "at": "2026-11-15T05:46:13.279Z"
         },
         {
           "n": 10,
@@ -55678,21 +55678,21 @@
         },
         {
           "n": 13,
-          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The ratified option F is built with its authority and generated-registry cutover in one change. Context leaves EffectRoots, the named grant exemption, the package budget insertion and the deny path, and every -[Context]> row, deny entry, snapshot, example and spec line is migrated. #Memo keys its cache on its arguments plus the context fields the function can reach (the whole context where sema cannot bound the reach), and a C callback that reads context without installing one gets a registered diagnostic with a UI snapshot. A composed landing proof shows the app examples for inferred, written-row, spawn, #Context block, #Memo and comptime reads give identical results at O0/O1/O2.",
+          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The ratified option F is built with its authority and generated-registry cutover in one change. Context leaves EffectRoots, the named grant exemption, the package budget insertion and the deny path, and every -[Context]> row, deny entry, snapshot, example and spec line is migrated. #Memo keys its cache on its arguments plus the context fields the function can reach (the whole context where sema cannot bound the reach), and a C callback that reads context without installing one gets a registered diagnostic with a UI snapshot. A composed landing proof shows the app examples for inferred, written-row, spawn, #Context block, #Memo and comptime reads give identical results at O0/O1/O2. Proof: `jet test Compiler --profile golden --filter context/effect_f_landing` on O0, O1 and O2 and `jet test Compiler --profile ui --filter context/callback_without_context`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T02:21:36.703Z"
+          "at": "2026-11-15T05:46:14.700Z"
         },
         {
           "n": 14,
-          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The older prose saying compile-time code may use only Mem is reconciled with D-JAI-CONTEXT1 PREP's later build-root context permission. The spec states one rule, and a case pins it.",
+          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The older prose saying compile-time code may use only Mem is reconciled with D-JAI-CONTEXT1 PREP's later build-root context permission. The spec states one rule, and a case pins it. Proof: `jet test Compiler --profile cases --filter context/comptime_rule`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T22:08:00.042Z"
+          "at": "2026-11-15T05:46:15.995Z"
         },
         {
           "n": 16,
@@ -55705,30 +55705,30 @@
         },
         {
           "n": 17,
-          "text": "Module values under F: a module value whose initializer reaches a context read is refused with E0643, as today; its build-root value is never stored. The spec says so, and a UI snapshot shows the refusal.",
+          "text": "Module values under F: a module value whose initializer reaches a context read is refused with E0643, as today; its build-root value is never stored. The spec says so, and a UI snapshot shows the refusal. Proof: `jet test Compiler --profile ui --filter E0643`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T11:47:12.902Z"
+          "at": "2026-11-15T05:46:17.043Z"
         },
         {
           "n": 18,
-          "text": "#Memo under F: the memo key names an equality for every context field the body reaches, handles and function values included, and the spec states the fallback when a field has no equality. A bench row measures the whole-context fallback against the keyed form.",
+          "text": "#Memo under F: the memo key names an equality for every context field the body reaches, handles and function values included, and the spec states the fallback when a field has no equality. A bench row measures the whole-context fallback against the keyed form. Proof: `jet test Compiler --profile cases --filter context/memo_key` and the bench row in the canonical manifest.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T11:47:13.851Z"
+          "at": "2026-11-15T05:46:18.170Z"
         },
         {
           "n": 19,
-          "text": "Spec wording under F: the definition of pure (-[]>, a bare #FX) says pure code may read context, and names the input as the task's current context record, not a parameter.",
+          "text": "Spec wording under F: the definition of pure (-[]>, a bare #FX) says pure code may read context, and names the input as the task's current context record, not a parameter. Proof: `git grep -n \"may read context\" -- Docs/spec` names the pure definition.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T11:47:14.702Z"
+          "at": "2026-11-15T05:46:19.337Z"
         },
         {
           "n": 20,
@@ -55773,7 +55773,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-15T03:28:33.061Z",
+      "updated": "2026-11-15T05:46:19.337Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -56386,12 +56386,12 @@
         },
         {
           "n": 21,
-          "text": "A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, as an example with golden output; the platform layer follows the ratified D-RAYLIB-DRIVER-LOAD1 (speak the display and sound protocols directly, stay static). Today Compiler/JetRuntime/Source/RouteAGame.jet:1-8 opens no window and input is inert (window_should_close is true at :25), Core/Game/Raylib.jet:768-775 play_sound only checks the path, and the only present path is __fill_rect runs (Raylib.jet:819-821). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "text": "A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, as an example with golden output; the platform layer follows the ratified D-RAYLIB-DRIVER-LOAD1 (speak the display and sound protocols directly, stay static). Today Compiler/JetRuntime/Source/RouteAGame.jet:1-8 opens no window and input is inert (window_should_close is true at :25), Core/Game/Raylib.jet:768-775 play_sound only checks the path, and the only present path is __fill_rect runs (Raylib.jet:819-821). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea). Proof: `jet test Compiler --profile golden --filter game/doom_style_window` on the static Linux target with the headless recorder.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:23:19.838Z"
+          "at": "2026-11-15T05:46:20.569Z"
         },
         {
           "n": 22,
@@ -56435,7 +56435,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-15T03:32:43.756Z",
+      "updated": "2026-11-15T05:46:20.569Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -58812,30 +58812,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The --target web examples and UI cases pass on the Jet CLI: every tests/known-failing.tsv row owned by #5201 (82 on dev 6a06b917cb) passes and leaves the ledger.",
+          "text": "The --target web examples and UI cases pass on the Jet CLI: every tests/known-failing.tsv row owned by #5201 (82 on dev 6a06b917cb) passes and leaves the ledger. Proof: `jet test Compiler --profile ui --filter web` passes and `git grep -c \"#5201\" -- tests/known-failing.tsv` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:15:25.204Z"
+          "at": "2026-11-15T05:46:21.953Z"
         },
         {
           "n": 2,
-          "text": "The same script (bench w06, JSON summary) runs unchanged under `jet run` and in a page built with `jet build --target=web`, with byte-identical output (test).",
+          "text": "The same script (bench w06, JSON summary) runs unchanged under `jet run` and in a page built with `jet build --target=web`, with byte-identical output (test). Proof: `jet test Compiler --profile golden --filter web/w06_same_output`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:07:36.296Z"
+          "at": "2026-11-15T05:46:23.065Z"
         },
         {
           "n": 5,
-          "text": "Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web backend; no hand-written .js remains in Compiler/, and a guard refuses one (42 tracked .js files under Compiler/ on dev 6a06b917cb).",
+          "text": "Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web backend; no hand-written .js remains in Compiler/, and a guard refuses one (42 tracked .js files under Compiler/ on dev 6a06b917cb). Proof: `jet test tests/guards --filter no_handwritten_js` and `git ls-files \"Compiler/*.js\"` prints only generated output.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:15:27.248Z"
+          "at": "2026-11-15T05:46:24.387Z"
         },
         {
           "n": 6,
@@ -58848,12 +58848,12 @@
         },
         {
           "n": 7,
-          "text": "Tasks run on the web target with the same meaning as native (I9): the runtime runs on node worker_threads with a shared WebAssembly.Memory, passive data segments with a one-time init, wasm atomics in the runtime leaves, and futex waits via Atomics.wait (off the browser main thread); the web task rows pass and leave the known-failing ledger.",
+          "text": "Tasks run on the web target with the same meaning as native (I9): the runtime runs on node worker_threads with a shared WebAssembly.Memory, passive data segments with a one-time init, wasm atomics in the runtime leaves, and futex waits via Atomics.wait (off the browser main thread); the web task rows pass and leave the known-failing ledger. Proof: `jet test Compiler --profile golden --filter web/tasks` on O0, O1 and O2 and the web tier, with no web task row left in tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T02:58:38.551Z"
+          "at": "2026-11-15T05:46:25.493Z"
         },
         {
           "n": 18,
@@ -58935,7 +58935,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-15T02:55:42.211Z",
+      "updated": "2026-11-15T05:46:25.493Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G9"
@@ -62418,21 +62418,21 @@
         },
         {
           "n": 2,
-          "text": "Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden).",
+          "text": "Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden). Proof: `jet test Compiler --profile core --filter data/frame_ops` against the Polars golden.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:04:17.509Z"
+          "at": "2026-11-15T05:46:26.515Z"
         },
         {
           "n": 3,
-          "text": "Frame operations run through the shared compute operations; no second kernel path.",
+          "text": "Frame operations run through the shared compute operations; no second kernel path. Proof: `git grep -n -E \"fn (filter|group|join)\" -- Core/Data/Frame` shows every operation calling the shared compute module.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:04:17.509Z"
+          "at": "2026-11-15T05:46:27.546Z"
         },
         {
           "n": 4,
@@ -62516,7 +62516,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:17.509Z",
-      "updated": "2026-11-15T03:41:01.551Z",
+      "updated": "2026-11-15T05:46:27.546Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -218274,6 +218274,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T05:46:27.546Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#3: proof; was: Frame operations run through the shared compute operations; no second kernel path."
+    },
+    {
+      "at": "2026-11-15T05:46:26.516Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0kdgbf8",
+      "note": "#2: proof; was: Reading a CSV into a frame and running filter, group-by with a sum, join, sort and select by column name works and matches Polars on the same file (golden)."
+    },
+    {
+      "at": "2026-11-15T05:46:25.493Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#7: proof; was: Tasks run on the web target with the same meaning as native (I9): the runtime runs on node worker_threads with a shared WebAssembly.Memory, passive data segments with a one-time init, wasm atomics in "
+    },
+    {
+      "at": "2026-11-15T05:46:24.387Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#5: proof; was: Owner 2026-10-30: browser JavaScript is allowed only as generated output. The web runtime (Compiler/Prelude/Web/**/*.js) and JetCanvas browser assets are written in Jet and generated by Jet's web back"
+    },
+    {
+      "at": "2026-11-15T05:46:23.065Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#2: proof; was: The same script (bench w06, JSON summary) runs unchanged under `jet run` and in a page built with `jet build --target=web`, with byte-identical output (test)."
+    },
+    {
+      "at": "2026-11-15T05:46:21.953Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#1: proof; was: The --target web examples and UI cases pass on the Jet CLI: every tests/known-failing.tsv row owned by #5201 (82 on dev 6a06b917cb) passes and leaves the ledger."
+    },
+    {
+      "at": "2026-11-15T05:46:20.569Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0776o2m",
+      "note": "#21: proof; was: A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, a"
+    },
+    {
+      "at": "2026-11-15T05:46:19.337Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#19: proof; was: Spec wording under F: the definition of pure (-[]>, a bare #FX) says pure code may read context, and names the input as the task's current context record, not a parameter."
+    },
+    {
+      "at": "2026-11-15T05:46:18.170Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#18: proof; was: #Memo under F: the memo key names an equality for every context field the body reaches, handles and function values included, and the spec states the fallback when a field has no equality. A bench row"
+    },
+    {
+      "at": "2026-11-15T05:46:17.043Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#17: proof; was: Module values under F: a module value whose initializer reaches a context read is refused with E0643, as today; its build-root value is never stored. The spec says so, and a UI snapshot shows the refu"
+    },
+    {
+      "at": "2026-11-15T05:46:15.995Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#14: proof; was: From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The older prose saying compile-time code may use only Mem is reconciled with D-JAI-CONTEXT1 PREP's later build-root context"
+    },
+    {
+      "at": "2026-11-15T05:46:14.700Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#13: proof; was: From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The ratified option F is built with its authority and generated-registry cutover in one change. Context leaves EffectRoots,"
+    },
+    {
+      "at": "2026-11-15T05:46:13.279Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#9: proof; was: The escape cost the D-CONTEXT1 claim rests on is measured: a paired two-program perf cell (scratch block against plain allocation) for a frame-style workload (and a second program that uses scratch di"
+    },
+    {
+      "at": "2026-11-15T05:46:12.256Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#6: strip debris; proof; was: `context.trace` reads an owned list of SourceLocation records (D-JAI-SITE1), innermost first, from the same frame source as panic and fault reports, and prints the same text on every supported target;"
+    },
+    {
+      "at": "2026-11-15T05:46:11.306Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#4: proof; was: D-CONTEXT1=A scratch blocks: `#Context(allocator: context.scratch) { … }` (or any mem.Arena) sends every allocation in the block, including in libraries, to the task's scratch arena (one contiguous re"
+    },
+    {
+      "at": "2026-11-15T05:46:10.357Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#3: proof; was: #ContextKey typed keys: packages declare keys, #Context(name: v) sets them for a region, context.get(name) reads them, and spawned tasks inherit the task-owned context; goldens and UI snapshots."
+    },
+    {
+      "at": "2026-11-15T05:46:09.314Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#2: proof; was: Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) as an implicit input to every function, under D-CONTEXT-EFFECT1=F: a read adds noth"
+    },
+    {
+      "at": "2026-11-15T05:46:08.383Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#17: strip debris; proof; was: A child that exits non-zero, or any failed stage of a pipeline, fails the call with an IOError that carries the exit code and the last lines of the child's stderr. Today `process.getoutput` with `git "
+    },
+    {
+      "at": "2026-11-15T05:46:07.491Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#16: strip debris; proof; was: w07 (spawn) and the pipeline `git log --oneline | grep fix | wc -l` run as native process pipelines with no `sh -c`; a file name with spaces and `; rm -rf x` stays one argv element (test), which the B"
+    },
+    {
+      "at": "2026-11-15T05:46:06.610Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#13: proof; was: Isolation mappings: isolate() can map the caller's uid and gid 1:1 as well as to 0, and bind-mount SRC onto DST before exec. chain.sh inroot (the canonical build root the compiler embeds) replaces uns"
+    },
+    {
+      "at": "2026-11-15T05:46:05.714Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#12: proof; was: I/O priority and cgroup placement: a ProcessSpec can set the child's I/O priority class (idle included) and place the child in its own cgroup v2 scope with memory.high, memory.max, memory.swap.max and"
+    },
+    {
+      "at": "2026-11-15T05:46:04.824Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#11: proof; was: Per-child usage: a ProcessReceipt reports that one child's peak RSS and its user and system CPU time (wait4 rusage), on every tier. sys.usage(.Children) is a running maximum over all waited children, "
+    },
+    {
+      "at": "2026-11-15T05:46:03.941Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#10: proof; was: CPU affinity: a ProcessSpec can pin the child to a CPU set, applied before exec, on every tier. The taskset -c calls in the chain stages, build-slot, publish-base and Land.jet run_heavy use it instead"
+    },
+    {
+      "at": "2026-11-15T05:46:03.047Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#9: proof; was: Isolation: Core can run a child in new Linux namespaces (user, mount, net) and exec in place, on every tier, refusing clearly on hosts without them. Compiler/JetTestKit's no-nix.sh and KIT_NETNS_RAISE"
+    },
+    {
+      "at": "2026-11-15T05:46:02.160Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0ufrhm0",
+      "note": "#5: proof; was: The 41 tests/cases rows REFUSED for kit pty, pty-send, pty-resize and pty-close (Tools/testkit/Steps.jet:564-570 refuses them outright) run against the ratified ProcessSpec.terminal session and none i"
+    },
     {
       "at": "2026-11-15T05:46:01.049Z",
       "by": "TowerKeeper-1",
