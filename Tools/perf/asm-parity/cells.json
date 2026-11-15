@@ -32,6 +32,18 @@
     "expect": "sum 333333233333340\n"
   },
   {
+    "name": "memcopy",
+    "what": "the memory kernel's byte copy and move (mem.copy<U8>), 1 byte to 16 KiB, overlapping either way",
+    "gauntlet": [],
+    "jet": "memcopy",
+    "args": ["2000"],
+    "expect": "sum 1823603788\n",
+    "kernel": {
+      "jet": { "routines": ["jet_rt_mem_move"], "source": "run.jet", "use": "mem.copy<U8>(" },
+      "ref": { "routines": ["dispatch", "move_avx2", "move_sse2"], "source": "ref.S", "use": "call [rsp]", "data": 8 }
+    }
+  },
+  {
     "name": "sieve",
     "what": "the gauntlet numerics.int-kernel cell",
     "gauntlet": ["numerics.int-kernel"],

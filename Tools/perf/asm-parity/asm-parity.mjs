@@ -56,6 +56,13 @@
 // (#6414): the cards' interim bounds, not the final target. They are reported
 // per row; `--gate` also exits 1 when one fails.
 //
+// A memory kernel cell (one with `kernel`, see `code` below) measures one
+// kernel primitive, and its release row must also reach the final bound:
+// cycles <= 1.00x and code bytes <= 1.00x, where code bytes are the
+// primitive's own code, not the file's. Its release build splits its debug
+// info out (`--debug-info=split`, the same image bytes) for the symbols and
+// the line table.
+//
 // Writes DIR/results.json and DIR/table.tsv (default DIR: .asm-parity under
 // the current directory) and prints the table.
 //
@@ -91,6 +98,8 @@ import { assemble } from './ref-build.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SIZE_GATE = 2.0;
 const CYCLES_GATE = 1.10;
+// A memory kernel cell's release bound, in cycles and in code bytes.
+const KERNEL_GATE = 1.00;
 // A median of fewer runs lets one quiet stretch of the machine decide a row.
 const MIN_RUNS = 21;
 
@@ -139,9 +148,55 @@ function buildJet(jet, cell, mode, dir, label = 'jet') {
   const src = join(dir, label === 'jet' ? `src-${mode}` : `src-${label}-${mode}`);
   rmSync(src, { recursive: true, force: true });
   cpSync(resolve(HERE, cell.jet), src, { recursive: true, filter: (p) => !p.includes('/.jet') });
-  const args = mode === 'release' ? ['build', '--release', '.'] : ['build', '.'];
+  const args = mode === 'release' ? ['build', '--release', ...(cell.kernel ? ['--debug-info=split'] : []), '.'] : ['build', '.'];
   must(jet, args, { cwd: src });
   return join(src, '.jet', 'build', 'run');
+}
+
+// A memory kernel cell's code bytes (its README states the method): the
+// sizes `nm -S` gives the primitive's routines (`routines`: its functions,
+// its dispatch, any data object it alone owns), plus every byte the line
+// table gives a source line of the cell's own source (`source`) whose text
+// holds `use` (each call site, however many copies of it the compiler
+// emitted), plus `data`, bytes the primitive keeps where no symbol names
+// them (the reference's routine slot on its stack). The Jet side reads its
+// split debug file, the reference side ref.S assembled again with `as -g`;
+// both the same way.
+function code(side, object, root) {
+  const symbols = new Map();
+  for (const line of must('nm', ['-S', object]).stdout.toString().split('\n')) {
+    const f = line.trim().split(/\s+/);
+    if (f.length === 4) symbols.set(f[3], parseInt(f[1], 16));
+  }
+  let bytes = side.data ?? 0;
+  for (const name of side.routines) {
+    if (!symbols.has(name)) throw new Error(`${object} has no symbol ${name}`);
+    bytes += symbols.get(name);
+  }
+  const text = readFileSync(join(root, side.source), 'latin1').split('\n');
+  const uses = new Set(text.flatMap((t, i) => (t.includes(side.use) ? [i + 1] : [])));
+  if (uses.size === 0) throw new Error(`${side.source} has no line with ${side.use}`);
+  // decodedline rows: file, line (or `-` at a sequence's end), address. A
+  // row's bytes run to the next row of its sequence.
+  let open = null, sites = 0;
+  for (const line of must('objdump', ['--dwarf=decodedline', object]).stdout.toString().split('\n')) {
+    const m = /^(\S+)\s+(\d+|-)\s+(0x[0-9a-f]+|0)(\s|$)/.exec(line);
+    if (!m) continue;
+    const at = Number(m[3]);
+    if (open) bytes += at - open;
+    open = m[2] !== '-' && m[1].split('/').pop() === side.source && uses.has(Number(m[2])) ? at : null;
+    if (open !== null) sites++;
+  }
+  if (sites === 0) throw new Error(`${object}'s line table has no row of ${side.source} at a ${side.use} line`);
+  return bytes;
+}
+
+// The kernel cell's code bytes: the reference's, and the Jet release
+// build's at `exe`.
+function kernelCode(cell, dir, exe) {
+  const object = join(dir, 'ref-lines.o');
+  must('as', ['-g', '-I', HERE, '-o', object, join(HERE, cell.name, 'ref.S')]);
+  return { ref: code(cell.kernel.ref, object, join(HERE, cell.name)), jet: code(cell.kernel.jet, `${exe}.debug`, resolve(HERE, cell.jet)) };
 }
 
 // One run: the input prepared, then each step (an argument list) in order;
@@ -417,6 +472,8 @@ for (const cell of cells) {
     server?.kill();
   }
   let ref = null;
+  const release = variants.find((v) => v.variant === 'jet-release');
+  const kernel = cell.kernel && release ? kernelCode(cell, dir, release.exe) : null;
   variants.forEach((v, k) => {
     const out = outs[k], speed = speeds[k];
     const same = out.status === 0 && out.stdout === expect;
@@ -429,15 +486,21 @@ for (const cell of cells) {
     row.cycles_x = speed.cycles / ref.cycles;
     row.instructions_x = speed.instructions / ref.instructions;
     row.size_gate = row.size_x <= SIZE_GATE ? 'ok' : 'over';
-    row.cycles_gate = row.cycles_x <= CYCLES_GATE ? 'ok' : 'over';
-    if (v.variant !== 'asm' && (row.size_gate !== 'ok' || row.cycles_gate !== 'ok')) gated++;
+    // A kernel cell's release row holds the final bound in cycles and in
+    // the primitive's code bytes.
+    const final = kernel && v === release;
+    row.cycles_gate = row.cycles_x <= (final ? KERNEL_GATE : CYCLES_GATE) ? 'ok' : 'over';
+    row.code_bytes = !kernel ? '-' : v.variant === 'asm' ? kernel.ref : final ? kernel.jet : '-';
+    row.code_x = final ? kernel.jet / kernel.ref : '-';
+    row.code_gate = final ? (row.code_x <= KERNEL_GATE ? 'ok' : 'over') : '-';
+    if (v.variant !== 'asm' && (row.size_gate !== 'ok' || row.cycles_gate !== 'ok' || row.code_gate === 'over')) gated++;
     rows.push(row);
   });
 }
-const cols = ['cell', 'variant', 'args', 'bytes', 'size_x', 'size_gate', 'cycles', 'instructions', 'cycles_x', 'instructions_x', 'cycles_gate', 'output'];
+const cols = ['cell', 'variant', 'args', 'bytes', 'size_x', 'size_gate', 'code_bytes', 'code_x', 'code_gate', 'cycles', 'instructions', 'cycles_x', 'instructions_x', 'cycles_gate', 'output'];
 const fmt = (r, c) => (typeof r[c] === 'number' && !Number.isInteger(r[c]) ? r[c].toFixed(2) : String(r[c]));
 const table = [cols.join('\t'), ...rows.map((r) => cols.map((c) => fmt(r, c)).join('\t'))].join('\n') + '\n';
-writeFileSync(join(o.out, 'results.json'), JSON.stringify({ runs: o.runs, interleaved: true, statistic: 'median', cpu: o.cpu, gates: { size: SIZE_GATE, cycles: CYCLES_GATE }, rows }, null, 2) + '\n');
+writeFileSync(join(o.out, 'results.json'), JSON.stringify({ runs: o.runs, interleaved: true, statistic: 'median', cpu: o.cpu, gates: { size: SIZE_GATE, cycles: CYCLES_GATE, kernel: KERNEL_GATE }, rows }, null, 2) + '\n');
 writeFileSync(join(o.out, 'table.tsv'), table);
 process.stdout.write(table);
 if (wrong) console.error(`${wrong} binaries printed the wrong output`);

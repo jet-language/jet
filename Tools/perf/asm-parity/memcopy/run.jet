@@ -1,0 +1,87 @@
+// The memory kernel's byte copy and move (mem.copy<U8>): 4096 operations
+// whose sizes run from 1 byte to 16 KiB, weighted to the small ones, each a
+// copy between two blocks and a move inside a third, where the two ranges
+// overlap in either direction. `n` passes over them; the sum is the last
+// byte each copy wrote plus the first byte each move wrote.
+use {
+    mem: core.mem
+}
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+// One copy (`size` bytes from `from` in the source block to `to` in the
+// target block) and one move (from `move_from` to `move_to` in the moved
+// block).
+Op: struct {
+    size: Int
+    from: Int
+    to: Int
+    move_from: Int
+    move_to: Int
+}
+
+OPS: 4096
+// The largest size, and the room past it for the offsets. One page-aligned
+// block holds the source at 0, the target at TARGET_AT and the moved bytes
+// at MOVED_AT, so the reference lays its bytes out the same way: a copy's
+// two ends sit about half a page apart, never on one 4 KiB alias.
+LARGEST: 16384
+COPY_ROOM: 64
+MOVE_ROOM: 256
+TARGET_AT: 18432
+MOVED_AT: 36864
+
+// The next state of a 31-bit linear congruential generator.
+next: fn(state: Int) -> Int {
+    (state * 1103515245 + 12345).bit_and(2147483647)
+}
+
+// The operations: per operation one draw picks the size (its low three bits
+// a size class of up to 8, 16, 32, 64, 128, 512, 2048 or 16384 bytes) and a
+// second the four offsets.
+operations: fn() -> [Op] {
+    ops := [Op]{}
+    state := 12345
+    loop _ in 0..<OPS {
+        state = next(state)
+        class: state.bit_and(7)
+        bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
+        size: 1 + (state >> 3).bit_and((1 << bits) - 1)
+        state = next(state)
+        ops.push(Op{size, from: state.bit_and(63), to: (state >> 6).bit_and(63), move_from: (state >> 12).bit_and(255), move_to: (state >> 20).bit_and(255)})
+    }
+    ops
+}
+
+run: fn(args: Args) {
+    passes: if args.n > 0 -> args.n else -> 1
+    ops: operations()
+    total := 0
+    #Unsafe("the block holds the source, the target and the moved bytes, LARGEST bytes and their room each, every offset stays inside its room, and the block is freed once after the passes") {
+        block: mem.alloc_raw(MOVED_AT + LARGEST + MOVE_ROOM, 4096) ?? panic("no memory")
+        source: block.byte_offset(0)
+        target: block.byte_offset(TARGET_AT)
+        moved: block.byte_offset(MOVED_AT)
+        loop i in 0..<(LARGEST + COPY_ROOM) -> mem.volatile_write<U8>(source.byte_offset(i), U8{(i * 7 + 3).bit_and(255)})
+        mem.fill<U8>(target, U8{0}, LARGEST + COPY_ROOM)
+        loop i in 0..<(LARGEST + MOVE_ROOM) -> mem.volatile_write<U8>(moved.byte_offset(i), U8{i.bit_and(255)})
+        loop _ in 0..<passes {
+            loop op in ops {
+                // A use is the line of its call alone: the pointers are the
+                // work's, computed before it, as the reference computes them.
+                to: target.byte_offset(op.to)
+                from: source.byte_offset(op.from)
+                mem.copy<U8>(to, from, op.size)
+                move_to: moved.byte_offset(op.move_to)
+                move_from: moved.byte_offset(op.move_from)
+                mem.copy<U8>(move_to, move_from, op.size)
+                total += Int{target.byte_offset(op.to + op.size - 1).*} + Int{moved.byte_offset(op.move_to).*}
+            }
+        }
+        mem.free_raw(block)
+    }
+    print("sum {total}")
+}
