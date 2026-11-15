@@ -78,6 +78,8 @@ use {
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_func,
         comptime_walk_identifiers,
+        core_record_field_types,
+        core_record_literal_fields,
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
@@ -639,6 +641,11 @@ sema_derive_literal_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
             Val(Expr.Present{value: element, span: span, id: AST_NODE_GENERATED})
         }
         .Struct(type_name, fields) -> {
+            // A compiler-owned record no program literal can name (a field's
+            // DefaultInfo, a TypeId) stays the embedded value sema types.
+            if core_record_literal_fields(type_name) == None && core_record_field_types(type_name) != None {
+                return Val(Expr.ComptimeName{name: "", span: span, value: Val(value), id: AST_NODE_GENERATED})
+            }
             expanded := [ExprField]{}
             loop field in fields {
                 element: sema_derive_literal_expr(field.value, span) ?? return None

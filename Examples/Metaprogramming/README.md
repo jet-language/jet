@@ -76,6 +76,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.
+- [FieldFacts](Reflection/FieldFacts/) — A field's type, default and offset read the same at every rung: a marker body that adds a method to another type, a marker that adds a method to the type it marks, a comptime constant, ordinary code through `Rock.reflect()` and fn build each print one line per field of `Rock`.
 - [GeneratingMarker](Reflection/GeneratingMarker.jet) — A marker that writes code types its template `-[Meta.Generate]>`, the row of `Marker.expand`.
 - [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct without `#Layout` reports the bytes the compiler chose for it.
 - [MarkerSites](Reflection/MarkerSites.jet) — A marker's `expand` body runs at every site its `sites` names.

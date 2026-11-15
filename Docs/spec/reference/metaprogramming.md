@@ -346,7 +346,15 @@ Each struct field's `FieldInfo` carries its `type`, a TypeId (below), its
 `offset` in bytes (`None` where the layout is not computed) and its
 `default`: `None` for a field without a written default, else a
 `DefaultInfo` whose `source` is the `SourceSpan` of the default expression.
-Reading `default` never runs the expression. An enum case's `FieldInfo`
+Reading `default` never runs the expression. A template that splices a
+field's `default` (or any reflected record no program literal can name,
+such as a TypeId) into generated code splices the record itself, so the
+generated code matches it as it would in ordinary code. Every rung reads
+the same answers, as
+[`FieldFacts`](../../../Examples/Metaprogramming/Reflection/FieldFacts/run.jet)
+shows: a marker body, a marker that adds a method to the type it marks, a
+comptime constant, ordinary code through `Rock.reflect()` and fn build each
+print a field's type, default span and offset. An enum case's `FieldInfo`
 names its payload as a TypeId: `Unit` for none, the payload type for one,
 and the written record `{x: Float, y: Float}` for named fields. A template
 compares a field's type by its `name` (`field.type.name == "Float"`) or,
