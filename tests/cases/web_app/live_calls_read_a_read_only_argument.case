@@ -1,0 +1,17 @@
+# `app.live`, `app.subscribe`, `app.push` and `app.invalidate` take a source's
+# arguments as a call to it does: a read-only parameter passed through them
+# stays its caller's (no E0120, no `.copy()` to write). Same output on
+# o0/o1/o2.
+fixture: live_calls_read_a_read_only_argument.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_calls_read_a_read_only_argument.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

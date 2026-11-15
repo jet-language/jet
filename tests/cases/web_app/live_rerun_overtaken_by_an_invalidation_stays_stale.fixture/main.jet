@@ -35,7 +35,7 @@ read_tasks: fn() -> Tasks {
 task_count: fn(project: String) -[DB.Read]> Int CountError! {
     if project == "" -> return Err(CountError.NoProject)
     read: read_tasks()
-    if read.racing -> app.invalidate(task_count, project.copy())
+    if read.racing -> app.invalidate(task_count, project)
     read.count
 }
 

@@ -5,7 +5,8 @@
 // arguments as a call to it, and lowers the call to the module's `__live_*`
 // helper: each argument is evaluated once into a hidden local, the encoded
 // arguments name the binding, and the closure that re-runs the source owns
-// the locals.
+// the locals. A read-only parameter is copied into its local, or, where no
+// closure keeps it, read straight into the key.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -120,11 +121,24 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
     keys := [Expr]{}
     reads := [CallArg]{}
     takes := [NamedSpan]{}
+    // A read-only parameter passed as an argument stays its caller's: the
+    // closure that re-runs the source owns a copy of it, and a call that runs
+    // nothing later (`push`, `invalidate`) only reads it into the key.
+    keeps_run: member == "live" || member == "subscribe"
     loop index in 0..<supplied {
         argument: positional[index + 1]
+        encodes: sema_type_bound_satisfied(graph, source.params[index], "Encode", environment.module_identity) == (Val(true))
+        borrowed: sema_copy_site_borrowed_param(argument.expr, scopes) != None
+        given: argument.expr.copy() // copy: `positional` keeps its argument
+        param_ty: source.params[index].copy() // copy: the source signature keeps its parameter types
+        if borrowed && encodes && !keeps_run {
+            keys.push(sema_live_module_call(alias, "__live_arg", [Type]{param_ty}, [CallArg]{sema_live_arg(given, argument.span)}, argument.span))
+            next
+        }
         local_name: "__jet_live_{span.start}_{index}"
-        binding := ast_binding(local_name, argument.span, false, argument.expr.copy(), None) // copy: `positional` keeps its argument
-        binding.ty = Val(source.params[index].copy()) // copy: the source signature keeps its parameter types
+        init: if borrowed -> Expr.Copy{value: given, span: argument.span, id: AST_NODE_GENERATED} else -> given
+        binding := ast_binding(local_name, argument.span, false, init, None)
+        binding.ty = Val(param_ty)
         statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             sema_single_use_leave_scope(scopes, state, diagnostics)
             return sema_live_rejected()
@@ -133,7 +147,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
         read: Expr.Ident{name: local_name, span: argument.span, id: AST_NODE_GENERATED}
         // An argument with no encoding (a database scope, a handle) does not
         // tell bindings apart.
-        if sema_type_bound_satisfied(graph, source.params[index], "Encode", environment.module_identity) == (Val(true)) {
+        if encodes {
             keys.push(sema_live_module_call(alias, "__live_arg", [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
         } else {
             keys.push(sema_live_string("_", argument.span))
