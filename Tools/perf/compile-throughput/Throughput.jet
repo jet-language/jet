@@ -13,7 +13,9 @@
 //       [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR]
 //       [--out FILE] [--tool PATH]
 //   jet Tools/perf/compile-throughput/Throughput.jet --batch PREVIOUS
-//       --current CURRENT [--out FILE]
+//       --current CURRENT [--runs N] [--modes LIST] [--perf PATH]
+//       [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS]
+//       [--work DIR] [--out FILE]
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full
 //       [--programs LIST] [--arms default,single] [--samples N] [--warmups N]
 //       [--receipt FILE] [--baseline FILE] [--write-baseline FILE]
@@ -70,7 +72,7 @@
 // compiler JET against the jet SEED it was built with, each compiling the
 // same corpus in each mode, --runs rounds (default 3). A round compiles
 // with SEED then JET, the next with JET then SEED, so both see the same
-// machine; every compile runs under `perf stat -e instructions:u` (--perf,
+// machine; every compile runs under `perf stat -e instructions:u,cycles:u` (--perf,
 // default `perf` on PATH), in <work>/{seed,new}-<mode>.<n>. The gate judges
 // only what load cannot move much: per mode, CPU (user + system), user-mode
 // instructions, and each top-level phase's process CPU at or above 0.5 s in
@@ -87,33 +89,45 @@
 // does, its mode cell `seed:O0` or `new:O0` (the throughput ledger of every
 // train). Exit: 0 PASS, 1 FAIL, 3 INCONCLUSIVE, 64 usage.
 //
-// The --batch form is the batch build's speed gate: it compiles nothing,
-// and reads two batch builds of `jet build --profile dev Compiler`, the
-// previous batch's (directory PREVIOUS) and this one's (CURRENT), each
-// directory holding the build's trace (`trace.txt`, from --trace) and GNU
-// `time -v`'s report on it (`time.txt`). It judges CPU (user + system, as
-// time -v counts it), traced CPU, and the own-thread CPU (the span end's
-// `cpu_ns`) of each top-level phase of every process in the trace that has
-// at least 0.5 s in either build. Own-thread, not process CPU: one process
-// can run two compiles at once, and a phase's process CPU then counts the
-// other compile's threads; a parallel phase's worker CPU is judged in the
-// totals. Those phases are the build's own and each build step child's,
-// shown as `<process>/<phase>` (for example
-// `core-record: jet-bare/sema.finalize`). Traced CPU sums every process's
-// top-level phases' process CPU, so it counts the build step children,
-// which time -v leaves out (the batch builds' time -v reports only the
-// build process's own CPU). One build a side gives one ratio CURRENT /
-// PREVIOUS: FAIL over +10%, a phase only when it also rose by 0.5 s or more
-// (a smaller rise is within one build's noise); a phase only one build ran
-// is `new` or `gone` (work moved between processes, which the CPU totals
-// judge); else pass.
-// Wall, parallelism (traced CPU over wall) and peak memory are reported,
-// never judged. The table leaves out the phases under the floor. The
-// verdict line reads `batch speed gate: PASS` or `FAIL`; a missing or
-// unreadable file, or a build whose time.txt exit status is not 0, gives
-// INCONCLUSIVE. --out FILE appends a `batch` row for each quantity, floored
-// ones included (unix seconds, PREVIOUS, CURRENT, quantity, previous s,
-// current s, verdict). Exit: 0 PASS, 1 FAIL, 3 INCONCLUSIVE, 64 usage.
+// The --batch form is the batch build's speed gate. It reads two batch
+// builds of `jet build --profile dev Compiler`, the previous batch's
+// (directory PREVIOUS) and this one's (CURRENT). Each directory holds the
+// build's trace (`trace.txt`, from --trace), GNU `time -v`'s report on it
+// (`time.txt`), `perf stat -x , -e instructions:u`'s count of it
+// (`perf.txt`) and the compiler the batch built
+// (`tree/Compiler/JetCli/.jet/build/jet`). It judges only what load cannot
+// move much. First, the builds' user-mode instructions: one ratio CURRENT /
+// PREVIOUS that fails over +10%, since the two builds compile different trees
+// and a batch's own sources move the count. Second, an interleaved A/B of
+// the two built compilers. It runs --runs rounds (default 3), alternating
+// which compiler goes first. In each round both compile CURRENT's tree in
+// each --modes mode (default check) under
+// `perf stat -e instructions:u,cycles:u` (--perf), in
+// <work>/{previous,current}-<mode>.<n>; --cpus, --threads, --memory and
+// --timeout are as in the first form, and CompilerPackages.jet runs with the
+// current compiler. Per mode the A/B judges instructions, failing over +3%
+// (one input, so only the compiler moves them), and cycles under the
+// --against rules: the median and the spread of the per-round ratios, +10%,
+// at least 3 rounds. CPU (user + system, as time -v counts it), traced CPU,
+// and the own-thread CPU (the span end's `cpu_ns`) of each top-level phase of
+// every process with at least 0.5 s in either build are reported, never
+// judged; so are wall, parallelism (traced CPU over wall) and peak memory.
+// The phases are the build's own and each build step child's, shown as
+// `<process>/<phase>` (for example `core-record: jet-bare/sema.finalize`).
+// A phase counts its own thread, not its process: one process can run two
+// compiles at once, and a phase's process CPU then counts the other
+// compile's threads. Traced CPU sums every process's top-level phases'
+// process CPU, so it counts the build step children, which time -v leaves
+// out (the batch builds' time -v reports only the build process's own CPU).
+// A phase only one build ran is `new` or `gone`. The table leaves out the
+// phases under the floor. The verdict line reads `batch speed gate: PASS`,
+// `FAIL` or `INCONCLUSIVE`. A failed A/B compile is FAIL. A missing or
+// unreadable file, a build whose time.txt exit status is not 0, a missing
+// instructions count, or an A/B quantity the --against rules leave
+// unjudged gives INCONCLUSIVE. --out FILE appends a `batch` row for each
+// build quantity, floored ones included (unix seconds, PREVIOUS, CURRENT,
+// quantity, previous, current, verdict), and the A/B compiles' rows as the
+// first form writes them. Exit: 0 PASS, 1 FAIL, 3 INCONCLUSIVE, 64 usage.
 //
 // The second form is the gauntlet cell, axes.compile_throughput of
 // Tools/gauntlet/measurement-manifest.json. Its programs: `bench300k` and
@@ -239,9 +253,10 @@ Run: struct {
     rc: Int
     wall_ns: Int
     cpu_ns: Int
-    // User-mode instructions of the compile and its children; -1 when not
-    // counted.
+    // User-mode instructions and cycles of the compile and its children;
+    // -1 when not counted.
     instructions: Int
+    cycles: Int
     peak_bytes: Int
     lines: Int
     trace: Trace?
@@ -254,7 +269,7 @@ usage: fn(message: String) -> Never {
     term.eprint("usage: JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
     term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
     term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
-    term.eprint("       jet Tools/perf/compile-throughput/Throughput.jet --batch PREVIOUS --current CURRENT [--out FILE]")
+    term.eprint("       jet Tools/perf/compile-throughput/Throughput.jet --batch PREVIOUS --current CURRENT [--runs N] [--modes LIST] [--perf PATH] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE]")
     process.exit(64)
 }
 
@@ -290,6 +305,7 @@ parse_list: fn(text: String) -> [String] { text.split(",").map(fn(m) { m.trim() 
 parse_options: fn(args: [String]) -> Options {
     options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf", batch: "", current: ""}
     index := 0
+    modes_given := false
     loop index < args.len() {
         flag: args[index]
         if index + 1 >= args.len() -> usage("{flag} needs a value")
@@ -297,7 +313,10 @@ parse_options: fn(args: [String]) -> Options {
         index += 2
         if {
             flag == "--tree" -> options.tree = value
-            flag == "--modes" -> options.modes = parse_list(value)
+            flag == "--modes" -> {
+                options.modes = parse_list(value)
+                modes_given = true
+            }
             flag == "--cpus" -> options.cpus = parse_cpus(value)
             flag == "--threads" -> options.threads = Int.parse(value) ?? usage("--threads takes a count")
             flag == "--memory" -> options.memory = memory_bytes(value) ?? usage("--memory takes a size such as 16G")
@@ -329,6 +348,8 @@ parse_options: fn(args: [String]) -> Options {
     }
     if options.against != "" && (options.lane != "" || options.budget != "") -> usage("--against takes neither --lane nor --budget")
     if options.batch != "" && (options.current == "" || options.lane != "" || options.against != "" || options.budget != "") -> usage("--batch takes --current, and neither --lane, --against nor --budget")
+    // The batch A/B compiles the corpus at `check` unless told otherwise.
+    if options.batch != "" && !modes_given -> options.modes = [String]{"check"}
     if options.batch == "" && options.current != "" -> usage("--current goes with --batch")
     if options.lane == "" -> return options
     if options.lane != "quick" && options.lane != "full" -> usage("--lane is quick or full")
@@ -551,8 +572,8 @@ slot_dir: fn(options: Options, compiler: String, mode: String, repeat: Int) -> S
     files.join(options.work, "{compiler}-{mode}.{repeat}")
 }
 
-// One compile of the corpus by `jet`. In the speed gate (`compiler` set) it
-// runs under `perf stat`, which counts its user-mode instructions.
+// One compile of the corpus by `jet`. In a speed gate (`compiler` set) it
+// runs under `perf stat`, which counts its user-mode instructions and cycles.
 measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identity: String, compiler: String, mode: String, repeat: Int) -> Run {
     base: slot_dir(options, compiler, mode, repeat)
     files.remove_all(base) ?? ()
@@ -561,7 +582,7 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     cache: files.join(base, "cache")
     trace_file: files.join(base, "trace.jsonl")
     counts_file: files.join(base, "perf.csv")
-    failed := Run{mode, repeat, compiler, rc: 1, wall_ns: 0, cpu_ns: 0, instructions: -1, peak_bytes: 0, lines, trace: None, note: "", budget: ""}
+    failed := Run{mode, repeat, compiler, rc: 1, wall_ns: 0, cpu_ns: 0, instructions: -1, cycles: -1, peak_bytes: 0, lines, trace: None, note: "", budget: ""}
     loop dir in ([String]{project, store, cache}) {
         files.create_dir_all(dir) ?? {
             failed.note = "cannot create {dir}: {err}"
@@ -572,7 +593,7 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
         failed.note = problem
         return failed
     }
-    argv := if compiler == "" -> [String]{jet} else -> [String]{options.perf, "stat", "-x", ",", "-e", "instructions:u", "-o", counts_file, "--", jet}
+    argv := if compiler == "" -> [String]{jet} else -> [String]{options.perf, "stat", "-x", ",", "-e", "instructions:u,cycles:u", "-o", counts_file, "--", jet}
     argv.extend(mode_args(mode, options.threads))
     spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
     if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
@@ -594,18 +615,19 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     note := ""
     if rc != 0 -> note = receipt.errors.trim().partition("\n").head
     if trace == None -> note = "{note} (no trace)".trim()
-    instructions: if compiler == "" -> -1 else -> perf_instructions(files.read(counts_file) ?? "")
-    run := Run{mode, repeat, compiler, rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), instructions, peak_bytes: receipt.peak_memory_bytes ?? 0, lines, trace, note, budget: ""}
+    counts: if compiler == "" -> "" else -> files.read(counts_file) ?? ""
+    run := Run{mode, repeat, compiler, rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), instructions: perf_count(counts, "instructions"), cycles: perf_count(counts, "cycles"), peak_bytes: receipt.peak_memory_bytes ?? 0, lines, trace, note, budget: ""}
     if options.budget != "" && run.trace == .Val(measured) -> run.budget = check_budget(options, base, lines, wall - traced_ns(measured))
     run
 }
 
-// The instructions:u count of `perf stat -x ,` output (`count,unit,event,…`
-// rows); -1 when it has none, as for `<not counted>`.
-perf_instructions: fn(text: String) -> Int {
+// An event's count in `perf stat -x ,` output (`count,unit,event,…` rows),
+// the event named without its `:u` modifier; -1 when it has none, as for
+// `<not counted>`.
+perf_count: fn(text: String, event: String) -> Int {
     loop line in text.split("\n") {
         fields: line.split(",").to_list()
-        if fields.len() > 2 && fields[2].starts_with("instructions") -> return Int.parse(fields[0].trim()) ?? -1
+        if fields.len() > 2 && fields[2].starts_with(event) -> return Int.parse(fields[0].trim()) ?? -1
     }
     -1
 }
@@ -797,10 +819,10 @@ middle_int: fn(values: [Int]) -> Int {
 // The verdict on one quantity over the rounds. A count that was not taken,
 // fewer than GATE_MIN_ROUNDS rounds, or ratios spread wider than GATE_SPREAD
 // is INCONCLUSIVE, so noise never passes: one binary spreads 10% on a phase
-// from run to run, so one round's ratio is noise. Every round over
-// GATE_LIMIT fails whatever the spread. Work the seed never did (0 in every
-// seed round) at or above the floor in every new round fails.
-gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> GateRow {
+// from run to run, so one round's ratio is noise. Every round over `limit`
+// fails whatever the spread. Work the seed never did (0 in every seed round)
+// at or above the floor in every new round fails.
+gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int, limit: Float) -> GateRow {
     row := GateRow{mode: mode.copy(), metric: metric.copy(), seed: middle_int(rounds.map(fn(r) { r.seed })), new: middle_int(rounds.map(fn(r) { r.new })), ratio: 0.0, spread: 0.0, status: "pass"}
     if rounds.len() == 0 || rounds.any(fn(r) { r.seed < 0 || r.new < 0 }) {
         row.status = "INCONCLUSIVE (not measured)"
@@ -823,9 +845,9 @@ gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> Gate
     row.ratio = ratios[(ratios.len() - 1) /% 2]
     row.spread = ratios[ratios.len() - 1] - ratios[0]
     if {
-        ratios[0] > GATE_LIMIT -> row.status = "FAIL (every round)"
+        ratios[0] > limit -> row.status = "FAIL (every round)"
         row.spread > GATE_SPREAD -> row.status = "INCONCLUSIVE (spread)"
-        row.ratio > GATE_LIMIT -> row.status = "FAIL"
+        row.ratio > limit -> row.status = "FAIL"
         else -> {}
     }
     row
@@ -837,14 +859,37 @@ phase_cpu: fn(run: Run, kind: String) -> Int {
     (trace.phases.find(fn(p) { p.kind == kind }) ?? return 0).cpu_ns
 }
 
-// The phase kinds of `runs`' traces not yet in `kinds`, in order.
-add_kinds: fn(kinds: &[String], runs: [Run]) {
-    loop run in runs {
-        trace: run.trace ?? next
-        loop phase in trace.phases {
-            if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
+// The phase kinds of `run`'s trace not yet in `kinds`, in order.
+add_kinds: fn(kinds: &[String], run: Run) {
+    trace: run.trace ?? return
+    loop phase in trace.phases {
+        if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
+    }
+}
+
+// One round of a mode: the indices in the runs of the baseline compiler's
+// compile (`seed` in the train gate, `previous` in the batch A/B) and the
+// candidate's.
+RoundPair: struct { base: Int, candidate: Int }
+
+// Whether `run` is a compile of `mode` by the compiler labelled `label` that
+// succeeded with a trace.
+round_run: fn(run: Run, mode: String, label: String) -> Bool { run.mode == mode && run.compiler == label && run.rc == 0 && run.trace != None }
+
+// The rounds of `mode` whose two compiles, by the compilers labelled `base`
+// and `candidate`, both succeeded with a trace.
+round_pairs: fn(runs: [Run], mode: String, base: String, candidate: String) -> [RoundPair] {
+    pairs := [RoundPair]{}
+    loop at in 0..<runs.len() {
+        if !round_run(runs[at], mode, base) -> next
+        loop other in 0..<runs.len() {
+            if runs[other].repeat == runs[at].repeat && round_run(runs[other], mode, candidate) {
+                pairs.push(RoundPair{base: at, candidate: other})
+                break
+            }
         }
     }
+    pairs
 }
 
 // Per mode, over the rounds whose two compiles both succeeded with a trace:
@@ -852,32 +897,40 @@ add_kinds: fn(kinds: &[String], runs: [Run]) {
 gate_rows: fn(runs: [Run], modes: [String]) -> [GateRow] {
     rows := [GateRow]{}
     loop mode in modes {
-        seeds := [Run]{}
-        news := [Run]{}
-        loop run in runs {
-            if run.mode != mode || run.compiler != "seed" || run.rc != 0 || run.trace == None -> next
-            wanted: mode.copy()
-            repeat: run.repeat
-            other: runs.find(fn(r) { r.mode == wanted && r.compiler == "new" && r.repeat == repeat && r.rc == 0 && r.trace != None }) ?? next
-            seeds.push(run.copy())
-            news.push(other.copy())
-        }
+        pairs: round_pairs(runs, mode, "seed", "new")
         cpu := [Paired]{}
         instructions := [Paired]{}
-        loop at in 0..<seeds.len() {
-            cpu.push(Paired{seed: seeds[at].cpu_ns, new: news[at].cpu_ns})
-            instructions.push(Paired{seed: seeds[at].instructions, new: news[at].instructions})
+        loop pair in pairs {
+            cpu.push(Paired{seed: runs[pair.base].cpu_ns, new: runs[pair.candidate].cpu_ns})
+            instructions.push(Paired{seed: runs[pair.base].instructions, new: runs[pair.candidate].instructions})
         }
-        rows.push(gate_row(mode, "cpu", cpu, 0))
-        rows.push(gate_row(mode, "instructions", instructions, 0))
+        rows.push(gate_row(mode, "cpu", cpu, 0, GATE_LIMIT))
+        rows.push(gate_row(mode, "instructions", instructions, 0, GATE_LIMIT))
         kinds := [String]{}
-        add_kinds(kinds, seeds)
-        add_kinds(kinds, news)
+        loop pair in pairs -> add_kinds(kinds, runs[pair.base])
+        loop pair in pairs -> add_kinds(kinds, runs[pair.candidate])
         loop kind in kinds {
             phase := [Paired]{}
-            loop at in 0..<seeds.len() -> phase.push(Paired{seed: phase_cpu(seeds[at], kind), new: phase_cpu(news[at], kind)})
-            rows.push(gate_row(mode, "phase {kind}", phase, GATE_PHASE_FLOOR_NS))
+            loop pair in pairs -> phase.push(Paired{seed: phase_cpu(runs[pair.base], kind), new: phase_cpu(runs[pair.candidate], kind)})
+            rows.push(gate_row(mode, "phase {kind}", phase, GATE_PHASE_FLOOR_NS, GATE_LIMIT))
         }
+    }
+    rows
+}
+
+// The batch A/B per mode, over the rounds whose two compiles both succeeded
+// with a trace: instructions, failing over AB_INSTRUCTIONS_LIMIT, then cycles.
+ab_rows: fn(runs: [Run], modes: [String]) -> [GateRow] {
+    rows := [GateRow]{}
+    loop mode in modes {
+        instructions := [Paired]{}
+        cycles := [Paired]{}
+        loop pair in round_pairs(runs, mode, "previous", "current") {
+            instructions.push(Paired{seed: runs[pair.base].instructions, new: runs[pair.candidate].instructions})
+            cycles.push(Paired{seed: runs[pair.base].cycles, new: runs[pair.candidate].cycles})
+        }
+        rows.push(gate_row(mode, "instructions", instructions, 0, AB_INSTRUCTIONS_LIMIT))
+        rows.push(gate_row(mode, "cycles", cycles, 0, GATE_LIMIT))
     }
     rows
 }
@@ -892,10 +945,10 @@ gate_verdict: fn(rows: [GateRow], runs: [Run]) -> String {
 
 GATE_HEADER: [String]{"mode", "quantity", "seed", "new", "change", "spread", "verdict"}
 
-// A row of the gate table: seconds (instructions as counts), the median
-// change in percent and the spread in points.
+// A row of the gate table: seconds (instructions and cycles as counts), the
+// median change in percent and the spread in points.
 gate_cells: fn(row: GateRow) -> [String] {
-    shown: if row.metric == "instructions" -> [String]{"{row.seed}", "{row.new}"} else -> [String]{seconds(row.seed), seconds(row.new)}
+    shown: if row.metric == "instructions" || row.metric == "cycles" -> [String]{"{row.seed}", "{row.new}"} else -> [String]{seconds(row.seed), seconds(row.new)}
     taken: row.ratio > 0.0
     change: if taken -> "{(row.ratio - 1.0) * 100.0:Fixed(1)}%" else -> "-"
     spread: if taken -> "{row.spread * 100.0:Fixed(1)}" else -> "-"
@@ -959,10 +1012,17 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
 
 // ---- The batch speed gate (--batch) ----
 
+// The batch A/B's compilers: the jet each batch built, under its directory.
+BATCH_JET: "tree/Compiler/JetCli/.jet/build/jet"
+// The A/B compiles one input with both compilers, so only the compiler moves
+// their instructions: a smaller rise than GATE_LIMIT fails.
+AB_INSTRUCTIONS_LIMIT: 1.03
+
 // One batch build as its directory records it: CPU (user + system), wall,
-// peak memory and exit status from time.txt, and every process's top-level
-// phases from trace.txt.
-BatchBuild: struct { cpu_ns: Int, wall_ns: Int, peak_bytes: Int, status: Int, phases: [Phase] }
+// peak memory and exit status from time.txt, user-mode instructions from
+// perf.txt (-1 when not counted), and every process's top-level phases from
+// trace.txt.
+BatchBuild: struct { cpu_ns: Int, wall_ns: Int, peak_bytes: Int, status: Int, instructions: Int, phases: [Phase] }
 
 // The value of a `time -v` report line `KEY: VALUE`; None when it has none.
 time_value: fn(report: String, key: String) -> String? {
@@ -1034,19 +1094,20 @@ build_phases: fn(text: String) -> [Phase] {
     phases
 }
 
-// A batch build from its time.txt and trace.txt text; None when the report
-// lacks the CPU, wall or exit status line.
-batch_build: fn(report: String, trace: String) -> BatchBuild? {
+// A batch build from its time.txt, trace.txt and perf.txt text; None when
+// the report lacks the CPU, wall or exit status line.
+batch_build: fn(report: String, trace: String, counts: String) -> BatchBuild? {
     user: clock_ns(time_value(report, "User time (seconds)") ?? return None) ?? return None
     system: clock_ns(time_value(report, "System time (seconds)") ?? return None) ?? return None
     wall: clock_ns(time_value(report, "Elapsed (wall clock) time (h:mm:ss or m:ss)") ?? return None) ?? return None
     status: Int.parse(time_value(report, "Exit status") ?? return None) ?? return None
     peak_kb: Int.parse(time_value(report, "Maximum resident set size (kbytes)") ?? "0") ?? 0
-    Val(BatchBuild{cpu_ns: user + system, wall_ns: wall, peak_bytes: peak_kb * 1024, status, phases: build_phases(trace)})
+    Val(BatchBuild{cpu_ns: user + system, wall_ns: wall, peak_bytes: peak_kb * 1024, status, instructions: perf_count(counts, "instructions"), phases: build_phases(trace)})
 }
 
-// The build DIR records; None, with the reason on stderr, when a file is
-// missing or unreadable, or the build failed.
+// The build DIR records; None, with the reason on stderr, when time.txt or
+// trace.txt is missing or unreadable, or the build failed. A missing
+// perf.txt leaves the instructions uncounted.
 batch_dir: fn(dir: String) -> BatchBuild? {
     report: files.read(files.join(dir, "time.txt")) ?? {
         term.eprint("Throughput.jet: cannot read {dir}/time.txt: {err}")
@@ -1056,7 +1117,11 @@ batch_dir: fn(dir: String) -> BatchBuild? {
         term.eprint("Throughput.jet: cannot read {dir}/trace.txt: {err}")
         return None
     }
-    build: batch_build(report, trace) ?? {
+    counts: files.read(files.join(dir, "perf.txt")) ?? {
+        term.eprint("Throughput.jet: cannot read {dir}/perf.txt: {err}")
+        ""
+    }
+    build: batch_build(report, trace, counts) ?? {
         term.eprint("Throughput.jet: {dir}/time.txt is not a `time -v` report")
         return None
     }
@@ -1075,21 +1140,31 @@ build_phase_cpu: fn(build: BatchBuild, kind: String) -> Int {
     (build.phases.find(fn(p) { p.kind == kind }) ?? return 0).thread_cpu_ns
 }
 
-// One quantity of the batch gate: its value in each build and the verdict
-// on the one ratio CURRENT / PREVIOUS. A phase (floor above 0) fails only
-// when it also rose by the floor or more: a smaller rise is within one
-// build's noise. A phase only one build ran is `new` or `gone`: work moved
-// between processes, which the CPU totals judge.
+// The judged quantity of the two builds: their instructions, one ratio
+// CURRENT / PREVIOUS that fails over GATE_LIMIT; INCONCLUSIVE when a build's
+// count is missing.
+batch_instructions_row: fn(previous: Int, current: Int) -> GateRow {
+    row := GateRow{mode: "build", metric: "instructions", seed: previous, new: current, ratio: 0.0, spread: 0.0, status: "pass"}
+    if previous <= 0 || current <= 0 {
+        row.status = "INCONCLUSIVE (not measured)"
+        return row
+    }
+    row.ratio = Float.from_int(current) / Float.from_int(previous)
+    if row.ratio > GATE_LIMIT -> row.status = "FAIL"
+    row
+}
+
+// A reported quantity of the batch gate: its value in each build and the
+// change, never a verdict (`-`). A phase (floor above 0) under the floor in
+// both builds is left out of the table; one only one build ran is `new` or
+// `gone`, work moved between processes.
 batch_row: fn(metric: String, previous: Int, current: Int, floor: Int) -> GateRow {
-    row := GateRow{mode: "build", metric: metric.copy(), seed: previous, new: current, ratio: 0.0, spread: 0.0, status: "pass"}
+    row := GateRow{mode: "build", metric: metric.copy(), seed: previous, new: current, ratio: 0.0, spread: 0.0, status: "-"}
     if {
         previous < floor && current < floor -> row.status = "below floor"
         previous == 0 -> row.status = "new"
         current == 0 -> row.status = "gone"
-        else -> {
-            row.ratio = Float.from_int(current) / Float.from_int(previous)
-            if row.ratio > GATE_LIMIT && current - previous >= floor -> row.status = "FAIL"
-        }
+        else -> row.ratio = Float.from_int(current) / Float.from_int(previous)
     }
     row
 }
@@ -1101,10 +1176,10 @@ traced_cpu: fn(build: BatchBuild) -> Int {
     total
 }
 
-// CPU, traced CPU, then each phase either build ran, the current build's
-// first.
+// The judged instructions, then the reported CPU, traced CPU and each phase
+// either build ran, the current build's first.
 batch_rows: fn(previous: BatchBuild, current: BatchBuild) -> [GateRow] {
-    rows := [GateRow]{batch_row("cpu", previous.cpu_ns, current.cpu_ns, 0), batch_row("traced cpu", traced_cpu(previous), traced_cpu(current), 0)}
+    rows := [GateRow]{batch_instructions_row(previous.instructions, current.instructions), batch_row("cpu", previous.cpu_ns, current.cpu_ns, 0), batch_row("traced cpu", traced_cpu(previous), traced_cpu(current), 0)}
     kinds := [String]{}
     loop phase in current.phases -> kinds.push(phase.kind.copy())
     loop phase in previous.phases {
@@ -1114,10 +1189,12 @@ batch_rows: fn(previous: BatchBuild, current: BatchBuild) -> [GateRow] {
     rows
 }
 
-// A row of the batch table: quantity, seconds, change in percent, verdict.
+// A row of the batch table: quantity, seconds (instructions as counts, `-`
+// when not counted), change in percent, verdict.
 batch_cells: fn(row: GateRow) -> [String] {
     change: if row.ratio > 0.0 -> "{(row.ratio - 1.0) * 100.0:Fixed(1)}%" else -> "-"
-    [String]{row.metric.copy(), seconds(row.seed), seconds(row.new), change, row.status.copy()}
+    shown: if row.metric == "instructions" -> [Int]{row.seed, row.new}.map(fn(n) { if n < 0 -> "-" else -> "{n}" }) else -> [String]{seconds(row.seed), seconds(row.new)}
+    [String]{row.metric.copy(), shown[0].copy(), shown[1].copy(), change, row.status.copy()}
 }
 
 // A build's unjudged line: wall, CPU, traced CPU, parallelism (traced CPU
@@ -1126,6 +1203,77 @@ batch_line: fn(label: String, dir: String, build: BatchBuild) -> String {
     traced: traced_cpu(build)
     parallel: if build.wall_ns > 0 -> "{Float.from_int(traced) / Float.from_int(build.wall_ns):Fixed(1)}" else -> "-"
     "{label} {dir}: wall {seconds(build.wall_ns)} s, cpu {seconds(build.cpu_ns)} s, traced cpu {seconds(traced)} s, parallel {parallel}, peak {build.peak_bytes /% 1048576} MiB"
+}
+
+// The verdict of verdicts: FAIL when one is, else INCONCLUSIVE when one is,
+// else PASS.
+combined_verdict: fn(verdicts: [String]) -> String {
+    if verdicts.contains("FAIL") -> return "FAIL"
+    if verdicts.contains("INCONCLUSIVE") -> return "INCONCLUSIVE"
+    "PASS"
+}
+
+// The batch A/B: the jet PREVIOUS built against the jet CURRENT built, each
+// compiling CURRENT's tree in each mode, --runs rounds that alternate which
+// goes first. Prints the compiles and the judged rows; returns their
+// verdict (gate_verdict), INCONCLUSIVE when a jet or perf is missing.
+batch_ab: fn(options: Options) -> String {
+    previous_dir: files.absolute(options.batch) ?? options.batch
+    current_dir: files.absolute(options.current) ?? options.current
+    previous_jet: files.join(previous_dir, BATCH_JET)
+    current_jet: files.join(current_dir, BATCH_JET)
+    loop jet in ([String]{previous_jet, current_jet}) {
+        if !files.is_file(jet) {
+            term.eprint("Throughput.jet: no batch-built jet at {jet}")
+            return "INCONCLUSIVE"
+        }
+    }
+    probe: process.cmd([String]{options.perf, "--version"}).output_limit(GIB).run() ?? {
+        term.eprint("Throughput.jet: cannot run --perf {options.perf}: {err}")
+        return "INCONCLUSIVE"
+    }
+    if probe.code != 0 {
+        term.eprint("Throughput.jet: `{options.perf} --version` exited {probe.code}")
+        return "INCONCLUSIVE"
+    }
+    ab := options.copy()
+    ab.tree = files.join(current_dir, "tree")
+    ab.tool = current_jet.copy()
+    if ab.work == "" -> ab.work = files.join(sys.temp_dir(), "jet-batch-ab-{time.now().to_unix_ms()}")
+    files.create_dir_all(ab.work) ?? {
+        term.eprint("Throughput.jet: cannot create the work directory {ab.work}: {err}")
+        return "INCONCLUSIVE"
+    }
+    previous_identity: identity_of(previous_jet)
+    current_identity: identity_of(current_jet)
+    named: [String]{gate_compiler_line("previous", previous_jet, previous_identity), gate_compiler_line("current", current_jet, current_identity)}
+    loop line in named -> print(line)
+    inputs: packages(ab, "inputs")
+    lines: corpus_source(ab, inputs).physical_lines
+    runs := [Run]{}
+    previous_first := true
+    loop mode in ab.modes {
+        loop repeat in 1..<(ab.runs + 1) {
+            order: if previous_first -> [String]{"previous", "current"} else -> [String]{"current", "previous"}
+            previous_first = !previous_first
+            loop compiler in order {
+                compiler_jet: if compiler == "previous" -> previous_jet else -> current_jet
+                compiler_identity: if compiler == "previous" -> previous_identity else -> current_identity
+                load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
+                run: measure(ab, inputs, lines, compiler_jet, compiler_identity, compiler, mode, repeat)
+                keep(ab, run, "-", compiler_jet, load)
+                runs.push(run)
+            }
+        }
+    }
+    loop line in run_table(runs) -> print(line)
+    rows: ab_rows(runs, ab.modes)
+    print("")
+    print([String]{"mode", "quantity", "previous", "current", "change", "spread", "verdict"}.map(fn(h) { h.pad_start(12, " ") }).join(" "))
+    loop row in rows -> print(gate_cells(row).map(fn(c) { c.pad_start(12, " ") }).join(" "))
+    print("traces: {ab.work}/<previous|current>-<mode>.<run>/trace.jsonl")
+    loop line in named -> print(line)
+    gate_verdict(rows, runs)
 }
 
 // The --batch form. Returns the exit code: 0 PASS, 1 FAIL, 3 INCONCLUSIVE.
@@ -1144,11 +1292,11 @@ run_batch: fn(options: Options) -> Int {
     print(batch_line("current ", options.current, current))
     rows: batch_rows(previous, current)
     print("")
-    print("{"quantity".pad_end(48, " ")} {"previous":PadLeft(10)} {"current":PadLeft(10)} {"change":PadLeft(8)} verdict")
+    print("{"quantity".pad_end(48, " ")} {"previous":PadLeft(16)} {"current":PadLeft(16)} {"change":PadLeft(8)} verdict")
     loop row in rows {
         if row.status == "below floor" -> next
         cells: batch_cells(row)
-        print("{cells[0].pad_end(48, " ")} {cells[1]:PadLeft(10)} {cells[2]:PadLeft(10)} {cells[3]:PadLeft(8)} {cells[4]}")
+        print("{cells[0].pad_end(48, " ")} {cells[1]:PadLeft(16)} {cells[2]:PadLeft(16)} {cells[3]:PadLeft(8)} {cells[4]}")
     }
     if options.out != "" {
         stamp: "{time.now().to_unix_ms() /% 1000}"
@@ -1159,9 +1307,14 @@ run_batch: fn(options: Options) -> Int {
         }
         files.append_all(options.out, text) ?? term.eprint("Throughput.jet: cannot append to {options.out}: {err}")
     }
-    failed: rows.any(fn(r) { r.status.starts_with("FAIL") })
-    print("batch speed gate: {if failed -> "FAIL" else -> "PASS"}")
-    if failed -> 1 else -> 0
+    print("")
+    verdicts := rows.map(fn(r) { r.status.partition(" ").head.copy() })
+    verdicts.push(batch_ab(options))
+    verdict: combined_verdict(verdicts)
+    print("batch speed gate: {verdict}")
+    if verdict == "PASS" -> return 0
+    if verdict == "FAIL" -> return 1
+    3
 }
 
 // ---- The gauntlet cell (--lane) ----
@@ -2010,7 +2163,7 @@ test_trace: fn() -> String {
 }
 
 test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
-    Run{mode: "O0", repeat, compiler: "", rc, wall_ns: wall_s * 1000000000, cpu_ns: wall_s * 4000000000, instructions: -1, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
+    Run{mode: "O0", repeat, compiler: "", rc, wall_ns: wall_s * 1000000000, cpu_ns: wall_s * 4000000000, instructions: -1, cycles: -1, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
 }
 
 #Test("the median compile of a mode is the middle wall of those that compiled") {
@@ -2139,7 +2292,7 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
 // of sema.bodies process CPU, and `instructions`.
 gate_run: fn(compiler: String, repeat: Int, cpu_s: Float, instructions: Int, bodies_ms: Int) -> Run {
     trace: Trace{phases: [Phase]{Phase{kind: "sema.bodies", cpu_ns: bodies_ms * 1000000, count: 1}, Phase{kind: "load", cpu_ns: 100000000, count: 1}}, user_lines: 0, core_lines: 0, first_us: 0, last_us: 0}
-    Run{mode: "O0", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: nearest(cpu_s * 1e9), instructions, peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
+    Run{mode: "O0", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: nearest(cpu_s * 1e9), instructions, cycles: nearest(cpu_s * 4e9), peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
 }
 
 // Three planted rounds: the seed at 100 s, 1e12 instructions and 10 s of
@@ -2192,19 +2345,21 @@ gate_rounds: fn(new_cpu: [Float], new_instructions: Int, new_bodies_ms: Int) -> 
     assert_eq(failed_rows[0].new, 101000000000)
     assert_eq(gate_verdict(failed_rows, failed), "FAIL")
     assert_eq(gate_verdict([GateRow]{}, [Run]{}), "INCONCLUSIVE")
-    fresh: gate_row("O0", "phase comptime.precheck", [Paired]{Paired{seed: 0, new: 19000000000}, Paired{seed: 0, new: 18000000000}, Paired{seed: 0, new: 18500000000}}, GATE_PHASE_FLOOR_NS)
+    fresh: gate_row("O0", "phase comptime.precheck", [Paired]{Paired{seed: 0, new: 19000000000}, Paired{seed: 0, new: 18000000000}, Paired{seed: 0, new: 18500000000}}, GATE_PHASE_FLOOR_NS, GATE_LIMIT)
     assert_eq(fresh.status, "FAIL (new work)")
-    assert_eq(perf_instructions("# started on Thu\n\n1234567,,instructions:u,9000,100.00,,\n"), 1234567)
-    assert_eq(perf_instructions("<not counted>,,instructions:u,0,0.00,,\n"), -1)
-    assert_eq(perf_instructions(""), -1)
+    counts: "# started on Thu\n\n1234567,,instructions:u,9000,100.00,,\n7654321,,cycles:u,9000,100.00,,\n"
+    assert_eq(perf_count(counts, "instructions"), 1234567)
+    assert_eq(perf_count(counts, "cycles"), 7654321)
+    assert_eq(perf_count("<not counted>,,instructions:u,0,0.00,,\n", "instructions"), -1)
+    assert_eq(perf_count("", "cycles"), -1)
 }
 
 #Test("one unchanged binary against itself gets no phase verdict, and the log names the jets it timed") {
     // One binary spreads about 10% on a phase from run to run: a lone
     // +26.7% round among steady ones is spread, never a FAIL.
-    phase: gate_row("O0", "phase ir.x64", [Paired]{Paired{seed: 3000000000, new: 3801000000}, Paired{seed: 3000000000, new: 3030000000}, Paired{seed: 3000000000, new: 2940000000}}, GATE_PHASE_FLOOR_NS)
+    phase: gate_row("O0", "phase ir.x64", [Paired]{Paired{seed: 3000000000, new: 3801000000}, Paired{seed: 3000000000, new: 3030000000}, Paired{seed: 3000000000, new: 2940000000}}, GATE_PHASE_FLOOR_NS, GATE_LIMIT)
     assert_eq(phase.status, "INCONCLUSIVE (spread)")
-    steady: gate_row("O0", "phase ir.object", [Paired]{Paired{seed: 2000000000, new: 2100000000}, Paired{seed: 2000000000, new: 1960000000}, Paired{seed: 2000000000, new: 2020000000}}, GATE_PHASE_FLOOR_NS)
+    steady: gate_row("O0", "phase ir.object", [Paired]{Paired{seed: 2000000000, new: 2100000000}, Paired{seed: 2000000000, new: 1960000000}, Paired{seed: 2000000000, new: 2020000000}}, GATE_PHASE_FLOOR_NS, GATE_LIMIT)
     assert_eq(steady.status, "pass")
     assert_eq(gate_compiler_line("candidate", "/b/jet", "abc"), "candidate jet: /b/jet (identity abc)")
     assert_eq(gate_compiler_line("seed", "/s/jet", ""), "seed jet: /s/jet (no IDENTITY)")
@@ -2233,27 +2388,73 @@ batch_trace: fn(finalize_ms: Int, record_ms: Int, record_thread_ms: Int) -> Stri
     }.join("\n")
 }
 
-#Test("the batch gate reads every process's phases and fails a rise past 10%") {
-    previous: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000)) ?? panic("previous")
+// A planted perf.txt of a build: `perf stat -x ,` with its instructions.
+batch_counts: fn(instructions: Int) -> String { "# started on Thu\n\n{instructions},,instructions:u,9000,100.00,,\n" }
+
+#Test("the batch gate judges the builds' instructions and reports their CPU and every process's phases") {
+    previous: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), batch_counts(1000000000000)) ?? panic("previous")
     assert_eq(previous.cpu_ns, 160000000000)
     assert_eq(previous.wall_ns, 138090000000)
     assert_eq(previous.peak_bytes, 2097152)
+    assert_eq(previous.instructions, 1000000000000)
     assert_eq(previous.phases.map(fn(p) { "{p.kind}={p.cpu_ns /% 1000000}/{p.thread_cpu_ns /% 1000000}/{p.wall_ns /% 1000}" }).join(","), "core-record: jet-bare/sema.finalize=60000/60000/3000,build.step=300/300/8000,sema.finalize=70000/70000/3000")
-    steady: batch_build(batch_report("155.00", "10.00", 0), batch_trace(74000, 62000, 62000)) ?? panic("steady")
+    steady: batch_build(batch_report("155.00", "10.00", 0), batch_trace(74000, 62000, 62000), batch_counts(1020000000000)) ?? panic("steady")
     steady_rows: batch_rows(previous, steady)
-    assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,traced cpu=pass,phase core-record: jet-bare/sema.finalize=pass,phase build.step=below floor,phase sema.finalize=pass")
-    assert_eq(batch_cells(steady_rows[0]).join(" "), "cpu 160.00 165.00 3.1% pass")
-    risen: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 67000, 67000)) ?? panic("risen")
-    risen_rows: batch_rows(previous, risen)
-    assert_eq(risen_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,traced cpu=pass,phase core-record: jet-bare/sema.finalize=FAIL,phase build.step=below floor,phase sema.finalize=pass")
-    // A phase whose process CPU rose with another compile's threads in the
-    // same process, its own thread steady, passes.
-    billed: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 67000, 60500)) ?? panic("billed")
-    billed_rows: batch_rows(previous, billed)
-    assert_eq(billed_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,traced cpu=pass,phase core-record: jet-bare/sema.finalize=pass,phase build.step=below floor,phase sema.finalize=pass")
+    assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "instructions=pass,cpu=-,traced cpu=-,phase core-record: jet-bare/sema.finalize=-,phase build.step=below floor,phase sema.finalize=-")
+    assert_eq(batch_cells(steady_rows[0]).join(" "), "instructions 1000000000000 1020000000000 2.0% pass")
+    assert_eq(batch_cells(steady_rows[1]).join(" "), "cpu 160.00 165.00 3.1% -")
+    // CPU and a phase far past +10% are load's to move: reported, never judged.
+    loaded: batch_build(batch_report("190.00", "10.00", 0), batch_trace(70000, 90000, 90000), batch_counts(1010000000000)) ?? panic("loaded")
+    loaded_rows: batch_rows(previous, loaded)
+    assert_eq(loaded_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "instructions=pass,cpu=-,traced cpu=-,phase core-record: jet-bare/sema.finalize=-,phase build.step=below floor,phase sema.finalize=-")
+    risen: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), batch_counts(1120000000000)) ?? panic("risen")
+    assert_eq(batch_rows(previous, risen)[0].status, "FAIL")
+    uncounted: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), "") ?? panic("uncounted")
+    uncounted_rows: batch_rows(previous, uncounted)
+    assert_eq(uncounted_rows[0].status, "INCONCLUSIVE (not measured)")
+    assert_eq(batch_cells(uncounted_rows[0]).join(" "), "instructions 1000000000000 - - INCONCLUSIVE (not measured)")
     assert_eq(batch_row("phase comptime.precheck", 0, 900000000, GATE_PHASE_FLOOR_NS).status, "new")
     assert_eq(batch_row("phase core-record: jet-bare/load", 900000000, 0, GATE_PHASE_FLOOR_NS).status, "gone")
-    assert_eq(batch_row("phase sema.check", 1140000000, 1400000000, GATE_PHASE_FLOOR_NS).status, "pass")
-    assert_eq(batch_build("\tUser time (seconds): 1.0\n", "") == None, true)
+    assert_eq(batch_build("\tUser time (seconds): 1.0\n", "", "") == None, true)
     assert_eq(clock_ns("1:02:18.5"), Val(3738500000000))
+    assert_eq(combined_verdict([String]{"PASS", "INCONCLUSIVE"}), "INCONCLUSIVE")
+    assert_eq(combined_verdict([String]{"INCONCLUSIVE", "FAIL"}), "FAIL")
+    assert_eq(combined_verdict([String]{"PASS", "PASS"}), "PASS")
+}
+
+// One planted A/B compile: `cycles` and `instructions` of a check.
+ab_run: fn(compiler: String, repeat: Int, instructions: Int, cycles: Int) -> Run {
+    trace: Trace{phases: [Phase]{}, user_lines: 0, core_lines: 0, first_us: 0, last_us: 0}
+    Run{mode: "check", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: 1000000000, instructions, cycles, peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
+}
+
+// Three planted A/B rounds: the previous compiler at 1e12 instructions and
+// 4e11 cycles, the current at the given instructions and per-round cycles.
+ab_rounds: fn(instructions: Int, cycles: [Int]) -> [Run] {
+    runs := [Run]{}
+    loop at in 0..<cycles.len() {
+        runs.push(ab_run("previous", at + 1, 1000000000000, 400000000000))
+        runs.push(ab_run("current", at + 1, instructions, cycles[at]))
+    }
+    runs
+}
+
+#Test("the batch A/B judges instructions past +3% and cycles past +10% over interleaved rounds") {
+    modes: [String]{"check"}
+    steady: ab_rounds(1020000000000, [Int]{404000000000, 396000000000, 410000000000})
+    steady_rows: ab_rows(steady, modes)
+    assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "instructions=pass,cycles=pass")
+    assert_eq(gate_cells(steady_rows[1]).join(" "), "check cycles 400000000000 404000000000 1.0% 3.5 pass")
+    assert_eq(gate_verdict(steady_rows, steady), "PASS")
+    more_work: ab_rows(ab_rounds(1040000000000, [Int]{404000000000, 396000000000, 410000000000}), modes)
+    assert_eq(more_work[0].status, "FAIL (every round)")
+    slower: ab_rows(ab_rounds(1010000000000, [Int]{460000000000, 470000000000, 452000000000}), modes)
+    assert_eq(slower[1].status, "FAIL (every round)")
+    noisy: ab_rows(ab_rounds(1010000000000, [Int]{380000000000, 404000000000, 460000000000}), modes)
+    assert_eq(noisy[1].status, "INCONCLUSIVE (spread)")
+    pair: ab_rows(ab_rounds(1010000000000, [Int]{404000000000, 396000000000}), modes)
+    assert_eq(pair[1].status, "INCONCLUSIVE (under 3 rounds)")
+    failed := ab_rounds(1010000000000, [Int]{404000000000, 396000000000, 410000000000})
+    failed[2].rc = 1
+    assert_eq(gate_verdict(ab_rows(failed, modes), failed), "FAIL")
 }

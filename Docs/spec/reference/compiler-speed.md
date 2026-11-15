@@ -154,7 +154,7 @@ the trace are over.
 `--against SEED` is the train speed gate: the compiler `JET` against the seed
 it was built with, each compiling the corpus in each mode, `--runs` rounds that
 alternate which compiler goes first. Every compile runs under
-`perf stat -e instructions:u`. The gate judges per mode the CPU time,
+`perf stat -e instructions:u,cycles:u`. The gate judges per mode the CPU time,
 user-mode instructions and the process CPU of each top-level phase of at least
 0.5 s, never wall time or lines per second, which load moves. A quantity fails
 when its median per-round ratio is over +10% within a 10-point spread, or when
@@ -173,19 +173,27 @@ both is a row of the release's `evidence/throughput.tsv`, so each release
 records the cell.
 
 `--batch PREVIOUS --current CURRENT` is the batch build's speed gate. It
-compiles nothing: it reads two batch builds of `jet build --profile dev
-Compiler`, each a directory with the build's trace (`trace.txt`) and GNU
-`time -v`'s report (`time.txt`). It judges CPU, traced CPU (every process's
-top-level phases, the build step children included, which `time -v` leaves
-out) and the own-thread CPU of each process's top-level phases of at least
-0.5 s, shown as `<process>/<phase>`. A phase is judged on its own thread, not
-its process: one process can run two compiles at once, and a phase's process
-CPU then counts the other compile's threads. One build a side gives one
-ratio: a quantity over +10% fails, a phase only when it also rose by 0.5 s or
-more. A phase only one build ran is `new` or `gone`, work moved between
-processes that the totals judge. It prints `batch speed gate: PASS` or `FAIL`
-and exits 0 or 1, or 3 when a build's files are missing or the build failed;
-`--out` records every quantity.
+reads two batch builds of `jet build --profile dev Compiler`, each a
+directory with the build's trace (`trace.txt`), GNU `time -v`'s report
+(`time.txt`), `perf stat -x , -e instructions:u`'s count of the build
+(`perf.txt`) and the compiler the build made
+(`tree/Compiler/JetCli/.jet/build/jet`). It judges only what load cannot move
+much. First, the builds' user-mode instructions: one ratio CURRENT /
+PREVIOUS, failing over +10% (the two builds compile different trees). Then an
+A/B of the two built compilers, each compiling CURRENT's tree in each
+`--modes` mode (default `check`) under `perf stat -e instructions:u,cycles:u`,
+`--runs` rounds (default 3) that alternate which goes first, kept in `--work`.
+On that one input, instructions fail over +3%; cycles follow the `--against`
+rules (+10%, a 10-point spread, three rounds). CPU, traced CPU (every
+process's top-level phases, the build step children included, which `time -v`
+leaves out), each process's top-level phases' own-thread CPU (shown as
+`<process>/<phase>`), wall, parallelism and peak memory are reported, never
+judged: load on a shared machine moves them by more than any limit. It prints
+`batch speed gate: PASS`, `FAIL` or `INCONCLUSIVE` and exits 0, 1 or 3:
+`FAIL` when a judged row fails or an A/B compile fails, `INCONCLUSIVE` when a
+build's files, a built compiler or a count is missing or the build failed.
+`--out` records every build quantity, and every A/B compile in the throughput
+ledger beside it.
 
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
