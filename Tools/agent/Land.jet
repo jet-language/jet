@@ -2719,9 +2719,20 @@ minutes: fn(seconds: Int) -> String Never! {
     "{whole}.{(seconds - whole * 60) * 10 /% 60}"
 }
 
+// The files Tools/agent/DiagnosticRows.jet writes. A patch that conflicts only
+// in them applies without them, and the composition writes them again.
+DIAGNOSTIC_GENERATED: [String]{
+    "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet",
+    "tests/diagnostics_coverage_baseline.txt",
+    "tests/diagnostics_coverage_allowlist.tsv",
+    "Docs/site/dist/e/*",
+    "Docs/audits/*-diagnostic-safety-audit.md",
+}
+
 // Apply `jobs` but the `aside` ones on the worktree `dir` (a lane's later
-// patches are left once one does not apply), then regenerate the runtime
-// generators' outputs.
+// patches are left once one does not apply; one that conflicts only in a
+// generated diagnostic file applies without it), then regenerate the runtime
+// generators' outputs and the diagnostic copies.
 compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> Composed Never! {
     applied := [Applied]{}
     all := [String]{}
@@ -2738,9 +2749,20 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
             next
         }
         if git(dir, [String]{"apply", "--check", job.patch}).code != 0 || git(dir, [String]{"apply", job.patch}).code != 0 {
-            say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
-            broken[job.lane] = name
-            next
+            checked := [String]{"apply", "--check"}
+            without := [String]{"apply"}
+            loop pattern in DIAGNOSTIC_GENERATED {
+                checked.push("--exclude={pattern}")
+                without.push("--exclude={pattern}")
+            }
+            checked.push(job.patch.copy())
+            without.push(job.patch.copy())
+            if git(dir, checked).code != 0 || git(dir, without).code != 0 {
+                say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
+                broken[job.lane] = name
+                next
+            }
+            say(log, "APPLIED WITHOUT GENERATED DIAGNOSTIC FILES {job.lane} {name} (DiagnosticRows writes them again)")
         }
         paths: touched_paths(dir, job.patch)
         loop path in paths {
@@ -2755,6 +2777,9 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
     // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
     generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
     say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")
+    // The diagnostic copies (registry rows, coverage lists, explain pages, safety audit).
+    rows: seed_run(dir, [String]{"Tools/agent/DiagnosticRows.jet", "--write"}, 900)
+    say(log, "DiagnosticRows rc={rows.code} {both(rows).trim_end().last_lines(2).join(" ")}")
     regenerated := [String]{}
     loop path in dirty_paths(dir) {
         if !all.contains(path) -> regenerated.push(path)
