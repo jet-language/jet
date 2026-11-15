@@ -5506,7 +5506,11 @@ over all of them; a binding due once those are spent serves its stored
 result, held the same way, until the next second. A binding's first run is
 not capped. Writes between two reads cost one re-run however many there
 were, so a burst of writes, or of writes during a hold, re-runs a binding
-once.
+once. A binding belongs to the caller that made it, so a query that reads
+`app.caller()` or a guarded table is never shared between callers. A
+write that meets its read set costs one re-run per caller that reads it
+after the write. A second subscriber of the same caller shares that
+caller's binding. Those re-runs count against the same 1000 a second.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry

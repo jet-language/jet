@@ -1,0 +1,90 @@
+// A live query that reads `app.caller()` gives each caller its own answer,
+// so two callers' bindings of one source and argument list never share a
+// result: each runs the source as its own caller. A write that meets the read
+// set re-runs every caller's binding once, and a second subscriber of one
+// caller shares that caller's binding. Those re-runs count against the
+// server's per-second cap like any other.
+use {
+    app
+    core.reactive.loadable.[Loadable]
+    core.time
+}
+
+#Error
+BoardError: enum {
+    NoBoard
+}
+
+Board: struct {
+    tasks: Int
+    runs: Int
+}
+
+BOARD: Shared{Board{tasks: 3, runs: 0}}
+
+// The open tasks of one board as its caller sees them, counting its runs.
+my_tasks: fn(board: String) -[DB.Read]> String BoardError! {
+    if board == "" -> return Err(BoardError.NoBoard)
+    who: app.caller()
+    state := BOARD.guard_edit()
+    state.value.runs += 1
+    "{who} sees {state.value.tasks}"
+}
+
+runs: fn() -> Int {
+    state := BOARD.guard_edit()
+    state.value.runs
+}
+
+// One write: a new task, and the invalidation a database write makes.
+add_task: fn() {
+    state := BOARD.guard_edit()
+    state.value.tasks += 1
+    app.invalidate(my_tasks, "crewboard")
+}
+
+shown: fn(state: Loadable<String, BoardError>) -> String {
+    if state == {
+        .Loaded(value) -> value
+        .Failed(reason) -> if reason == {
+            .NoBoard -> "failed: no board"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+// The binding `account` makes of the crewboard's tasks.
+bind: fn(account: String) -> app.Live<String, BoardError> {
+    app.as_caller(account, fn() { app.live(my_tasks, "crewboard") })
+}
+
+run: fn() {
+    ann: bind("ann")
+    ben: bind("ben")
+    print("{shown(app.state(ann))}; {shown(app.state(ben))}; runs {runs()}")
+    // One write that meets the read set: one re-run per caller.
+    add_task()
+    print("{shown(app.state(ann))}; {shown(app.state(ben))}; runs {runs()}")
+    // A second subscriber of ann's shares her binding: no re-run.
+    print("ann again: {shown(app.state(bind("ann")))}; runs {runs()}")
+    // Three writes, each read by both callers: one re-run per caller per write.
+    loop _ in 0..<3 {
+        add_task()
+        _: app.state(ann)
+        _: app.state(ben)
+    }
+    print("three writes: runs {runs()}")
+    // Four callers each read after every write: 1200 re-runs are due, and
+    // the server makes 1000 this second, then holds each binding's result.
+    time.sleep(1100ms)
+    crew := [app.Live<String, BoardError>]{}
+    loop account in ["ann", "ben", "cat", "dan"] -> crew.push(bind(account))
+    loop binding in crew -> _: app.state(binding)
+    before: runs()
+    loop _ in 0..<300 {
+        add_task()
+        loop binding in crew -> _: app.state(binding)
+    }
+    print("300 writes, four callers: {runs() - before} re-runs")
+    print(app.live_stats())
+}
