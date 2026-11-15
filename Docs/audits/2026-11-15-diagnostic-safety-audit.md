@@ -503,10 +503,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2204 | DebugSessionQuit | Compiler/JetCli/Source/Cli/Debug.jet:116 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:306 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:306 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:1758 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCli/Source/Cli/Inspect.jet:1759 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCli/Source/Cli/Inspect.jet:1760 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCli/Source/Cli/Inspect.jet:1761 | every applicable tier lowers |
+| E2389 | UnprovenEntryResolution | Compiler/JetCli/Source/Cli/Inspect.jet:1759 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCli/Source/Cli/Inspect.jet:1760 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCli/Source/Cli/Inspect.jet:1761 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCli/Source/Cli/Inspect.jet:1762 | every applicable tier lowers |
 | E2393 | ImportWithoutProject | Compiler/JetCli/Source/Cli/Entry.jet:1499 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3757 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1089 | declare the conversion |
@@ -577,7 +577,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2933 | InvalidLayoutElement | Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet:262 | the element is a layout comparison |
 | E2937 | UiServiceWithoutCapability | Compiler/JetSema/Source/Sema/CoreUsage.jet:501 | the package declares the capability |
 | E2938 | InvalidShortcut | Compiler/JetSema/Source/Sema/Calls/Static.jet:1799 | a valid `.cmd` key |
-| E2941 | UnknownProofLens | Compiler/JetCli/Source/Cli/Expand.jet:470 | name a defined lens |
+| E2941 | UnknownProofLens | Compiler/JetCli/Source/Cli/Expand.jet:471 | name a defined lens |
 | E2950 | SolverCounterexample | Compiler/JetCli/Source/Cli/ProveSolverReport.jet:282 | the code or the claim is fixed |
 | E2967 | FrameScheduleConflict | Compiler/JetSema/Source/Sema/Calls/Game.jet:185 | access and completion facts resolve |
 | E3001 | Panic | Compiler/JetRuntime/Source/ProductionReceipt.jet:24 | the failing condition is fixed |
