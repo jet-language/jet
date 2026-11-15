@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6923,
-    "rev": 104445,
+    "rev": 104449,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27288,11 +27288,11 @@
         {
           "n": 14,
           "text": "Selecting one case from a list of enum values uses a case pattern or `filter_map` and keeps the payload's ownership; letting a borrowed payload escape the selection is refused with a UI snapshot, and the spec states that a checked downcast of a foreign value is not Jet syntax. Proof: `jet test Compiler --profile golden --filter Patterns/TypedSelection`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:54.635Z"
+          "evidence": "dev b367bfcdc8 (GoalsA-1-3 typed-selection). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile golden --filter Patterns/TypedSelection -> PASS 3; jet test Compiler --profile ui --filter typed_selection_payload_escape -> PASS 1.",
+          "at": "2026-11-15T04:19:55.666Z"
         },
         {
           "n": 15,
@@ -27328,7 +27328,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-15T03:22:31.230Z",
+      "updated": "2026-11-15T04:19:55.666Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": [
@@ -74909,11 +74909,11 @@
         {
           "n": 37,
           "text": "Precompiled Core makes every compile faster, never slower: outside the toolchain tree, `jet check hello.jet` and `jet run hello.jet` with the jet that carries the Core record take no more wall time and no more peak RSS than with jet-bare (Core from sources), median of 3. On gate-p62 the record jet took 22.1-24.4 s at 1.68 GB against 0.76-1.5 s at 185 MB (G11Speed-5, 2026-11-14): RecordTree string decoding re-decoded front-coded blocks for every string and key (57% of busy CPU), and loads pulled 67 modules from the record against 35 parsed from source. The gauntlet rerun (#6834 c5) waits on this.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T09:21:09.895Z"
+          "evidence": "dev c01387e368 (PrecompiledCore-4 stand-in-ab-fix). A/B of the record jet (B) against jet-bare with Core from sources (A), outside the toolchain tree, cold store each run, arms interleaved, medians. p143, 5 rounds, wall B/A: hello 1.000, e2404 1.000, lint 0.865, e3401 0.908, run-cold-context 0.810, jetc-trace 0.820; peak RSS lower in B for the record-touching programs (run-cold-context 636 to 520 MB, e3401 253 to 239 MB, lint 257 to 251 MB, jetc-trace 275 to 273 MB); PARITY ok. p144, 25 rounds: check hello.jet 10/10 ms, RSS 71524/71652 KB; run hello.jet 20/20 ms, RSS 90252/89976 KB; e2404 10/10 ms, 76252/76316 KB. hello, check-hello and e2404 touch no record: PC4's strace shows identical opens, clones and mmaps in both arms (715.17 MB mapped, 74 opens, no Core tree file), and their RSS medians differ by under 0.2% with the sign flipping across the 5-, 9- and 25-round runs (allocator arena modes in both arms). Script: lander3-tmp/pcab25.sh.",
+          "at": "2026-11-15T04:19:57.101Z"
         },
         {
           "n": 38,
@@ -74933,7 +74933,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T03:08:30.634Z",
+      "updated": "2026-11-15T04:19:57.101Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -99055,11 +99055,11 @@
         {
           "n": 1,
           "text": "`#Codable` derives a codec for `distinct Int` and `distinct String` fields: a distinct type codes as its base by default (D-CODABLE-DISTINCT1=A; seed-b14 gave jet.NotSerializable). Proof: `jet test Compiler --profile cases --filter codable_options/distinct_types_code_as_their_base_by_default`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:34:05.346Z"
+          "evidence": "dev 040e5e08f6 (GoalsB-5-10). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile cases --filter codable_options/distinct_types_code_as_their_base_by_default -> PASS 1.",
+          "at": "2026-11-15T04:19:53.065Z"
         },
         {
           "n": 2,
@@ -99145,11 +99145,11 @@
         {
           "n": 11,
           "text": "The UI snapshots for the codec diagnostics are re-blessed. Proof: `jet test Compiler --profile ui --filter codable` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:34:08.218Z"
+          "evidence": "dev 040e5e08f6 (GoalsB-5-10). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile ui --filter codable -> PASS 16 FAIL 0 (union_codable_distinct_ambiguous reports E2415 at 5:5; new union_codable_auto_enum_ambiguous); jet test Compiler/JetFoundation/Tests --filter 'owned trait' -> 3 passed.",
+          "at": "2026-11-15T04:19:54.313Z"
         },
         {
           "n": 12,
@@ -99169,7 +99169,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-15T04:05:36.570Z",
+      "updated": "2026-11-15T04:19:54.313Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -213965,6 +213965,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:19:57.101Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-15T04:19:55.666Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb6zik",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T04:19:54.313Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ue0hua",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T04:19:53.065Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ue0hua",
+      "note": "#1"
+    },
     {
       "at": "2026-11-15T04:19:31.271Z",
       "by": "TowerKeeper-1",
