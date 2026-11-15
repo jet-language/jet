@@ -2443,6 +2443,7 @@ sema_scope_resolve_key: fn(table: SemaScopeTable, name: String) -> String? {
 sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
+    light_type: sema_scope_light_function_type()
     loop binding in source.bindings {
         function_type := false
         if binding.symbol.ty == .Val(ty) {
@@ -2451,7 +2452,8 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         if function_type {
             bindings.push(SemaScopeBinding{
                 frame: binding.frame,
-                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(sema_scope_light_function_type()), visibility: binding.symbol.visibility},
+                // Every light row shares the one empty function type.
+                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type), visibility: binding.symbol.visibility},
                 key: binding.key,
                 mutable: binding.mutable,
                 access: binding.access,
