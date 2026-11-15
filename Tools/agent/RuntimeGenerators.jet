@@ -3083,6 +3083,8 @@ render_dyn_kind_runtime: fn(rows: [DynKind]) -> String GeneratorError! {
         } else { lines.push("    rt_static_text(\"{row.word}\")") }
     }
     lines.push("}}")
+    // `jet fmt` parts the end line, a comment, from the function above it.
+    lines.push("")
     lines.push(DYN_KIND_END)
     Ok(lines.join("\n"))
 }
@@ -3118,7 +3120,7 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
     assert_eq(rows[1].variant, "Bytes")
     assert_eq(rows[2].word, "an object")
     runtime: render_dyn_kind_runtime(rows) ?? panic("rows did not render: {err.message}")
-    assert(runtime.contains("    if kind == DYN_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n{DYN_KIND_END}"))
+    assert(runtime.contains("    if kind == DYN_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n\n{DYN_KIND_END}"))
     host: "a\n{DYN_KIND_BEGIN}\nstale\n{DYN_KIND_END}\nb\n"
     assert_eq(splice_region("h", host, DYN_KIND_BEGIN, DYN_KIND_END, "dyn_kind", "R") ?? "", "a\nR\nb\n")
     if splice_region("h", "{host}{host}", DYN_KIND_BEGIN, DYN_KIND_END, "dyn_kind", "R") == {
@@ -3350,7 +3352,8 @@ exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
 
 // The rows as constants named `prefix` and the row's name, each a runtime
 // word when `word`, between the generated region's two lines; with `spaced`,
-// a blank line parts one row from the next.
+// a blank line parts one row from the next and the last row from the end
+// line, as `jet fmt` writes them.
 render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool, spaced: Bool) -> String Never! {
     lines := [String]{EXIT_CODES_BEGIN}
     first := true
@@ -3361,6 +3364,7 @@ render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool, spaced: Bool
         value: if word -> "I64{{{row.value}}}" else -> row.value.copy()
         lines.push("{prefix}{row.name}: {value}")
     }
+    if spaced -> lines.push("")
     lines.push(EXIT_CODES_END)
     lines.join("\n")
 }
@@ -3550,7 +3554,7 @@ exit_guard: fn() -[FS]> [String] GeneratorError! {
     assert_eq(rows.len(), 2)
     assert_eq(render_exit_codes(rows, "KIT_", false, false), "{EXIT_CODES_BEGIN}\n// Fine.\nKIT_EXIT_OK: 0\n// A stop.\nKIT_EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
     assert(render_exit_codes(rows, "", true, false).contains("\nEXIT_RUNTIME_PANIC: I64{{70}}\n"))
-    assert_eq(render_exit_codes(rows, "priv ", false, true), "{EXIT_CODES_BEGIN}\n// Fine.\npriv EXIT_OK: 0\n\n// A stop.\npriv EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
+    assert_eq(render_exit_codes(rows, "priv ", false, true), "{EXIT_CODES_BEGIN}\n// Fine.\npriv EXIT_OK: 0\n\n// A stop.\npriv EXIT_RUNTIME_PANIC: 70\n\n{EXIT_CODES_END}")
     assert_eq(render_exit_code_table(rows), "{EXIT_CODES_DOC_BEGIN}\n| Code | Name | Meaning |\n|---:|---|---|\n| 0 | `OK` | Fine. |\n| 70 | `RUNTIME_PANIC` | A stop. |\n{EXIT_CODES_DOC_END}")
     if exit_code_rows("EXIT_ICE: 1o1\n") == {
         .Ok(_) -> { assert(false) }

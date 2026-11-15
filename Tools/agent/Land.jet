@@ -1303,7 +1303,8 @@ compile_pass: fn(name: String, snap: String, out: String, memory: String, second
 }
 
 // `jet build Compiler` of the snapshot, then the kept sources it regenerates
-// (`kept: true`), which must be committed as it wrote them.
+// (`kept: true`), which must be committed as it wrote them, and the runtime
+// generators' tables, which must be current.
 build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out: String, seed_jet: String, identity: String, package_dirs: [String], named: [String]) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     if !passes.build {
         return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
@@ -1314,6 +1315,15 @@ build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out
     if stale.len() > 0 {
         run.rc = 1
         run.lines.push("STALE: {stale.join(", ")} differ from what `jet build Compiler` generates; build it and commit them")
+    }
+    receipt: process.cmd([String]{seed_jet, "Tools/agent/RuntimeGenerators.jet", "--check"}).cwd(snap).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", snap).timeout(time.duration_seconds(900)).run() ?? {
+        run.rc = 1
+        run.lines.push("runtime generators could not run: {err}")
+        return run
+    }
+    if receipt.code != 0 || receipt.timed_out {
+        run.rc = 1
+        run.lines.push("STALE: runtime generated tables: {clip("{receipt.output}{receipt.errors}".trim(), 600)}")
     }
     run
 }
