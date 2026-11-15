@@ -71,9 +71,10 @@ SemaAppCallerReport: struct {
 }
 
 // The E2815 reports of the program. A program outside Core that never
-// calls `app.caller` walks nothing: one scan of its bodies finds that. The
-// scan reads each function on its own, so it runs on as many of `threads`
-// as its bodies admit (sema_app_caller_scans), its parts joined in function
+// calls `app.caller` walks nothing: one read of its checked nodes finds
+// that (SemaAppCallerRead.Nodes), with no walk of its bodies. The reads take
+// each function on its own, so they run on as many of `threads` as the
+// bodies admit (sema_app_caller_scans), their parts joined in function
 // order: the program, the gate and the reports are the same for any thread
 // count.
 sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads) -> [Diagnostic] {
@@ -100,13 +101,20 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     }
     workers: compiler_threads_admit(threads, places.len(), work, SEMA_APP_CALLER_NODES_PER_THREAD, 0, 0)
     bounds: if workers <= 1 -> [Int]{0, places.len()} else -> compiler_threads_partition(weights, workers)
-    scans: sema_app_caller_scans(graph, modules, places, bounds, 0)
-    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller.symbol.id.id, as_caller: as_caller.symbol.id.id}
+    caller_id: caller.symbol.id.id
+    gates: sema_app_caller_scans(graph, modules, places, bounds, 0, caller_id, SemaAppCallerRead.Nodes)
+    named := false
+    loop scan in gates {
+        if scan.reached -> named = true
+    }
+    if !named -> return [Diagnostic]{}
+    scans: sema_app_caller_scans(graph, modules, places, bounds, 0, caller_id, SemaAppCallerRead.Walk)
     reached := false
     loop scan in scans {
-        if scan.callees.get(program.caller) != None -> reached = true
+        if scan.reached -> reached = true
     }
     if !reached -> return [Diagnostic]{}
+    program := SemaAppCallerProgram{functions: [SemaAppCallerFunction]{}, rows: [U32:Int]{}, signed_in: [U32:Bool]{}, caller: caller_id, as_caller: as_caller.symbol.id.id}
     loop scan in scans {
         loop function in scan.functions {
             program.rows[function.symbol] = program.functions.len()
@@ -217,11 +225,22 @@ SemaAppCallerPlace: struct {
     function_index: Int
 }
 
-// One part of the scan: its functions that have a run-wide symbol, in
-// order, and every symbol their bodies call or name.
+// One part of the scan: whether it reaches `app.caller`, and as
+// SemaAppCallerRead.Walk reads it, its functions that have a run-wide
+// symbol, in order, and every symbol their bodies call or name.
 SemaAppCallerScan: struct {
+    reached: Bool
     functions: [SemaAppCallerFunction]
     callees: [U32:Bool]
+}
+
+// How a scan reads a function. `Nodes`, the gate: every node of its checked
+// tree, in place, for a call of `app.caller`. The walk reads only nodes of
+// the tree, so a function the gate finds no call in has none the walk
+// finds. `Walk`: its body as the walk reads it, statement by statement.
+SemaAppCallerRead: enum {
+    Nodes
+    Walk
 }
 
 // The app.caller scan's threads (compiler_threads_admit): a thread is
@@ -231,35 +250,54 @@ SEMA_APP_CALLER_NODES_PER_THREAD: 20000
 
 // The scans of the parts from bounds `at` on, each but the last on a task of
 // its own, in part order.
-sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], bounds: [Int], at: Int) -> [SemaAppCallerScan] Never! {
+sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], bounds: [Int], at: Int, caller: U32, read: SemaAppCallerRead) -> [SemaAppCallerScan] Never! {
     done := [SemaAppCallerScan]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
     if at + 2 == bounds.len() {
-        done.push(sema_app_caller_scan(graph, modules, places, from, to))
+        done.push(sema_app_caller_scan(graph, modules, places, from, to, caller, read))
         return done
     }
     task.group sema_app_caller_scan_threads {
-        head: task sema_app_caller_scan(graph, modules, places, from, to)
-        rest: sema_app_caller_scans(graph, modules, places, bounds, at + 1)
+        head: task sema_app_caller_scan(graph, modules, places, from, to, caller, read)
+        rest: sema_app_caller_scans(graph, modules, places, bounds, at + 1, caller, read)
         done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
         loop part in rest.move() -> done.push(part)
     }
     done
 }
 
-// The scan of functions `from..<to` of `places`.
-sema_app_caller_scan: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], from: Int, to: Int) -> SemaAppCallerScan Never! {
-    scan := SemaAppCallerScan{functions: [SemaAppCallerFunction]{}, callees: [U32:Bool]{}}
+// The scan of functions `from..<to` of `places` for `app.caller`
+// (`caller`), read as `read` says.
+sema_app_caller_scan: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], places: [SemaAppCallerPlace], from: Int, to: Int, caller: U32, read: SemaAppCallerRead) -> SemaAppCallerScan Never! {
+    scan := SemaAppCallerScan{reached: false, functions: [SemaAppCallerFunction]{}, callees: [U32:Bool]{}}
     loop index in from..<to {
         place: places[index]
         function: modules[place.module_index].functions[place.function_index]
+        if read == .Nodes {
+            if sema_app_caller_names(graph, function, caller) {
+                scan.reached = true
+                return scan
+            }
+            next
+        }
         symbol: symbol_find(graph.symbols, function.key) ?? next
         scan.functions.push(SemaAppCallerFunction{symbol: symbol.id, module_index: place.module_index, function_index: place.function_index})
         sema_app_caller_scan_calls(graph, function, scan.callees)
     }
+    if read == .Walk -> scan.reached = scan.callees.get(caller) != None
     scan
+}
+
+// Whether a node of `function`'s checked tree calls or names `caller`.
+sema_app_caller_names: fn(graph: SemaRegistrationGraph, function: FnBody, caller: U32) -> Bool Never! {
+    loop node in function.tree.nodes {
+        if sema_app_caller_callee(graph, function, node.kind) == .Val(named) && named == caller {
+            return true
+        }
+    }
+    false
 }
 
 // Adds each symbol `function` calls or names to `callees`.
