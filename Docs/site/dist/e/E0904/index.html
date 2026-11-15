@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Provide the type argument explicitly or add enough context to infer it.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0904</code>: <code>tests/ui/generic_bound_type_union.stderr</code>.</p>
-<pre class="diag">Error [jet.UninferableTypeArgument]: `Int | Float` is a set of types, not a trait, so it cannot bound `T`
-  --&gt; tests/ui/generic_bound_type_union.jet:6:11
+<p>First UI snapshot mentioning <code>E0904</code>: <code>tests/ui/dispatch_hole_type_ambiguous.stderr</code>.</p>
+<pre class="diag">Error [jet.UninferableTypeArgument]: Can&#39;t figure out what `T` should be here
+  --&gt; tests/ui/dispatch_hole_type_ambiguous.jet:4:8
     |
-  6 |     print(twice(2))
-    |           ^^^^^
- Why: A generic bound names traits that every type argument must implement; a union of types is a value type, not a bound
- Fix: Use the union `Int | Float` as the parameter type and match on it, or bound `T` by a trait such as `Comparable`
+  4 |     if missing(_) {
+    |        ^^^^^^^
+ Why: Generic calls need enough context to pick a concrete type
+ Fix: Pass the type argument explicitly, like `make&lt;Int&gt;()`, or give the value a typed head, like `p: Pair&lt;Int&gt;{ … }`
 More: jet-lang.dev/e/E0904
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
