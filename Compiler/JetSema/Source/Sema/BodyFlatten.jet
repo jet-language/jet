@@ -66,6 +66,13 @@ BodyFlat: struct {
     tree: BodyTree
     arena: BodyTree
     into_arena: Bool
+    // The Local kinds filed so far, chained per symbol id: `local_first`
+    // holds an id's latest, `local_next` the one before (-1 ends the chain).
+    // A read equal to a filed one shares its kind, so a binder's equal reads
+    // hold one box between them (body_flat_local_shared).
+    local_kinds: [NodeKind]{[NodeKind]{}}
+    local_next: [Int]{[Int]{}}
+    local_first: [Int:Int]{[Int:Int]{}}
 }
 
 // The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
@@ -488,7 +495,7 @@ body_flat_expr_kind: fn(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
     if value == {
         .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
         .StrLit(f_parts) -> NodeKind.StrLit{parts: body_flat_list_str_part(f_parts, flat)}
-        .Local(f_local) -> NodeKind.Local{local: f_local}
+        .Local(f_local) -> body_flat_local_shared(f_local, flat) ?? body_flat_local_file(NodeKind.Local{local: f_local}, flat)
         .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_flat_list_stmt(f_body, flat)}
         .CtLit(f_value) -> NodeKind.CtLit{value: f_value}
         .Call(f_callee, f_type_args, f_args) -> NodeKind.Call{callee: f_callee, type_args: f_type_args, args: body_flat_list_call_arg(f_args, flat)}
@@ -565,6 +572,33 @@ body_flat_expr_kind: fn(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         // body_flat_expr files a Flat node before it asks for its kind.
         .Flat(_) -> panic("body_flat_expr_kind: a Flat node is an arena row, not a checker kind")
     }
+}
+
+// The Local kind already filed for a read equal to `local`, if any.
+body_flat_local_shared: fn(local: TLocal, flat: BodyFlat) -> NodeKind? Never! {
+    symbol: local.symbol_id ?? return None
+    at := flat.local_first.get(Int{symbol.id}) ?? -1
+    loop at >= 0 {
+        if flat.local_kinds[at] == .Local(filed) {
+            if filed == local -> return Val(flat.local_kinds[at])
+        }
+        at = flat.local_next[at]
+    }
+    None
+}
+
+// Files Local kind `kind` for later equal reads (body_flat_local_shared) and
+// returns it. A local without a symbol id is not filed.
+body_flat_local_file: fn(kind: &&NodeKind, flat: &BodyFlat) -> NodeKind Never! {
+    if kind == .Local(local) {
+        symbol: local.symbol_id ?? return kind
+        key: Int{symbol.id}
+        flat.local_next.push(flat.local_first.get(key) ?? -1)
+        flat.local_first[key] = flat.local_kinds.len()
+        flat.local_kinds.push(kind)
+        return flat.local_kinds[flat.local_kinds.len() - 1]
+    }
+    kind
 }
 
 body_flat_struct_field_value: fn(value: TStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
@@ -1350,7 +1384,7 @@ body_copy_expr_kind: fn(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .BoolLit(f_value) -> NodeKind.BoolLit{value: f_value}
         .CharLit(f_value) -> NodeKind.CharLit{value: f_value}
         .StrLit(f_parts) -> NodeKind.StrLit{parts: body_copy_list_str_part(f_parts, flat)}
-        .Local(f_local) -> NodeKind.Local{local: f_local}
+        .Local(f_local) -> body_flat_local_shared(f_local, flat) ?? body_flat_local_file(NodeKind.Local{local: f_local}, flat)
         .Unit -> NodeKind.Unit
         .InlineBlock(f_body) -> NodeKind.InlineBlock{body: body_copy_list_stmt(f_body, flat)}
         .Uninit -> NodeKind.Uninit
