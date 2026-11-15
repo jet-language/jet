@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6974,
-    "rev": 106067,
+    "rev": 106069,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60544,6 +60544,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "c1 cell receipt on p157 (dev ac7422fb93, 2026-11-15 02:32-02:38; JET=<p157> jet Tools/perf/compile-throughput/Throughput.jet --budget 30M-wall --runs 3, cold and uncached, cpus 16-31), corpus 826,120 lines. Medians by wall: check 52,464 lines/s (15.75 s, cpu 74.5 s, parallel 4.7, peak 4040 MiB; sema.finalize 5.40 s, comptime 4.19, load 1.18, register 1.05); O0 18,055 lines/s (45.76 s, parallel 2.6, peak 6259 MiB; build.step 15.63 s serial, sema.finalize 9.94, comptime 3.87, ir.build 2.61, ir.x64 1.78); release 15,640 lines/s (52.82 s, peak 6233 MiB; build.step 13.31, sema.finalize 10.84, ir.opt 7.36, comptime 4.62, native.link 3.01). The budget column reads error 2 on every row (Tools/perf/budget/check exits 2); GoalsA-1-3 is fixing it, and c1/c2 stay open until a receipt carries verdicts. 30M lines/s is 570x away for check."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "p156 regression located (Main, 2026-11-15 02:09): jet check --trace InspectBuild.jet, p155 vs p156: comptime.closure SEMA_PRELUDE_MARKER_DECLS 0.00 -> 1.48 s; comptime.build and load of CORE_DECLARATIONS/CORE_BARE_SOURCE_KEYS/EFFECT... +0.34 s; comptime 1.83 -> 3.74 s. Cause: G5 a568b242df (the marker rows as a #run constant whose closure walks the parser). Fix owner PrecompiledCore-4."
         },
         {
@@ -60975,7 +60980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T07:09:55.917Z",
+      "updated": "2026-11-15T07:39:46.546Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -61208,11 +61213,11 @@
         {
           "n": 41,
           "text": "A 6.6 MB unicode control program compiles without being OOM-killed under an 8 GB cap (it peaked above 8.5 GB), with peak RSS and time recorded per compiler phase. Proof: a committed GNU time and `JET_TRACE_FILE` receipt of `jet check` on that program.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:29:30.150Z"
+          "evidence": "GoalsA-1-3's Tools/perf/unicode-literal/Run.jet landed 50df26e7d3; the receipt landed e8e9495efe (Tools/perf/unicode-literal/receipt.txt). On batch compiler p157 (dev ac7422fb93), 2026-11-15 02:40, under systemd MemoryMax=8G with no swap: jet check of the control program (Core/Text/Runtime/Assets/UnicodeNameIndex.jet before c56: 5,950,707 bytes, a 1,487,610-element [U8] literal; history holds no 6.6 MB revision) takes 1.39 s wall with a 509,764 KB (498 MiB) GNU time peak and exit 0, with per-phase wall/rss/peak from --trace (sources 0.35 s, load 0.30, register 0.15). It peaked above 8.5 GB when the criterion was written.",
+          "at": "2026-11-15T07:39:45.600Z"
         },
         {
           "n": 42,
@@ -61346,7 +61351,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-15T07:22:56.936Z",
+      "updated": "2026-11-15T07:39:45.600Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -218463,6 +218468,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T07:39:46.546Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T07:39:45.600Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fo37ov",
+      "note": "#41"
+    },
     {
       "at": "2026-11-15T07:25:38.113Z",
       "by": "Main",
