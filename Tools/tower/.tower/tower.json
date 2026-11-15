@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6861,
-    "rev": 103025,
+    "rev": 103050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42171,6 +42171,78 @@
           "verifiedBy": null,
           "evidence": "jet test Compiler --profile golden --filter DefaultErr: 18 PASS, 0 FAIL (DefaultErrValue, DefaultErrorConversion, DefaultErrEdge o0/o1/o2) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev bda8175585",
           "at": "2026-11-14T23:04:11.359Z"
+        },
+        {
+          "n": 16,
+          "text": "`#Policy(failures: .Explicit)` at block, function, module or package level makes each call that can pass a failure up need `?` or `?(text)`, with a registered error naming the call, and `jet fmt` inserts the marks (D-FAIL-VISIBLE1=A, mirroring `copies: .Explicit`). Proof: `jet test Compiler --profile ui --filter failures_explicit_policy` and `jet test Compiler --profile cases --filter fmt_inserts_failure_marks`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:03.501Z"
+        },
+        {
+          "n": 17,
+          "text": "`jet review` and `jet diff` list a change's failure points and flag a function that newly can fail (D-FAIL-VISIBLE1=A). Proof: `jet test Compiler --profile cases --filter review_flags_new_failure_point`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:04.430Z"
+        },
+        {
+          "n": 18,
+          "text": "A written failure contract is a ceiling: a body that can fail outside it is a registered error naming the extra failure, `Never!` denies failure, and `Err` inside the contract keeps it open (D-FAIL-PUBSIG1=A, D-FAIL-EFFECT1=A: failure sets follow the effect law). Proof: `jet test Compiler --profile ui --filter failure_contract_ceiling_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:05.324Z"
+        },
+        {
+          "n": 19,
+          "text": "`jet fix --pin-failures` writes each function's inferred failure set into its source as a written contract (D-FAIL-PUBSIG1=A). Proof: `jet test Compiler --profile cases --filter fix_pin_failures`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:06.216Z"
+        },
+        {
+          "n": 20,
+          "text": "`dbg(expr)` returns `expr` unchanged and writes one line to standard error (`[dbg] score.jet:3 word.len() * 3 = 9`); it adds no effect, so it works in `-[]>` functions, `#Memo` functions (printing only when the body runs) and compile-time code (D-DBG1=A). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Debugging/Dbg` on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:07.118Z"
+        },
+        {
+          "n": 21,
+          "text": "A release-profile build (`jet build`, or `--release` on any command) refuses any remaining `dbg` with a registered error, and `jet fix` removes the wrapper and keeps the expression (D-DBG1=A). Proof: `jet test Compiler --profile ui --filter dbg_in_release_build` and `jet test Compiler --profile cases --filter fix_removes_dbg`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:07.995Z"
+        },
+        {
+          "n": 22,
+          "text": "Typed and minted failures leave `run` and a written `Err!` contract without a conversion, on O0, O1 and O2, and the run-time report names the conversion (`FindError -> Err`) (probes uprop1, uprop2 and wcase in $JET_SCRATCH_ROOT/lanes/Main/prep/c3838/). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/MintedLeaveRun`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:08.881Z"
+        },
+        {
+          "n": 23,
+          "text": "A catch-all `.Err(e)` arm over an open failure union binds `e` as Err on every tier (probe catchall). Proof: `jet test Compiler --profile golden --filter ErrorsAndEffects/Failures/CatchAllOpenUnion` on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T02:42:09.775Z"
         }
       ],
       "refs": [
@@ -42184,12 +42256,12 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-14T23:04:11.359Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:42:09.775Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 23
     },
     {
       "id": "c0bs5inj",
@@ -55953,8 +56025,8 @@
     {
       "id": "c022g7qw",
       "num": 5073,
-      "title": "Compiler architecture: Source -> AST -> IR -> Machine Code (non-SSA slot IR, structured control, data-oriented); ballot + plan before engaging",
-      "body": "## Proposal: Source → AST → IR → Machine Code\nOwner-directed redesign, 2026-10-20. Sequencing: the work starts AFTER the greenfield cleanup (#5071), and it needs a ratified ballot first.\n\n**Today:** AST → TIR (typed desugared tree) → MIR (SSA + ownership) → LIR (SSA over words/layouts) → X64 instruction list → object. That is five representations, four full copies, and a validation pass per IR.\n\n**Proposed:**\n- **AST:** flat and lossless (integer node IDs; tokens and trivia kept). Sema writes its results as arrays keyed by node ID (types, names, ownership/copy, effects, failure contracts). There is no second typed tree.\n- **IR:** one per function. Linear, slot-based, NOT SSA:\n  - variables are mutable typed slots;\n  - control flow is STRUCTURED (block / loop / if / break / continue), with no arbitrary jumps;\n  - ownership is explicit instructions (move / copy / drop / close);\n  - the IR is flat arrays, content-hashable, and serializable.\n- **Machine Code:** per-target selection + slot-based register allocation (linear scan over slot live ranges) + encoding.\n\n**Rejected:** a separate direct AST→machine-code O0 path. It would be a second code generator and violate I9.\n\n## How each consumer maps\n- **Comptime:** the evaluator executes the IR directly. Comptime and runtime share one representation, so I9 holds by construction. Effects, authority and determinism are enforced at IR host-call instructions.\n- **Web (Wasm/JS):** Wasm requires structured control flow and locals. Structured control + slots map 1:1 (slots → locals; block/loop/br), with no relooper. JS emit is the same.\n- **O1/O2:**\n  - local passes, inlining, simplification and loop vectorization (it needs loop structure, which is kept) run on the IR;\n  - a pass that needs SSA builds a per-function SSA view on demand and discards it, so debug builds never pay for SSA.\n- **Ownership:** drop flags, last uses, partial moves and Close order are dataflow over slots; this is what MIR analysis computes today.\n- **Debugging:** DWARF/DAP variables are slots, which is simpler than SSA location lists. Spans and node IDs flow AST → IR → machine.\n- **Dev/hot swap** (NativeSwap/WebModuleSwap), **REPL/notebooks**, **in-memory O0 `jet run`**: IR is per function with stable identities, so code units swap per function, and in-memory machine code is a direct product.\n- **Incremental, LSP and caching:** AST and facts are keyed by stable node IDs; the IR is content-addressed per function.\n- **FFI** (C ABI, runtime routes, C++/Rust bridges), **data plans/columnar**, **SIMD lanes**, **tasks/async/realtime**, **#Kernel/compute/autodiff**, **acceleration decisions:** each is mapped explicitly in the ballot. Each one is an inventory row with its proof.\n- **More targets** (ARM64, embedded) live behind the Machine Code layer. The IR is target-independent; layouts are resolved at a late IR stage per target.\n- **Package management (Nix replacement) and JetOS:** these rely on the programmable build (`fn build`), comptime, hermetic and deterministic outputs, and content-addressed caching.\n  - A deterministic, content-hashable per-function IR strengthens this: store keys for compiled units, distributed caching, reproducible builds.\n  - Nothing in the design narrows it.\n- **Rust emit:** removed with Rust.\n\n## Speed and waste analysis (measured 2026-10-20 quiet run, 105 s)\n**Phases:** front end ~45 s (parse, register, sema, comptime, finalize, names, merge), MIR lower 8, optimize 7, native.lower 14, native.object 23, foreign + link 6.\n\n- **IR work alone** removes the MIR/LIR split, the copies, the lints and the SSA/block-parameter overhead in roughly 50 s of the back end. Estimate: 105 s → ~60-70 s. That alone does NOT reach 30 s.\n- **30 s ALSO needs the data-oriented front end** (flat AST, facts tables, interned names, no per-node allocation). That is part of this architecture (its first steps).\n- **To avoid wasted work, speed work before the switch goes only where it carries over:**\n  - runtime (allocator, Shared/scheduler, threads);\n  - lexer/parser;\n  - sema/finalize/comptime contention;\n  - parallelism;\n  - the data-oriented AST/facts themselves.\n- **NO further optimization of MIR→LIR→x64 lowering or the SSA passes:** they are replaced.\n\n## Migration with no regressions\n1. **Inventory:** every feature/consumer of AST/TIR/MIR/LIR, each with a proof (examples, UI tests, fixtures, comptime programs, web examples).\n2. **Spike:** IR + O0 machine code for Core + examples. Measure speed and output against today's pipeline. This decides go/no-go.\n3. **Flat AST + facts** (replaces TIR). The proof is an identical compiled object.\n4. **IR replaces MIR + LIR:** O0 first, then O1/O2.\n   - During the transition only, the chain builds old and new side by side and requires identical program behavior: the differential harness from #5064, plus the comptime evaluator agreeing on every comptime program.\n   - The old path is deleted at each cutover (greenfield: no permanent dual paths).\n5. **Web emit and comptime** on the IR.\n6. **Lossless AST → new fmt** (the #5071 fmt root cause).\n\n## Decisions for the ballot\n- the names;\n- non-SSA slot IR with structured control;\n- on-demand SSA views only where a pass proves the need;\n- no direct O0 path;\n- order: cleanup → inventory → spike → front end → IR;\n- go/no-go gates and their metrics.",
+      "title": "Compiler architecture review follow-ups: generator gate, gated tool packages, one helper home, one layout owner",
+      "body": "Destination: the findings of the 2026-10-22 architecture review (Docs/audits/2026-10-22-architecture-review.md) that no other card owns are closed: generators have one freshness gate, every tool package is gated or deleted, Core and the runtime share one internal helper home, layout has one owner, every import is declared, and IR Lint keeps the Core arity rows true.\n\nWhy it matters: drift between copies is silent; each of these is a place where a fix in one copy does not reach the others (Pillar 5, Docs/spec/philosophy.md: one home per rule).\n\nThe pipeline itself is ratified as D-ARCH-IR1=A (one non-SSA slot IR between the AST and machine code) and is built: JetIR is the only IR, and IR Lint types every op (db30a75783).\n\nOwned elsewhere: the route tables (#6151, #6615 c8), keep-going's second control flow (#4914), the sandbox target and the committed guest wasm (#6366).",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e11",
@@ -55968,6 +56040,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Rebuilt: legacy one-line items restated from the 2026-10-22 architecture review with dev counts and proofs; c3, c11, c14-c16 met; c1 merged into #6615 c8; c7 moved to #4914 c11; c9, c10 moved to #6366 c42, #6366 c43."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -56303,128 +56380,132 @@
         {
           "n": 1,
           "text": "(was #5105) One route registry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:22:53.172Z"
+          "evidence": "Merged into #6615 c8: one route registry is the deletion of the IR route tables (#6615 c8) and of the compiler's twin tables (#6151 c2, c11)",
+          "at": "2026-11-15T02:40:42.639Z",
+          "closure": "obsolete"
         },
         {
           "n": 2,
-          "text": "(was #5106) Generator registry with a lander freshness gate",
+          "text": "Every generator is listed in one generator registry with a `--check` mode and one implementation, and the lander runs every check as a gate, so a generated file cannot drift (architecture review Repo1; census F20, F21). Proof: `jet test tests/guards --filter generators_fresh` runs each registered generator's `--check` and passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:23:00.874Z"
+          "at": "2026-11-15T02:40:30.577Z"
         },
         {
           "n": 3,
           "text": "(was #5107) Unicode tables as static data",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:23:07.844Z"
+          "evidence": "Landed in a3f54f035a (G11Speed-c29r4, #6328 c29 rule R4): every generated runtime Unicode lookup is a sorted record table in immortal static text searched by one binary search; Compiler/JetRuntime/Source/UnicodeTables.jet on dev 72a8142651 reads 'Static range tables: I64 only, no allocation or Core indexing'.",
+          "at": "2026-11-15T02:40:37.047Z"
         },
         {
           "n": 4,
-          "text": "(was #5108) Gate or delete packages outside the build",
+          "text": "Each tool package outside the Compiler members (JetLSP, JetDevserver, JetDebug, JetSemIndex, JetCanvas, JetRepl) is a member of Compiler/package.jet that checks at zero errors, or is deleted; JetRuntime checks at zero errors in its build mode (architecture review L3). Proof: `jet check` of each listed package exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:23:15.183Z"
+          "at": "2026-11-15T02:40:31.734Z"
         },
         {
           "n": 5,
-          "text": "(was #5112) Shared internal module for Core and runtime helpers",
+          "text": "Core and the runtime have one internal home for byte, text and number primitives (ascii_lower, hex digits, UTF-8 validity, JSON escaping, checked arithmetic) that other Core modules import without it becoming public API; Core has 12 private ascii_lower copies on dev 72a8142651. A census flags a new same-name private helper (architecture review R3). Proof: `git grep -c -E '^ascii_lower: fn' -- Core` reports one file, and `jet test tests/guards --filter duplicate_helpers` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:23:22.052Z"
+          "at": "2026-11-15T02:40:32.747Z"
         },
         {
           "n": 6,
-          "text": "(was #5113) Single layout owner after cutover A",
+          "text": "Layout is computed by one function: sema reflection's LayoutInfo and JetIR's type rows (ir_struct_size, ir_enum_box_size) read the same size, alignment and offsets (architecture review L4). Proof: `jet test Compiler --profile cases --filter reflection_layout_matches_ir` compares both for structs, enums, records and generics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:23:27.554Z"
+          "at": "2026-11-15T02:40:33.920Z"
         },
         {
           "n": 7,
           "text": "(was #5114) Keep-going: one failure-capture path per phase",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:23:32.344Z"
+          "evidence": "Moved to #4914 c11: keep-going belongs on the report-all-errors card",
+          "at": "2026-11-15T02:40:43.648Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
-          "text": "(was #5116) Remove dangling imports and undeclared dependencies",
+          "text": "Every package declares each package its sources import: no `use` of an undeclared package (jet_loader and jet_comptime in JetRepl/Console, jet_fixer in JetDevserver, jetpack_provider in JetLSP Hover at review time) and no dangling import (architecture review L3). Proof: `jet check` of every Compiler member and tool package reports no unresolved-package error.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:23:36.786Z"
+          "at": "2026-11-15T02:40:35.039Z"
         },
         {
           "n": 9,
           "text": "(was #5119) Manifest `targets: [sandbox]` outlives sandbox execution",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:23:41.225Z"
+          "evidence": "Moved to #6366 c42: the sandbox target belongs beside the plugin target work on the FFI card (#6366 c16)",
+          "at": "2026-11-15T02:40:44.593Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #5120) capabilities feature example needs a prebuilt guest wasm",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:23:46.301Z"
+          "evidence": "Moved to #6366 c43: the committed guest wasm goes with the sandbox target",
+          "at": "2026-11-15T02:40:45.526Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #4131 c1) Jet backend 5: frames, System V calls and calls into the compiled runtime: implemented, with a focused test or fixture that passes; the command and its result are logged on this card [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:49:38.221Z"
+          "evidence": "Holds on dev 72a8142651: the JetIR x64 back end builds frames and makes System V calls into the compiled runtime for every native program; `jet test Compiler --profile golden --filter Basics/FizzBuzz` PASS 3 (o0, o1, o2) with the gate-p136 jet, 2026-11-14. JetIR is the only back end since db30a75783's parent line (JetBackend's LIR is gone).",
+          "at": "2026-11-15T02:40:38.073Z"
         },
         {
           "n": 14,
           "text": "IR Lint types every op (owner 2026-11-09; follows done #6065): IRLintTyping has no Bare row, so every IROp but Nop and Unreachable has a typing rule (Load, Store, CallIndirect and the other 13 former Bare rows), and LintPlanted plants a violation for each new rule with lp_valid exercising every op with no finding.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:04:02.068Z"
+          "evidence": "Landed in db30a75783 (IR Lint: give every IR op a full static type): the 16 IRLintTyping.Bare rows are gone and every op but Nop and Unreachable has a typing rule; LintPlanted plants a violation per rule. On dev and master.",
+          "at": "2026-11-15T02:40:39.116Z"
         },
         {
           "n": 15,
           "text": "CallIndirect is typed: indirect and closure calls load the code word into a #code<Fn> row and the lint checks arity, argument and result kinds against it; the golden, ui and cases profiles show no new internal-error row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:04:03.082Z"
+          "evidence": "Landed in db30a75783: CallIndirect checks arity, each argument kind and the result kind against the callee's Fn type carried on the `#code<fn type>` row (IR_CODE_TYPE, built by ir_code_row, loaded by ir_indirect_call and ir_call_closure).",
+          "at": "2026-11-15T02:40:40.272Z"
         },
         {
           "n": 16,
           "text": "Every path that builds IR lints it once: jet emit --ir (an internal error with exit 101 after the dump), comptime batches and the comptime entry module; the emit --ir and comptime_ cases pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:04:03.996Z"
+          "evidence": "Landed in db30a75783: `jet emit --ir` runs the lint as pass ir.build (an ICE row with exit 101 after the dump), and comptime runs it as eval.batch before each x64 batch and eval.entry on the hand-built entry module.",
+          "at": "2026-11-15T02:40:41.496Z"
         },
         {
           "n": 17,
@@ -56437,12 +56518,12 @@
         },
         {
           "n": 18,
-          "text": "Regression found 2026-11-09 (LintPlanted core routes row on dev 6a06b917cb; #6114 was met): core.plugin.load is 2 args in CORE_CALLS but jet_plugin_load takes 3, and core.crypto.vault.current is 1 arg but jet_vault_current_impl takes 2; the arity rows agree again and the R4 core.arity check keeps them agreeing.",
+          "text": "The Core arity rows agree with their runtime routes: core.plugin.load (CORE_CALLS 2 arguments, jet_plugin_load 3) and core.crypto.vault.current (1 against jet_vault_current_impl's 2) disagreed on dev 6a06b917cb, and the IR Lint core.arity check keeps them agreeing. Proof: `jet test Compiler/JetIR --filter LintPlanted` passes with LP_CORE_ARITY empty.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:04:05.966Z"
+          "at": "2026-11-15T02:40:36.012Z"
         }
       ],
       "refs": [],
@@ -56456,8 +56537,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-14T01:18:12.475Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T02:40:48.034Z",
+      "updatedBy": "TowerKeeper-1",
       "goals": [
         "G6"
       ],
@@ -205931,6 +206012,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T02:42:09.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#23 A catch-all `.Err(e)` arm over an open failure union binds `"
+    },
+    {
+      "at": "2026-11-15T02:42:08.881Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#22 Typed and minted failures leave `run` and a written `Err!` c"
+    },
+    {
+      "at": "2026-11-15T02:42:07.995Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#21 A release-profile build (`jet build`, or `--release` on any "
+    },
+    {
+      "at": "2026-11-15T02:42:07.118Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#20 `dbg(expr)` returns `expr` unchanged and writes one line to "
+    },
+    {
+      "at": "2026-11-15T02:42:06.216Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#19 `jet fix --pin-failures` writes each function's inferred fai"
+    },
+    {
+      "at": "2026-11-15T02:42:05.324Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#18 A written failure contract is a ceiling: a body that can fai"
+    },
+    {
+      "at": "2026-11-15T02:42:04.430Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#17 `jet review` and `jet diff` list a change's failure points a"
+    },
+    {
+      "at": "2026-11-15T02:42:03.501Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#16 `#Policy(failures: .Explicit)` at block, function, module or"
+    },
+    {
+      "at": "2026-11-15T02:40:48.034Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T02:40:47.089Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T02:40:45.526Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T02:40:44.593Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T02:40:43.648Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T02:40:42.640Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-15T02:40:41.496Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T02:40:40.272Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T02:40:39.116Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-15T02:40:38.073Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T02:40:37.047Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c022g7qw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-15T02:40:36.012Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#18: adds the proof; was: Regression found 2026-11-09 (LintPlanted core routes row on dev 6a06b917cb; #6114 was met): core.plugin.load is 2 args in CORE_CALLS but jet_plugin_load takes 3, and core.crypto.vault.current is 1 arg"
+    },
+    {
+      "at": "2026-11-15T02:40:35.039Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#8: restated from the architecture review finding; adds the proof; was: (was #5116) Remove dangling imports and undeclared dependencies"
+    },
+    {
+      "at": "2026-11-15T02:40:33.920Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#6: restated from the architecture review finding; the LIR copy is gone with JetBackend; was: (was #5113) Single layout owner after cutover A"
+    },
+    {
+      "at": "2026-11-15T02:40:32.747Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#5: restated from the architecture review finding with the dev count; adds the proof; was: (was #5112) Shared internal module for Core and runtime helpers"
+    },
+    {
+      "at": "2026-11-15T02:40:31.734Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#4: restated from the architecture review finding; adds the proof; was: (was #5108) Gate or delete packages outside the build"
+    },
+    {
+      "at": "2026-11-15T02:40:30.577Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c022g7qw",
+      "note": "#2: restated from the architecture review finding; adds the proof; was: (was #5106) Generator registry with a lander freshness gate"
+    },
     {
       "at": "2026-11-15T02:40:29.267Z",
       "by": "TowerKeeper-1",
