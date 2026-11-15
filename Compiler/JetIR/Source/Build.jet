@@ -218,11 +218,12 @@ IRBuilder: struct {
     // (ir_memo_file).
     memo: IRMemo?{None}
     // The slot and instruction counts where the innermost open
-    // `#Context(allocator: a)` block of this body began (-1: none open):
-    // storage it reserved after them is younger than the block
+    // `#Context(allocator: a)` block of this body began (0 with none open:
+    // all of this body's frame is younger than every block open when it
+    // runs): storage it reserved after them is younger than the block
     // (BuildRoutes.jet ir_list_grow_buffer).
-    young_slots: Int{-1}
-    young_ops: Int{-1}
+    young_slots: Int{0}
+    young_ops: Int{0}
     // Building the program entry itself (IRProgram.entry, not a lambda or a
     // generic instance in it): its end and each return first report the
     // entry returning (ir_entry_ending), so its drops can leave the heap to

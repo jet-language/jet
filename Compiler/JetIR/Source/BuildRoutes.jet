@@ -6,10 +6,11 @@ use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuilt
 // A buffer of `bytes` bytes (a slot) to replace the one of the List at
 // `list`, null when `try` and refused. In a program's module it comes from
 // the allocator that served the old buffer, else from the one owning the
-// List's storage (BuildMove.jet), the current one for storage this body
-// reserved inside its innermost open `#Context(allocator: a)` block (which
-// its address test cannot tell from the frame's older storage); the heap
-// anywhere else.
+// List's storage (BuildMove.jet): the current one for storage of this
+// body's frame reserved inside its innermost open `#Context(allocator: a)`
+// block, or with none open (the address test cannot tell that storage
+// from the frame's older storage, nor from a caller's frame once the body
+// is inlined there); the heap anywhere else.
 ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try: Bool) -> Int Never! {
     word_row: ir_word_row(m)
     if !m.user_values {
@@ -22,11 +23,12 @@ ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try:
 }
 
 // Whether `slot` addresses storage of this body's frame reserved inside its
-// innermost open `#Context(allocator: a)` block: every write of it there is
-// a StackAddress, or an Offset into such storage or a Move or Copy of it (a
-// local list's header moves from the storage its literal built).
+// innermost open `#Context(allocator: a)` block, or anywhere in it with none
+// open: every write of it there is a StackAddress, or an Offset into such
+// storage or a Move or Copy of it (a local list's header moves from the
+// storage its literal built). A parameter's storage is the caller's.
 ir_young_storage: fn(b: IRBuilder, slot: Int) -> Bool Never! {
-    if b.young_slots < 0 || slot < b.young_slots -> return false
+    if slot < b.young_slots || slot < b.f.param_count -> return false
     made := false
     loop at in b.young_ops..<b.f.op.len() {
         if b.f.dst[at] != slot -> next
