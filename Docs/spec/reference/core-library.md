@@ -3694,7 +3694,10 @@ resulting parts (D-TEXTUNICODE1=A).
 
 The checksum-verifying `Tools/agent/UnicodeTables.jet` owns the pinned
 mapping and property assets, including the native runtime's fixed-word
-lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
+lookup functions. Each Core asset is a binary file
+(`Core/Text/Runtime/Assets/*.bin`) that its Jet module embeds with
+`embed_bytes` when the program is built, so every tier reads the same bytes.
+Regenerate them from `tests/data/unicode/ucd`; never copy
 host Unicode tables or hand-maintain a native whitespace/casing list.
 Run it with `--check` to check every generated asset for exact byte identity;
 the lander runs that check as a ratchet.
@@ -3736,9 +3739,10 @@ non-ignorable, the CLDR default, so punctuation and spaces sort as characters
 before digits and letters. Levels 1 to 3 (base letter, accent, case) are
 followed by an identical level on the NFD scalars. Implicit weights for Han,
 Tangut, Nüshu, Khitan and unassigned code points are computed, not stored.
-`Tools/agent/CollationTable.jet` generates `Core/Text/CollationTable.jet` from
-the vendored, checksum-verified `tests/data/unicode/uca/allkeys_CLDR.txt`;
-the table is linked only into programs that collate. There is no
+`Tools/agent/CollationTable.jet` generates `Core/Text/CollationTable.jet` and
+the binary tables it embeds (`Core/Text/CollationTable/*.bin`) from the
+vendored, checksum-verified `tests/data/unicode/uca/allkeys_CLDR.txt`; the
+table is linked only into programs that collate. There is no
 locale-specific tailoring. String `<`, `<=>` and `sort()` keep byte order,
 which is code point order and the order `LC_COLLATE=C` gives.
 

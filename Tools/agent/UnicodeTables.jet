@@ -4,7 +4,10 @@
 //     and UnicodeText<n>.jet: the runtime's static range tables (no heap, no
 //     Core indexing);
 //   Core/Text/SegmentationTables.jet and Core/Text/Runtime/Assets/*.jet: the
-//     JUCD schema-1 assets, with Assets.jet and manifest.json;
+//     JUCD schema-1 assets, each a generated binary file beside its Jet file
+//     (Assets/<Unit>.bin) that the Jet file embeds when the program is built,
+//     with Assets.jet and manifest.json; SegmentationTables.jet embeds the
+//     same files;
 //   the generated string-asset block of Core/Text/Runtime/KernelUnicodeString.jet.
 // Every input under tests/data/unicode/ucd is checked against
 // tests/data/unicode/SHA256SUMS before it is read.
@@ -53,7 +56,6 @@ SENTENCE_TAGS: [String]{"Other", "CR", "LF", "Extend", "Sep", "Format", "Sp", "L
 INCB_TAGS: [String]{"None", "Linker", "Consonant", "Extend"}
 SCALAR_LANE: 2097152
 MAX_SCALAR: 1114111
-HEX_DIGITS: "0123456789ABCDEF"
 
 #Error
 TableError: struct {
@@ -101,9 +103,14 @@ Leaf: struct {
     value: Int
 }
 
+// One generated file: its repository path and its bytes.
 Output: struct {
     path: String
-    text: String
+    bytes: [U8]
+}
+
+text_output: fn(path: String, text: String) -> Output {
+    Output{path: path, bytes: text.bytes()}
 }
 
 Asset: struct {
@@ -114,7 +121,7 @@ Asset: struct {
     stride: Int
     bytes: Int
     sha256: String
-    source: String
+    data: [U8]
 }
 
 Ucd: struct {
@@ -717,22 +724,22 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
         "// Native text-method lookups; static range tables, no allocation/Core indexing.\n",
         "// Full mappings pack three 21-bit scalar lanes (low lane first).\n",
     }.join("")
-    units := [Output]{}
+    units := [String]{}
     loop lookup in lookups {
         n: units.len()
-        if n > 0 && byte_len(units[n - 1].text) + 1 + byte_len(lookup) <= limit {
-            units[n - 1] = Output{path: units[n - 1].path.copy(), text: [String]{units[n - 1].text, "\n", lookup}.join("")}
+        if n > 0 && byte_len(units[n - 1]) + 1 + byte_len(lookup) <= limit {
+            units[n - 1] = [String]{units[n - 1], "\n", lookup}.join("")
             next
         }
         text: [String]{text_header, lookup}.join("")
         if byte_len(text) > limit -> return Err(fail("text lookup exceeds existing UnicodeTables.jet size: {lookup.partition("\n").head}"))
-        units.push(Output{path: "{RUNTIME_DIR}/UnicodeText{n}.jet", text: text})
+        units.push(text)
     }
     outputs := [Output]{
-        Output{path: "{RUNTIME_DIR}/UnicodeTables.jet", text: tables},
-        Output{path: "{RUNTIME_DIR}/UnicodeNormalizeTables.jet", text: normalize},
+        text_output("{RUNTIME_DIR}/UnicodeTables.jet", tables),
+        text_output("{RUNTIME_DIR}/UnicodeNormalizeTables.jet", normalize),
     }
-    loop unit in units -> outputs.push(unit.copy())
+    loop (n, unit) in units -> outputs.push(text_output("{RUNTIME_DIR}/UnicodeText{n}.jet", unit))
     Ok(outputs)
 }
 
@@ -769,19 +776,6 @@ jucd: fn(kind: Int, count: Int, stride: Int, body: [U8], pool: [U8]) -> [U8] Tab
     Ok(out)
 }
 
-byte_literal: fn(bytes: [U8]) -> String {
-    digits: HEX_DIGITS.bytes()
-    out := [U8]{}
-    loop byte in bytes {
-        value: Int{byte}
-        out.push(U8{92})
-        out.push(U8{120})
-        out.push(digits[value >> 4])
-        out.push(digits[value.bit_and(Int{15})])
-    }
-    String.from_bytes_lossy(out)
-}
-
 span_rows: fn(spans: [Span], tagged: Bool) -> [Int] {
     out := [Int]{}
     loop span in spans {
@@ -792,11 +786,18 @@ span_rows: fn(spans: [Span], tagged: Bool) -> [Int] {
     out
 }
 
-segmentation_asset: fn(symbol: String, spans: [Span], tagged: Bool) -> String TableError! {
-    widths: if tagged -> [Int]{3, 3, 1} else -> [Int]{3, 3}
-    stride: if tagged -> 7 else -> 6
-    bytes: jucd(if tagged -> 3 else -> 2, spans.len(), stride, records(span_rows(spans, tagged), widths), [U8]{})
-    Ok("// {spans.len()} JUCD records, {stride} bytes each.\n{symbol}: [U8]{{\"{byte_literal(bytes)}\"}}\n")
+// The Jet file of the asset `item`: it embeds the asset's binary file beside it.
+asset_source: fn(item: Asset) -> String {
+    "{HEADER}// JUCD schema 1; little-endian; {item.count} records of {item.stride} bytes.\n// The bytes are {pascal(item.unit)}.bin beside this file, embedded when the program is built.\n{item.symbol}: #run {{ embed_bytes(\"{pascal(item.unit)}.bin\") }}\n"
+}
+
+// SegmentationTables.jet's entry for the asset named `symbol`: it embeds that
+// asset's binary file, so both read the same bytes.
+segmentation_entry: fn(assets: [Asset], symbol: String) -> String TableError! {
+    loop item in assets {
+        if item.symbol == symbol -> return Ok("// {item.count} JUCD records, {item.stride} bytes each.\n{symbol}: #run {{ embed_bytes(\"{ASSET_DIR.partition("Core/Text/").tail}/{pascal(item.unit)}.bin\") }}\n")
+    }
+    Err(fail("SegmentationTables.jet names {symbol}, which no asset carries"))
 }
 
 asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int], pool: [U8]) TableError! {
@@ -804,9 +805,9 @@ asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int
     loop width in widths -> stride += width
     count: rows.len() /% widths.len()
     bytes: jucd(kind, count, stride, records(rows, widths), pool)
-    unit: lower_ascii(symbol)
-    source: "{HEADER}// JUCD schema 1; little-endian; {count} records of {stride} bytes.\n{symbol}: [U8]{{\"{byte_literal(bytes)}\"}}\n"
-    assets.push(Asset{symbol: symbol, unit: unit, kind: kind, count: count, stride: stride, bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), source: source})
+    size: bytes.len()
+    digest: crypto.sha256(bytes).hex()
+    assets.push(Asset{symbol: symbol, unit: lower_ascii(symbol), kind: kind, count: count, stride: stride, bytes: size, sha256: digest, data: bytes})
     Ok()
 }
 
@@ -947,22 +948,21 @@ generated: fn() -[FS]> [Output] TableError! {
     sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
     ucd: read_ucd()
     outputs := runtime_outputs(ucd, sums)
-    segmentation := [String]{}
-    segmentation.push(segmentation_asset("UNICODE_WORD_BREAK", ucd.word, true))
-    segmentation.push(segmentation_asset("UNICODE_SENTENCE_BREAK", ucd.sentence, true))
-    segmentation.push(segmentation_asset("UNICODE_EXTENDED_PICTOGRAPHIC", ucd.extended_pictographic, false))
-    segmentation.push(segmentation_asset("UNICODE_ALPHABETIC", merge_pairs(ucd.alphabetic), false))
-    segmentation.push(segmentation_asset("UNICODE_NUMERIC", merge_pairs(ucd.numerics), false))
-    outputs.push(Output{path: "Core/Text/SegmentationTables.jet", text: [String]{HEADER, "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n", segmentation.join("\n")}.join("")})
     assets: core_assets(ucd)
+    segmentation := [String]{}
+    loop symbol in ([String]{"UNICODE_WORD_BREAK", "UNICODE_SENTENCE_BREAK", "UNICODE_EXTENDED_PICTOGRAPHIC", "UNICODE_ALPHABETIC", "UNICODE_NUMERIC"}) {
+        segmentation.push(segmentation_entry(assets, symbol))
+    }
+    outputs.push(text_output("Core/Text/SegmentationTables.jet", [String]{HEADER, "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n// Each table embeds the core.text runtime asset's binary file when the program is built.\n", segmentation.join("\n")}.join("")))
     modules := [String]{}
     loop item in assets {
-        outputs.push(Output{path: "{ASSET_DIR}/{pascal(item.unit)}.jet", text: item.source.copy()})
+        outputs.push(Output{path: "{ASSET_DIR}/{pascal(item.unit)}.bin", bytes: item.data.copy()})
+        outputs.push(text_output("{ASSET_DIR}/{pascal(item.unit)}.jet", asset_source(item)))
         modules.push("{item.unit}: module")
     }
-    outputs.push(Output{path: "{ASSET_DIR}/Assets.jet", text: "{HEADER}{modules.join("\n")}\n"})
-    outputs.push(Output{path: "{ASSET_DIR}/manifest.json", text: manifest(assets, sums)})
-    outputs.push(Output{path: STRING_KERNEL, text: string_kernel(assets)})
+    outputs.push(text_output("{ASSET_DIR}/Assets.jet", "{HEADER}{modules.join("\n")}\n"))
+    outputs.push(text_output("{ASSET_DIR}/manifest.json", manifest(assets, sums)))
+    outputs.push(text_output(STRING_KERNEL, string_kernel(assets)))
     Ok(outputs)
 }
 
@@ -972,14 +972,11 @@ tables_main: fn(args: [String]) -[FS]> String TableError! {
     outputs: generated()
     stale := [String]{}
     loop output in outputs {
-        current: files.read(output.path) ?? ""
-        if current == output.text -> next
-        if check {
-            stale.push(output.path.copy())
-            next
-        }
-        files.write(output.path, output.text) ?? return Err(fail("cannot write {output.path}: {err}"))
+        current: files.read_bytes(output.path) ?? [U8]{}
+        if current == output.bytes -> next
         stale.push(output.path.copy())
+        if check -> next
+        files.write_bytes(output.path, output.bytes) ?? return Err(fail("cannot write {output.path}: {err}"))
     }
     if check && stale.len() > 0 -> return Err(fail("unicode-tables: stale (run jet Tools/agent/UnicodeTables.jet): {stale.join(", ")}"))
     if check -> return Ok("unicode-tables: {outputs.len()} outputs are current")
@@ -1024,5 +1021,5 @@ run: fn() { print(tables_main(process.args()) ?? process.fail(1, err.message)) }
 }
 
 #Test("the checked-in tables match the vendored inputs") {
-    assert_eq(tables_main([String]{"--check"}) ?? err.message, "unicode-tables: 42 outputs are current")
+    assert_eq(tables_main([String]{"--check"}) ?? err.message, "unicode-tables: 75 outputs are current")
 }

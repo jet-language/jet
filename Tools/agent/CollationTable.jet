@@ -1,13 +1,15 @@
 #!/usr/bin/env jet
-// Generates Core/Text/CollationTable.jet, the table behind `text.collate` and
+// Generates Core/Text/CollationTable.jet and the binary tables beside it in
+// Core/Text/CollationTable/, the table behind `text.collate` and
 // `text.collation_key` (D-TEXT-COLLATE1=A): the CLDR root collation order for
-// Unicode 17.0.0, which English uses untailored.
+// Unicode 17.0.0, which English uses untailored. The Jet file embeds each
+// table's bytes when the program is built.
 // Inputs, both vendored and listed in tests/data/unicode/SHA256SUMS:
 //   tests/data/unicode/uca/allkeys_CLDR.txt  (CLDR 48 root, UCA 17.0.0)
 //   tests/data/unicode/ucd/PropList.txt      (Unified_Ideograph, for implicit weights)
 // Usage (from the repository root):
-//   jet Tools/agent/CollationTable.jet           rewrite the table
-//   jet Tools/agent/CollationTable.jet --check   fail when the table is stale
+//   jet Tools/agent/CollationTable.jet           rewrite every stale output
+//   jet Tools/agent/CollationTable.jet --check   write nothing; fail naming every stale output
 use {
     crypto: core.crypto
     files: core.files
@@ -18,11 +20,18 @@ ALLKEYS_PATH: "tests/data/unicode/uca/allkeys_CLDR.txt"
 PROPLIST_PATH: "tests/data/unicode/ucd/PropList.txt"
 SUMS_PATH: "tests/data/unicode/SHA256SUMS"
 TARGET_PATH: "Core/Text/CollationTable.jet"
+// The binary tables' directory, relative to TARGET_PATH's directory.
+TABLE_DIR: "CollationTable"
 ABSENT: 16777215
-HEX_DIGITS: "0123456789ABCDEF"
 #Error
 TableError: struct {
     message: String
+}
+
+// One generated file: its repository path and its bytes.
+Output: struct {
+    path: String
+    bytes: [U8]
 }
 
 // One allkeys row: 1-3 scalars and their collation elements, each
@@ -194,19 +203,6 @@ build_tables: fn(rows: [KeyRow]) -> Tables TableError! {
     Ok(Tables{singles: singles, single_count: single_count, contractions: contractions, contraction_count: contraction_count, elements: elements, element_count: element_count})
 }
 
-byte_literal: fn(bytes: [U8]) -> String {
-    digits: HEX_DIGITS.bytes()
-    out := [U8]{}
-    loop byte in bytes {
-        value: Int{byte}
-        out.push(U8{92})
-        out.push(U8{120})
-        out.push(digits[value >> 4])
-        out.push(digits[value.bit_and(Int{15})])
-    }
-    String.from_bytes_lossy(out)
-}
-
 // A JUCD schema-1 asset (Core/Text/Runtime/UnicodeAssets.jet `valid`): the
 // 40-byte header, then `count` records of `stride` bytes, then the pool.
 jucd: fn(kind: Int, count: Int, stride: Int, records: [U8], pool: [U8]) -> [U8] {
@@ -237,7 +233,12 @@ ideograph_rows: fn(ranges: [Int]) -> [U8] {
     out
 }
 
-render: fn(tables: Tables, ideographs: [Int], allkeys_sha: String) -> String {
+// One binary table: its file in TABLE_DIR beside TARGET_PATH, and its bytes.
+table_output: fn(name: String, bytes: [U8]) -> Output {
+    Output{path: "Core/Text/{TABLE_DIR}/{name}", bytes: bytes}
+}
+
+render: fn(tables: Tables, ideographs: [Int], allkeys_sha: String) -> [Output] {
     range_count: ideographs.len() /% 2
     lines := [String]{
         "// GENERATED FILE — do not hand-edit.",
@@ -246,24 +247,31 @@ render: fn(tables: Tables, ideographs: [Int], allkeys_sha: String) -> String {
         "// and the Unified_Ideograph ranges of tests/data/unicode/ucd/PropList.txt.",
         "// Regenerate: jet Tools/agent/CollationTable.jet",
         "// Compiler-private data part of core.text, read only by text.collate and",
-        "// text.collation_key. JUCD schema 1, Unicode 17.0.0, little-endian.",
+        "// text.collation_key. JUCD schema 1, Unicode 17.0.0, little-endian. Each",
+        "// table is a generated file in {TABLE_DIR}/ beside this one, embedded when",
+        "// the program is built.",
         "",
         "// Kind 9: {tables.single_count} single-scalar keys, 7 bytes each, sorted by scalar:",
         "// [scalar:3, first element:3, element count:1]. The pool holds the",
         "// {tables.element_count} collation elements of every key, 5 bytes each:",
         "// [primary:2, secondary:2, tertiary:1].",
-        "COLLATION_ELEMENTS: [U8]{{\"{byte_literal(jucd(9, tables.single_count, 7, tables.singles, tables.elements))}\"}}",
+        "COLLATION_ELEMENTS: #run {{ embed_bytes(\"{TABLE_DIR}/elements.bin\") }}",
         "",
         "// Kind 10: {tables.contraction_count} contraction keys, 13 bytes each, sorted by scalars:",
         "// [scalar:3, scalar:3, scalar:3 ({ABSENT} past the key's end), first element:3,",
         "// element count:1]. Element indexes point into COLLATION_ELEMENTS' pool.",
-        "COLLATION_CONTRACTIONS: [U8]{{\"{byte_literal(jucd(10, tables.contraction_count, 13, tables.contractions, [U8]{}))}\"}}",
+        "COLLATION_CONTRACTIONS: #run {{ embed_bytes(\"{TABLE_DIR}/contractions.bin\") }}",
         "",
         "// Kind 2: {range_count} Unified_Ideograph ranges [first:3, last:3], for implicit weights.",
-        "COLLATION_UNIFIED_IDEOGRAPHS: [U8]{{\"{byte_literal(jucd(2, range_count, 6, ideograph_rows(ideographs), [U8]{}))}\"}}",
+        "COLLATION_UNIFIED_IDEOGRAPHS: #run {{ embed_bytes(\"{TABLE_DIR}/unified_ideographs.bin\") }}",
         "",
     }
-    lines.join("\n")
+    [Output]{
+        Output{path: TARGET_PATH, bytes: lines.join("\n").bytes()},
+        table_output("elements.bin", jucd(9, tables.single_count, 7, tables.singles, tables.elements)),
+        table_output("contractions.bin", jucd(10, tables.contraction_count, 13, tables.contractions, [U8]{})),
+        table_output("unified_ideographs.bin", jucd(2, range_count, 6, ideograph_rows(ideographs), [U8]{})),
+    }
 }
 
 // The digest SHA256SUMS records for `name`, or an error naming the gap.
@@ -283,7 +291,7 @@ read_pinned: fn(path: String, sums: String) -[FS]> String TableError! {
     String.from_bytes(bytes) ?? return Err(fail("{path} is not UTF-8"))
 }
 
-generated_text: fn() -[FS]> String TableError! {
+generated: fn() -[FS]> [Output] TableError! {
     sums: files.read(SUMS_PATH) ?? return Err(fail("cannot read {SUMS_PATH}: {err}"))
     allkeys: read_pinned(ALLKEYS_PATH, sums)
     proplist: read_pinned(PROPLIST_PATH, sums)
@@ -294,14 +302,19 @@ generated_text: fn() -[FS]> String TableError! {
 table_main: fn(args: [String]) -[FS]> String TableError! {
     check: args.len() == 1 && args[0] == "--check"
     if args.len() > 1 || (args.len() == 1 && !check) -> return Err(fail("usage: CollationTable.jet [--check]"))
-    text: generated_text()
-    if check {
-        current: files.read(TARGET_PATH) ?? return Err(fail("cannot read {TARGET_PATH}: {err}"))
-        if current != text -> return Err(fail("{TARGET_PATH} is stale; run jet Tools/agent/CollationTable.jet"))
-        return Ok("collation-table: {TARGET_PATH} is current")
+    outputs: generated()
+    if !check -> files.create_dir_all("Core/Text/{TABLE_DIR}") ?? return Err(fail("cannot create Core/Text/{TABLE_DIR}: {err}"))
+    stale := [String]{}
+    loop output in outputs {
+        current: files.read_bytes(output.path) ?? [U8]{}
+        if current == output.bytes -> next
+        stale.push(output.path.copy())
+        if check -> next
+        files.write_bytes(output.path, output.bytes) ?? return Err(fail("cannot write {output.path}: {err}"))
     }
-    files.write(TARGET_PATH, text) ?? return Err(fail("cannot write {TARGET_PATH}: {err}"))
-    Ok("collation-table: wrote {TARGET_PATH}")
+    if check && stale.len() > 0 -> return Err(fail("collation-table: stale (run jet Tools/agent/CollationTable.jet): {stale.join(", ")}"))
+    if check -> return Ok("collation-table: {outputs.len()} outputs are current")
+    Ok("collation-table: wrote {stale.len()} of {outputs.len()} outputs")
 }
 
 run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
@@ -315,5 +328,5 @@ run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
 }
 
 #Test("the checked-in table matches the vendored inputs") {
-    assert_eq(table_main([String]{"--check"}) ?? err.message, "collation-table: {TARGET_PATH} is current")
+    assert_eq(table_main([String]{"--check"}) ?? err.message, "collation-table: 4 outputs are current")
 }
