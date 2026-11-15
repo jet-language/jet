@@ -28,9 +28,14 @@ A command that fails under `--json` prints one `jet.status/v1` line on stdout
 and nothing on stderr. Its `reports` hold the typed refusal: a missing file or
 project, a usage error, an unbuilt command, or a missing or mismatched engine.
 The compile and authority problems of `jet run --json` keep their status line
-on stderr, so the program's own stdout stays clean. `jet new --json` prints
-one line with action `new`: `new.path` is the folder and `new.files` the
-files it wrote.
+on stderr, so the program's own stdout stays clean. An unhandled failure the
+program's entry returns is then one `jet.err/v1` line on stderr, not the human
+report: its `message`, `code` and `cause`, its `context_frames`, the `origin`
+where it started and the `source_journey` of calls that passed it up, origin
+first. Each hop has its `fn_name`, `file`, `line`, `column`, its `?(text)`
+`note` (empty without one) and `hops`, how many times in a row that call
+passed it up. `jet new --json` prints one line with action `new`: `new.path`
+is the folder and `new.files` the files it wrote.
 
 `jet emit --ast|--ir <file>` prints one compiler tier of a file:
 `--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`

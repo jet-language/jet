@@ -55,6 +55,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         {name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        // `jet run --json` of the file: an unhandled failure the entry
+        // returns is one `jet.err/v1` line on stderr.
+        {name: "run_json", argv: ["run", "--json", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         // `jet run --deny=<rights>` of the file: the invocation's deny row
         // refuses a right the program reaches (E1803).
         {name: "run_deny", argv: ["run", "--deny=$arg", "$file"], parent: false, exit: "nonzero", streams: "both", capability: ""},

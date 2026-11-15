@@ -123,10 +123,13 @@ journey_trim_newlines: fn(text: I64) -> I64 {
     }
     rt_text_copy(data, length)
 }
+// The entry's unhandled failure as a report for stderr: one `jet.err/v1` line
+// when the wire is chosen (jet_report_use_wire, or JET_RUN_JSON from
+// `jet run --json`), else the human report and its trail.
 #Export(c) jet_error_report: fn(error: I64) -> I64 {
     journey: jet_journey_take_hops()
     report := I64{0}
-    if (sync_load(journey_report_wire_word) != I64{0}) {
+    if (sync_load(journey_report_wire_word) != I64{0} || host_startup_environment_value(env_name_jet_run_json()) != I64{0}) {
         report = jet_error_report_json(error, journey)
         rt_text_push_scalar(report, I64{10})
     } else {

@@ -1,0 +1,21 @@
+// `jet run --json` reports an unhandled failure as one `jet.err/v1` line on
+// stderr: its context frames, its origin and each call that passed it up,
+// origin first, with file, line, column and the `?(text)` note.
+parse: fn(raw: String) -> Int {
+    if raw == "" -> return Err("empty input")
+    raw.len()
+}
+
+double: fn(raw: String) -> Int {
+    n: parse(raw)?("parsing the count")
+    n * 2
+}
+
+total: fn() -> Int {
+    a: double("x")
+    b: double("")
+    a + b
+}
+
+run: fn() { print(total()) }
+// @run_json

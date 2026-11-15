@@ -319,6 +319,7 @@ the text before it.
 | `JET_RECEIPT_DIGEST` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The digest of the receipt a program's receipt sections extend. |
 | `JET_RECEIPT_DIR` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The directory a program's receipt sections are written to. |
 | `JET_RECEIPT_WITNESS` | `Jetpack/TrustRoot/Source/CacheReceipts.jet` | The witness new cache receipts record; without it, `ci` under CI, else the local account. |
+| `JET_RUN_JSON` | `Compiler/JetRuntime/Source/JourneyTLS.jet` | Set to `1` for the program a `jet run --json` or `jet dev --json` launches: an unhandled failure the entry returns is reported as one `jet.err/v1` line on stderr, with its origin and each hop's file, line and column. |
 | `JET_RUST_MUSL_AR` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The archiver of Rust foreign builds against musl. |
 | `JET_RUST_MUSL_LINKER` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The linker of Rust foreign builds against musl. |
 | `JET_RUST_MUSL_TOOLCHAIN` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The musl Rust toolchain whose `bin/rustc` Rust foreign builds run. |

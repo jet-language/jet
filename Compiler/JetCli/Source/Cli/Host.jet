@@ -104,6 +104,7 @@ use {
         ENV_JET_PROJECT_ROOT,
         ENV_JET_PROP_SEED,
         ENV_JET_READ_SCOPE,
+        ENV_JET_RUN_JSON,
         ENV_JET_TEST_CAPTURE,
         ENV_JET_TEST_FILTER,
         ENV_JET_TEST_MEASURE,
@@ -2225,20 +2226,23 @@ jet_cli_perf_samples_image: fn(executable: X64Executable) {
 // What a compiling verb's worker (jet_cli_compile_on_worker) hands the main
 // thread: its output, or the program `jet run` linked, which runs on the main
 // thread because only a single-threaded jet may run it in its own place
-// (jet_cli_launch).
+// (jet_cli_launch). `json` is `jet run --json`'s.
 JetCLIRunStep: enum {
     Output(output: JetDriverVerbOutput)
-    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool)
+    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool)
 }
 
 // Finish `step` on this thread: run its program (jet_cli_launch) with the
-// environment that lets it write a production-failure receipt, and under
-// `--observe` publish its run (jet_cli_observe_env), else return its output.
+// environment that lets it write a production-failure receipt, under
+// `--json` JET_RUN_JSON (an unhandled failure reports as one `jet.err/v1`
+// line, JetRuntime JourneyTLS.jet), and under `--observe` publish its run
+// (jet_cli_observe_env), else return its output.
 jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
-        .Launch(executable, file, binary, program_args, options, invocation, read_scope, verbose, color) -> {
+        .Launch(executable, file, binary, program_args, options, invocation, read_scope, verbose, color, json) -> {
             vars := jet_cli_production_receipt_env(file, program_args)
+            if json -> vars.push(JetCLIEnvVar{name: ENV_JET_RUN_JSON, value: "1"})
             if options.observe {
                 // copy: the observed run's fields join the receipt's.
                 loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
@@ -2421,7 +2425,7 @@ jet_cli_run_result: fn(file: String, source: String, color: Bool, options: Build
     built := jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
-        .Image(executable, path) -> JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: path, program_args: program_args, options: options, invocation: invocation, read_scope: read_scope, verbose: verbose, color: color}
+        .Image(executable, path) -> JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: path, program_args: program_args, options: options, invocation: invocation, read_scope: read_scope, verbose: verbose, color: color, json: json}
     }
 }
 
@@ -2484,15 +2488,15 @@ jet_cli_script_build_and_run: fn(file: String, source: String, color: Bool, json
     built := jet_cli_run_build(file, source, color, options, false, json, invocation, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
-        .Image(executable, path) -> jet_cli_script_launch(keep, authority, executable, file, path, program_args, options, invocation, color)
+        .Image(executable, path) -> jet_cli_script_launch(keep, authority, executable, file, path, program_args, options, invocation, color, json)
     }
 }
 
-jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, executable: &&X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetCLIRunStep {
+jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, executable: &&X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, color: Bool, json: Bool) -> JetCLIRunStep {
     if keep == .Val(kept) {
         _: jet_cli_script_keep(kept, executable, authority, build_options_value(options, "optimize"))
     }
-    JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: jet_cli_run_read_scope(authority, invocation), verbose: false, color: color}
+    JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: jet_cli_run_read_scope(authority, invocation), verbose: false, color: color, json: json}
 }
 
 jet_cli_native_test_unrun_check_report: fn() -> String Never! {
@@ -4123,7 +4127,7 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
             .Checked(result, inputs, snapshot) -> {
                 read = result.comptime_inputs.copy()
                 read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
-                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, read_scope, verbose, color)
+                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, read_scope, verbose, color, json)
             }
         }
         first = false
@@ -4167,13 +4171,13 @@ JetCLIDevChild: enum {
 
 // Start `jet dev`'s program from its build `built` (a failed build prints
 // its report; jet_cli_dev_launch runs a built one).
-jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
+jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool) -> JetCLIDevChild {
     if built == {
         .Failed(output) -> {
             cli_term.eprint(output.stderr)
             JetCLIDevChild.Idle
         }
-        .Image(executable, binary) -> jet_cli_dev_launch(executable, binary, file, program_args, port, options, invocation, read_scope, verbose, color)
+        .Image(executable, binary) -> jet_cli_dev_launch(executable, binary, file, program_args, port, options, invocation, read_scope, verbose, color, json)
     }
 }
 
@@ -4181,10 +4185,12 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 // jet_cli_launch runs it, else from its file `binary`, written first. It
 // gets the environment that lets it write a production-failure receipt,
 // JET_DEV=1 (a web app then picks a free port and reloads its pages,
-// Core/Web/Web.jet __app_listen), and `port`, the dev server's (JET_DEV_PORT).
-jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
+// Core/Web/Web.jet __app_listen), under `--json` JET_RUN_JSON, and `port`,
+// the dev server's (JET_DEV_PORT).
+jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool) -> JetCLIDevChild {
     vars := jet_cli_production_receipt_env(file, program_args)
     vars.push(JetCLIEnvVar{name: ENV_JET_DEV, value: "1"})
+    if json -> vars.push(JetCLIEnvVar{name: ENV_JET_RUN_JSON, value: "1"})
     if port == .Val(number) {
         vars.push(JetCLIEnvVar{name: ENV_JET_DEV_PORT, value: "{number}"})
         cli_term.eprint("jet dev: dev server port {number} ({ENV_JET_DEV_PORT})")
