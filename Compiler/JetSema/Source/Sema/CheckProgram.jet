@@ -32,6 +32,7 @@ use jet_foundation.[
     SemaNameCase,
     sema_casing_has_case,
     core_module_export,
+    module_index,
     module_is_core,
     module_is_none,
     module_none,
@@ -8655,8 +8656,7 @@ sema_comptime_precheck_fold: fn(program: SemaProgramTables, check: SemaComptimeI
 }
 
 // One function check a comptime run makes ahead of a pass's closures
-// (sema_comptime_function_prechecks): function `function_key` of
-// `module_identity`.
+// (SemaComptimeWalk): function `function_key` of `module_identity`.
 SemaComptimeFunctionJob: struct {
     module_identity: ModuleID
     function_key: String
@@ -8665,68 +8665,72 @@ SemaComptimeFunctionJob: struct {
 // A comptime run's on-demand function checks (sema_check_comptime_function),
 // made ahead of a pass's closures (jet_driver_comptime_prefetch), or of one
 // breadth-first level of a closure (jet_driver_comptime_closure_prefetch), on
-// the compiler threads. A closure checks the functions it reaches
-// one at a time. A function check reads only the graph, the constants it
-// references and its module's probe scope, and a value that lands between two
-// checks types only its own constant, so a check made at the start of the
-// pass that waits on no constant is the one the closure would make (the
-// driver keeps no other). The checks run in waves of consecutive modules, as
-// the item prechecks do (sema_comptime_precheck_items): the run's environment
-// is entered in each wave module in turn to prepare its probe scope, which
-// every thread reads through its own light copy. Each thread checks in its
-// own environment and program tables, whose graph records demand in rows of
-// its own (sema_comptime_function_thread_program), so each check captures
-// only its own demand (sema_demand_capture_open), and the closure that takes
-// the check records it into the run's graph (sema_comptime_replay_demand)
-// where its own check would have. Host callbacks are withheld; a check that
-// wanted one, and every job of a module that cannot be entered or of a wave
-// whose checks admit one thread, has no row (None). One row per job.
-sema_comptime_function_prechecks: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], memory_plan: SemaFunctionMemoryPlan, jobs: [SemaComptimeFunctionJob], threads: CompilerThreads) -> [SemaComptimeFunctionResult?] {
-    checks := [SemaComptimeFunctionResult?]{}
-    loop _ in 0..<jobs.len() -> checks.push(None)
-    // The jobs of each module, in order of first appearance; `module_rows`
-    // holds each module's row at its ModuleID row
-    // (sema_comptime_claim_module_slot).
-    module_rows := [Int]{}
-    module_identities := [ModuleID]{}
-    module_positions := [[Int]]{}
-    weights := [Int]{}
-    total := 0
-    loop (position, job) in jobs {
-        weight: sema_comptime_function_weight(program, job.function_key)
-        weights.push(weight)
-        total += weight
-        row: sema_comptime_claim_module_slot(module_rows, job.module_identity, module_positions.len())
-        if row == module_positions.len() {
-            module_identities.push(job.module_identity)
-            module_positions.push([Int]{})
-        }
-        module_positions[row].push(position)
+// the compiler threads as one walk. The driver queues functions
+// (sema_comptime_walk_push) while the threads check the queued ones
+// (sema_comptime_walk_run). The driver takes each check as soon as it is made
+// (sema_comptime_walk_take) and queues the functions it reaches while the
+// threads go on with the rest, so no thread waits for another thread's
+// check, only for the queue. A function check reads only the graph, the
+// constants it references and its module's probe scope, and a value that
+// lands between two checks types only its own constant, so a check made at
+// the start of the pass that waits on no constant is the one the closure
+// would make (the driver keeps no other). The driver enters the run's
+// environment in a module the first time it queues one of the module's
+// functions, preparing the module's probe scope
+// (sema_comptime_function_precheck_slot) in a cell of its own, which every
+// thread reads through its own light copy; it holds the scopes within a body
+// wave's bound (sema_comptime_walk_evict). Each thread checks in its own
+// environment and program tables, whose graph records demand in rows of its
+// own (sema_comptime_function_thread_program), so each check captures only
+// its own demand (sema_demand_capture_open). The closure that takes the
+// check records it into the run's graph (sema_comptime_replay_demand), where
+// its own check would have. Host callbacks are withheld. A check that wanted
+// one has no row, and neither does a function of a module that cannot be
+// entered.
+SemaComptimeWalk: struct {
+    state: Shared<SemaFunctionPrecheckShared>
+    queue: Shared<SemaComptimeWalkQueue>
+    changed: Condition
+    // The checking threads (sema_comptime_walk_admit).
+    workers: Int
+    // Each module's row in the queue's `slots`, at its ModuleID row
+    // (module_index): -1 for a module not entered yet (or whose scope was
+    // dropped, sema_comptime_walk_evict), -2 for one that cannot be entered.
+    // Each prepared scope's module and scope rows by its row, and the rows
+    // of the scopes the queue still holds. Only the driver's
+    // sema_comptime_walk_push reads and writes these.
+    module_slots: [Int]
+    slot_modules: [Int]
+    slot_rows: [Int]
+    held_rows: Int
+}
+
+// The threads a walk of `jobs` may use: as many as their work admits, or,
+// when the walk `grows` (the driver queues what each check reaches, so its
+// first jobs are not its work), every thread the compiler may use. Each
+// thread holds its light copy of one module scope at a time, within a body
+// wave's bound (SEMA_BODY_WAVE_SCOPE_ROWS).
+sema_comptime_walk_admit: fn(threads: CompilerThreads, program: SemaProgramTables, jobs: [SemaComptimeFunctionJob], grows: Bool) -> Int {
+    scratch: SEMA_BODY_WAVE_SCOPE_ROWS * SEMA_BODY_SCOPE_BYTES_PER_BINDING
+    if grows -> return compiler_threads_admit(threads, threads.cores, threads.cores, 1, scratch, 0)
+    work := 0
+    loop job in jobs -> work += sema_comptime_function_weight(program, job.function_key)
+    compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, scratch, 0)
+}
+
+// A walk on `workers` threads over the run's environment, program tables,
+// available constants, values and memory plan, with nothing queued yet.
+sema_comptime_walk_open: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], memory_plan: SemaFunctionMemoryPlan, workers: Int) -> SemaComptimeWalk {
+    SemaComptimeWalk{
+        state: Shared{SemaFunctionPrecheckShared{environments: [SemaScopeEnvironment]{environment}, programs: [SemaProgramTables]{program}, available: [SemaComptimeAvailableConstants]{available}, values: [[SemaComptimeItemValue]]{values}, memory_plans: [SemaFunctionMemoryPlan]{memory_plan}}},
+        queue: Shared{SemaComptimeWalkQueue{jobs: [SemaComptimeFunctionJob]{}, job_slots: [Int]{}, order: [Int]{}, next: 0, busy: 0, done: [SemaComptimeWalkDone]{}, slots: [Shared<SemaScopeProbeSlot>?]{}, pending: [Int]{}, closed: false, failed: false}},
+        changed: Condition.new(),
+        workers: workers,
+        module_slots: [Int]{},
+        slot_modules: [Int]{},
+        slot_rows: [Int]{},
+        held_rows: 0,
     }
-    if compiler_threads_admit(threads, jobs.len(), total, SEMA_BODY_MIN_BYTES_PER_THREAD, 0, 0) <= 1 {
-        return checks
-    }
-    // The shared state shares the run's environment and program tables:
-    // the run's environment enters the wave modules meanwhile, and each
-    // thread's checks write only its own (sema_comptime_function_precheck_claimed).
-    shared_state: Shared{SemaFunctionPrecheckShared{environments: [SemaScopeEnvironment]{environment}, programs: [SemaProgramTables]{program}, available: [SemaComptimeAvailableConstants]{available}, values: [[SemaComptimeItemValue]]{values}, memory_plans: [SemaFunctionMemoryPlan]{memory_plan}, jobs: jobs, slots: [SemaScopeProbeSlot]{}}}
-    start := 0
-    loop start < module_positions.len() {
-        // A wave holds every module's probe scope at once, so it takes
-        // consecutive modules while their scope rows stay within a body
-        // wave's bound (SEMA_BODY_WAVE_SCOPE_ROWS), and at least one.
-        end := start
-        scope_rows := 0
-        loop end < module_identities.len() {
-            rows: sema_comptime_precheck_scope_rows(program, module_identities[end])
-            if end > start && scope_rows + rows > SEMA_BODY_WAVE_SCOPE_ROWS -> break
-            scope_rows += rows
-            end += 1
-        }
-        sema_comptime_function_precheck_wave(shared_state, environment, program, module_identities, module_positions, weights, start, end, scope_rows, available.counted_values, threads, checks)
-        start = end
-    }
-    checks
 }
 
 // The source bytes of the function registered under `function_key`, a
@@ -8747,95 +8751,50 @@ sema_comptime_function_weight: fn(program: SemaProgramTables, function_key: Stri
     1
 }
 
-// What every function precheck thread reads: the run's environment, program
-// tables, available constants, values and memory plan, each the one row of
-// its list; the pass's jobs; and the current wave's prepared probe slots, one
-// per entered wave module.
+// What every walk thread reads while the walk lasts: the run's environment,
+// program tables, available constants, values and memory plan, each the one
+// row of its list. Nothing writes it while the walk lasts.
 SemaFunctionPrecheckShared: struct {
     environments: [SemaScopeEnvironment]
     programs: [SemaProgramTables]
     available: [SemaComptimeAvailableConstants]
     values: [[SemaComptimeItemValue]]
     memory_plans: [SemaFunctionMemoryPlan]
-    jobs: [SemaComptimeFunctionJob]
-    slots: [SemaScopeProbeSlot]
 }
 
-// One check a function precheck thread made, at its job's position.
-SemaFunctionPrecheckDone: struct {
-    position: Int
+// A walk's queue: every job queued, each with its module scope's row in
+// `slots` at `job_slots`; the positions of the jobs in the order the threads
+// claim them, `next` of them claimed so far; how many claimed jobs have no
+// check made yet (`busy`); the checks made and not taken yet; the module
+// scopes prepared for the walk, each in a cell of its own that only the
+// threads read (None once dropped), with each one's queued jobs not claimed
+// yet at `pending`; whether the driver closed the walk, and whether a
+// thread failed (sema_comptime_walk_watched).
+SemaComptimeWalkQueue: struct {
+    jobs: [SemaComptimeFunctionJob]
+    job_slots: [Int]
+    order: [Int]
+    next: Int
+    busy: Int
+    done: [SemaComptimeWalkDone]
+    slots: [Shared<SemaScopeProbeSlot>?]
+    pending: [Int]
+    closed: Bool
+    failed: Bool
+}
+
+// A check a walk thread made, of the queued job `job`.
+SemaComptimeWalkDone: struct {
+    job: SemaComptimeFunctionJob
     check: SemaComptimeFunctionResult
 }
 
-// A function precheck wave: modules `module_identities[start..<end]`, whose
-// scopes hold `scope_rows` rows, are each entered in turn
-// (sema_comptime_function_precheck_slot); the threads then claim the wave's
-// checks, modules with the heaviest function first and heaviest first within
-// a module. Each check lands in `checks` at its job's position.
-sema_comptime_function_precheck_wave: fn(shared_state: Shared<SemaFunctionPrecheckShared>, environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identities: [ModuleID], module_positions: [[Int]], weights: [Int], start: Int, end: Int, scope_rows: Int, version: Int, threads: CompilerThreads, checks: &[SemaComptimeFunctionResult?]) {
-    // Job j checks position positions[j] in wave module job_modules[j];
-    // firsts[k] is wave module k's first job, its last row the job count.
-    slots := [SemaScopeProbeSlot]{}
-    positions := [Int]{}
-    job_modules := [Int]{}
-    job_weights := [Int]{}
-    firsts := [Int]{}
-    heaviest := [Int]{}
-    work := 0
-    // A wave whose checks admit one thread prepares no module scope.
-    planned_jobs := 0
-    planned_work := 0
-    loop row in start..<end {
-        loop position in module_positions[row] {
-            planned_jobs += 1
-            planned_work += weights[position]
-        }
-    }
-    if compiler_threads_admit(threads, planned_jobs, planned_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0) <= 1 {
-        return
-    }
-    loop row in start..<end {
-        slot := sema_comptime_function_precheck_slot(environment, program, module_identities[row], version) ?? next
-        wave_module: firsts.len()
-        firsts.push(positions.len())
-        slots.push(slot.move())
-        module_heaviest := 0
-        loop position in module_positions[row] {
-            positions.push(position)
-            job_modules.push(wave_module)
-            job_weights.push(weights[position])
-            work += weights[position]
-            if weights[position] > module_heaviest -> module_heaviest = weights[position]
-        }
-        heaviest.push(module_heaviest)
-    }
-    firsts.push(positions.len())
-    workers: compiler_threads_admit(threads, positions.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
-    if workers <= 1 {
-        return
-    }
-    order := [Int]{}
-    loop wave_module in compiler_threads_heaviest_first(heaviest) {
-        first: firsts[wave_module]
-        module_weights := [Int]{}
-        loop job in first..<firsts[wave_module + 1] -> module_weights.push(job_weights[job])
-        loop index in compiler_threads_heaviest_first(module_weights) -> order.push(first + index)
-    }
-    sema_comptime_function_precheck_slots(shared_state, slots)
-    plan: Shared{SemaPrecheckPlan{positions: positions.move(), modules: job_modules.move(), order: order.move(), next: 0}}
-    done := [SemaFunctionPrecheckDone]{}
-    sema_comptime_function_precheck_claimers(shared_state, plan, 1, workers, done)
-    loop done.len() > 0 {
-        row := done.pop() ?? break
-        checks[row.position] = Val(row.check.move())
-    }
-    // The wave's module scopes leave with its threads.
-    sema_comptime_function_precheck_slots(shared_state, [SemaScopeProbeSlot]{})
-}
-
-sema_comptime_function_precheck_slots: fn(shared_state: Shared<SemaFunctionPrecheckShared>, slots: &&[SemaScopeProbeSlot]) {
-    permit: shared_state.guard_edit()
-    permit.value.slots = slots.move()
+// A job a walk thread claimed, with its module scope's row in the queue's
+// `slots` and that row's cell.
+SemaComptimeWalkClaim: struct {
+    job: SemaComptimeFunctionJob
+    slot: Int
+    scope: Shared<SemaScopeProbeSlot>
 }
 
 // Enters the run's environment in `module_identity` and prepares that
@@ -8857,7 +8816,7 @@ sema_comptime_function_precheck_slot: fn(environment: &SemaScopeEnvironment, pro
     probe.slots.pop()
 }
 
-// A function precheck thread's probe for one wave module: a light copy of
+// A walk thread's probe for one module (sema_comptime_walk_module): a light copy of
 // the module's prepared scope (sema_scope_light_copy) beside the slot's
 // small rows, with host callbacks withheld through `wanted`. It is prepared
 // for the same module and version, so a check's sema_comptime_probe_prepare
@@ -8879,7 +8838,7 @@ sema_comptime_function_thread_probe: fn(slot: SemaScopeProbeSlot, wanted: Shared
     }
 }
 
-// A function precheck thread's program tables: the run's, sharing every
+// A walk thread's program tables: the run's, sharing every
 // table, whose graph records the demand of the thread's checks in rows of
 // its own, so a check's capture holds only its own demand, and counts no
 // lookups (every lookup would take the shared counters' permit and serialize
@@ -8898,62 +8857,224 @@ sema_comptime_function_thread_graph: fn(held: &&SemaRegistrationGraph?) -> SemaR
     Val(graph.move())
 }
 
-// Runs claiming threads `from..<workers`, one task each, and moves every
-// check a thread returned into `done`; the calling thread claims beside them.
-sema_comptime_function_precheck_claimers: fn(shared_state: Shared<SemaFunctionPrecheckShared>, plan: Shared<SemaPrecheckPlan>, from: Int, workers: Int, done: &[SemaFunctionPrecheckDone]) {
-    if from >= workers {
-        claimed := sema_comptime_function_precheck_claimed(shared_state, plan)
-        loop claimed.len() > 0 {
-            row := claimed.pop() ?? break
-            done.push(row)
-        }
-        return
+// Runs the walk's checking threads until the driver closes it
+// (sema_comptime_walk_close): `workers` tasks, each claiming queued jobs
+// under watch (sema_comptime_walk_watched). The result is the number of
+// checks the threads made.
+sema_comptime_walk_run: fn(walk: SemaComptimeWalk) -> Int {
+    sema_comptime_walk_threads(walk, 0)
+}
+
+sema_comptime_walk_threads: fn(walk: SemaComptimeWalk, from: Int) -> Int {
+    if from >= walk.workers -> return 0
+    made := 0
+    task.group sema_comptime_walk_group {
+        head: task sema_comptime_walk_watched(walk)
+        made += sema_comptime_walk_threads(walk, from + 1)
+        made += head.join() ?? panic(compiler_threads_failure_text(err))
     }
-    task.group sema_function_precheck_threads {
-        head: task sema_comptime_function_precheck_claimed(shared_state, plan)
-        sema_comptime_function_precheck_claimers(shared_state, plan, from + 1, workers, done)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
-        loop claimed.len() > 0 {
-            row := claimed.pop() ?? break
-            done.push(row)
+    made
+}
+
+// One walk thread, watched: when it fails, the walk is marked failed at
+// once, so the driver stops waiting for its checks (sema_comptime_walk_take),
+// closes the walk, and the failure reaches the driver's join.
+sema_comptime_walk_watched: fn(walk: SemaComptimeWalk) -> Int {
+    made := 0
+    task.group sema_comptime_walk_watch {
+        thread: task sema_comptime_walk_claimed(walk)
+        made = thread.join() ?? {
+            sema_comptime_walk_fail(walk)
+            panic(compiler_threads_failure_text(err))
         }
+    }
+    made
+}
+
+sema_comptime_walk_fail: fn(walk: SemaComptimeWalk) {
+    permit: walk.queue.guard_edit()
+    permit.value.failed = true
+    walk.changed.notify_all()
+}
+
+// One walk thread: checks the jobs it claims until the walk closes, in its
+// own environment and program tables (each shares the run's rows until a
+// check writes it). The result is the number of checks it made.
+sema_comptime_walk_claimed: fn(walk: SemaComptimeWalk) -> Int {
+    inputs: walk.state.guard_read()
+    environment := inputs.value.environments[0]
+    program: sema_comptime_function_thread_program(inputs.value.programs[0])
+    made := 0
+    pending := sema_comptime_walk_claim(walk)
+    loop {
+        claim: pending ?? break
+        // Passed straight through: a local binding of a guarded row would copy it.
+        pending = sema_comptime_walk_module(walk, claim, environment, program, inputs.value.available[0], inputs.value.memory_plans[0], inputs.value.values[0], made)
+    }
+    made
+}
+
+// Checks the claimed job `first` and each next job the thread claims of the
+// same module, on its light copy of the module's prepared scope
+// (sema_comptime_function_thread_probe), with host callbacks withheld. The
+// light rows keep their types in the prepared scope, which a check reads in
+// place through the environment's `module_scope` (sema_scope_binding_type),
+// as an item precheck's module environment holds it. The result is the
+// thread's first claim of another module, or None once the walk is closed.
+sema_comptime_walk_module: fn(walk: SemaComptimeWalk, first: SemaComptimeWalkClaim, environment: &SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], made: &Int) -> SemaComptimeWalkClaim? {
+    scope: first.scope.guard_read()
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    probe := sema_comptime_function_thread_probe(scope.value, wanted)
+    environment.module_scope = Val(scope.value.table)
+    job := first.job
+    loop {
+        sema_host_hook_unwant(wanted)
+        check := sema_comptime_function_precheck_one(environment, program, probe, available, memory_plan, values, job)
+        if sema_host_hook_was_wanted(wanted) -> check = None
+        if check != None -> made += 1
+        sema_comptime_walk_finish(walk, job, check)
+        claim: sema_comptime_walk_claim(walk) ?? return None
+        if claim.slot != first.slot -> return Val(claim)
+        job = claim.job
     }
 }
 
-// One thread: checks the jobs it claims until none is left, in its own
-// environment and program tables (each shares the run's rows until a check
-// writes it), on its light copy of the job's module scope, made when it
-// claims a job of a module other than its previous job's; host callbacks are
-// withheld.
-sema_comptime_function_precheck_claimed: fn(shared_state: Shared<SemaFunctionPrecheckShared>, plan: Shared<SemaPrecheckPlan>) -> [SemaFunctionPrecheckDone] {
-    inputs: shared_state.guard_read()
-    jobs: plan.guard_read()
-    wanted: Shared{SemaHostHookWanted{wanted: false}}
-    environment := inputs.value.environments[0]
-    program: sema_comptime_function_thread_program(inputs.value.programs[0])
-    probe := sema_comptime_probe_init(None)
-    current := -1
-    claimed := [SemaFunctionPrecheckDone]{}
-    loop {
-        claim: sema_comptime_precheck_claim(jobs.value)
-        if claim.position < 0 -> break
-        if claim.wave_module != current {
-            current = claim.wave_module
-            probe = sema_comptime_function_thread_probe(inputs.value.slots[current], wanted)
-            // The probe's light rows keep their types in the wave module's
-            // prepared scope, which a check reads in place through the
-            // environment's `module_scope` (sema_scope_binding_type), as an
-            // item precheck's module environment holds it.
-            environment.module_scope = Val(inputs.value.slots[current].table)
+// The next queued job, claimed once one is queued; None once the walk is
+// closed with every job claimed.
+sema_comptime_walk_claim: fn(walk: SemaComptimeWalk) -> SemaComptimeWalkClaim? {
+    permit: walk.queue.guard_edit()
+    permit.wait(walk.changed, fn(value) { value.next < value.order.len() || value.closed }) ?? panic("a comptime walk thread could not wait for its queue")
+    if permit.value.next >= permit.value.order.len() -> return None
+    position: permit.value.order[permit.value.next]
+    permit.value.next += 1
+    permit.value.busy += 1
+    slot: permit.value.job_slots[position]
+    permit.value.pending[slot] = permit.value.pending[slot] - 1
+    scope: permit.value.slots[slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
+    Val(SemaComptimeWalkClaim{job: permit.value.jobs[position], slot: slot, scope: scope})
+}
+
+// Ends a claimed job: its check, when it made one, waits in the queue for
+// the driver (sema_comptime_walk_take).
+sema_comptime_walk_finish: fn(walk: SemaComptimeWalk, job: SemaComptimeFunctionJob, check: &&SemaComptimeFunctionResult?) {
+    permit: walk.queue.guard_edit()
+    made := check.move()
+    if made != None {
+        permit.value.done.push(SemaComptimeWalkDone{job: job, check: made.move() ?? panic("a comptime walk check vanished")})
+    }
+    permit.value.busy -= 1
+    walk.changed.notify_all()
+}
+
+// The checks the threads made since the last take, in the order they were
+// made, waiting for one; empty once every queued job is checked or a thread
+// failed, when the walk has nothing more unless the driver queues more.
+sema_comptime_walk_take: fn(walk: SemaComptimeWalk) -> [SemaComptimeWalkDone] {
+    permit: walk.queue.guard_edit()
+    permit.wait(walk.changed, fn(value) { value.done.len() > 0 || value.failed || (value.next >= value.order.len() && value.busy == 0) }) ?? panic("the comptime walk could not wait for its checks")
+    if permit.value.failed -> return [SemaComptimeWalkDone]{}
+    taken := [SemaComptimeWalkDone]{}
+    loop permit.value.done.len() > 0 {
+        row: permit.value.done.pop() ?? break
+        taken.push(row)
+    }
+    taken.reverse()
+    taken
+}
+
+// Queues `jobs` on the walk and wakes its threads. The run's environment
+// enters each module the walk holds no scope of yet, preparing the module's
+// scope for the threads (sema_comptime_function_precheck_slot); a job of a
+// module that cannot be entered is not queued (the closure checks it). The
+// threads claim the modules with the heaviest job first, and each module's
+// jobs heaviest first, so a thread mostly stays in one module's scope.
+sema_comptime_walk_push: fn(walk: &SemaComptimeWalk, environment: &SemaScopeEnvironment, program: SemaProgramTables, version: Int, jobs: [SemaComptimeFunctionJob]) {
+    // Module k of this push has scope row `slots[k]`, its jobs at
+    // `members[k]` and its heaviest job's weight at `heaviest[k]`.
+    slots := [Int]{}
+    members := [[Int]]{}
+    member_weights := [[Int]]{}
+    heaviest := [Int]{}
+    loop job_row in 0..<jobs.len() {
+        job: jobs[job_row]
+        at: module_index(job.module_identity)
+        loop walk.module_slots.len() <= at -> walk.module_slots.push(-1)
+        if walk.module_slots[at] == -1 {
+            walk.module_slots[at] = -2
+            rows: sema_comptime_precheck_scope_rows(program, job.module_identity)
+            sema_comptime_walk_evict(walk, rows, slots)
+            prepared := sema_comptime_function_precheck_slot(environment, program, job.module_identity, version)
+            if prepared != None {
+                walk.module_slots[at] = walk.slot_modules.len()
+                walk.slot_modules.push(at)
+                walk.slot_rows.push(rows)
+                walk.held_rows += rows
+                sema_comptime_walk_add_slot(walk, prepared.move() ?? panic("a prepared comptime walk scope vanished"))
+            }
         }
-        sema_host_hook_unwant(wanted)
-        // Passed straight through: a local binding of a guarded row would copy it.
-        check := sema_comptime_function_precheck_one(environment, program, probe, inputs.value.available[0], inputs.value.memory_plans[0], inputs.value.values[0], inputs.value.jobs[claim.position]) ?? next
-        if !sema_host_hook_was_wanted(wanted) {
-            claimed.push(SemaFunctionPrecheckDone{position: claim.position, check: check.move()})
+        slot: walk.module_slots[at]
+        if slot < 0 -> next
+        weight: sema_comptime_function_weight(program, job.function_key)
+        group := 0
+        loop group < slots.len() && slots[group] != slot -> group += 1
+        if group == slots.len() {
+            slots.push(slot)
+            members.push([Int]{})
+            member_weights.push([Int]{})
+            heaviest.push(0)
+        }
+        members[group].push(job_row)
+        member_weights[group].push(weight)
+        if weight > heaviest[group] -> heaviest[group] = weight
+    }
+    if slots.len() == 0 -> return
+    permit: walk.queue.guard_edit()
+    loop group in compiler_threads_heaviest_first(heaviest) {
+        loop member in compiler_threads_heaviest_first(member_weights[group]) {
+            permit.value.order.push(permit.value.jobs.len())
+            permit.value.jobs.push(jobs[members[group][member]])
+            permit.value.job_slots.push(slots[group])
+            permit.value.pending[slots[group]] = permit.value.pending[slots[group]] + 1
         }
     }
-    claimed
+    walk.changed.notify_all()
+}
+
+// Drops the prepared scopes no queued job needs, oldest first, until a new
+// scope of `rows` rows fits beside the held ones within a body wave's bound
+// (SEMA_BODY_WAVE_SCOPE_ROWS), as a precheck wave holds its modules' scopes;
+// `keep` are the scopes the current push queues jobs on. A thread still
+// checking a job of a dropped scope holds its cell until it moves on, and a
+// module whose scope was dropped is entered again when the driver next
+// queues one of its functions.
+sema_comptime_walk_evict: fn(walk: &SemaComptimeWalk, rows: Int, keep: [Int]) {
+    if walk.held_rows + rows <= SEMA_BODY_WAVE_SCOPE_ROWS -> return
+    permit: walk.queue.guard_edit()
+    slot := 0
+    loop slot < walk.slot_modules.len() && walk.held_rows > 0 && walk.held_rows + rows > SEMA_BODY_WAVE_SCOPE_ROWS {
+        if permit.value.slots[slot] != None && permit.value.pending[slot] == 0 && !keep.contains(slot) {
+            permit.value.slots[slot] = None
+            walk.held_rows -= walk.slot_rows[slot]
+            walk.module_slots[walk.slot_modules[slot]] = -1
+        }
+        slot += 1
+    }
+}
+
+// Adds a module scope the driver prepared for the walk, in a cell of its own.
+sema_comptime_walk_add_slot: fn(walk: SemaComptimeWalk, slot: &&SemaScopeProbeSlot) {
+    cell: Shared{slot.move()}
+    permit: walk.queue.guard_edit()
+    permit.value.slots.push(Val(cell))
+    permit.value.pending.push(0)
+}
+
+// Closes the walk: its threads end once every queued job is claimed
+// (sema_comptime_walk_run).
+sema_comptime_walk_close: fn(walk: SemaComptimeWalk) {
+    permit: walk.queue.guard_edit()
+    permit.value.closed = true
+    walk.changed.notify_all()
 }
 
 sema_comptime_function_precheck_one: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], job: SemaComptimeFunctionJob) -> SemaComptimeFunctionResult? {
