@@ -99,11 +99,8 @@ sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> Se
     }
     if owner == "TCPStream" {
         if method == "read" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamRead, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        // `read_text` is the text read's spelling for one seed: Core/Net/Net.jet's
-        // tcp_read wrappers must check under a seed whose `read(n)` is the byte
-        // read and under this sema, and `read_text` is text in both.
-        if (method == "read" || method == "read_text") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadText, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
-        if (method == "read" || method == "read_text") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadTextDeadline, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "read" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadText, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
+        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadTextDeadline, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "read_bytes" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
         if method == "read_bytes" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "read_into" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int)}, AccessConvention.Read))
@@ -166,7 +163,7 @@ sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> Se
 
 sema_network_handle_known_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TCPListener" -> return method == "accept" || method == "local_addr"
-    if owner == "TCPStream" -> return method == "read" || method == "read_bytes" || method == "read_text" || method == "read_into" || method == "write" || method == "write_some" || method == "write_bytes" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
+    if owner == "TCPStream" -> return method == "read" || method == "read_bytes" || method == "read_into" || method == "write" || method == "write_some" || method == "write_bytes" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
     if owner == "UDPSocket" -> return method == "ready" || method == "close" || method == "receive" || method == "send_to"
     if owner == "UnixListener" -> return method == "accept"
     if owner == "UnixStream" -> return method == "read_bytes" || method == "read_into" || method == "write_bytes" || method == "ready" || method == "close" || method == "set_timeout"
@@ -230,7 +227,7 @@ sema_network_handle_expected_arity: fn(owner: String, method: String) -> String 
     if owner == "TCPStream" {
         if method == "read" -> return "0, 1, or 2"
         if method == "read_into" -> return "2 or 3"
-        if method == "read_bytes" || method == "read_text" || method == "write" || method == "write_some" || method == "write_bytes" -> return "1 or 2"
+        if method == "read_bytes" || method == "write" || method == "write_some" || method == "write_bytes" -> return "1 or 2"
         if method == "shutdown" -> return "1"
         if method == "ready" -> return "2"
         return "0"
