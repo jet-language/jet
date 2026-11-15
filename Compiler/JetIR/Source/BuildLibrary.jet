@@ -460,15 +460,26 @@ IR_THREAD_START_SYMBOLS: [String]{"os_clone_i64", "signal", "dlopen"}
 // of the hook's guards (ir_lifecycle_rows), so every export that can reach
 // a guard's storage is listed too; the receipt is just "*" when such a hook
 // has no guard, since every program that links the library runs it.
+// A CallRuntime's name is looked up once, at its first call, and a guard
+// reads the functions that take its address, so no call searches the
+// receipt again and no guard scans every DataAddress.
 ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]) -> [String] Never! {
     count: m.functions.len()
     defined := [String:Int]{}
     loop row in exports -> defined[row.symbol.copy()] = row.function
+    // Per name row, the export function a CallRuntime of it reaches (-1:
+    // none; -2: not looked up yet) and whether it can start a thread.
+    name_callees := [Int]{}
+    name_starts := [Bool]{}
+    loop _ in m.names {
+        name_callees.push(-2)
+        name_starts.push(false)
+    }
     callers := [[Int]]{}
     loop _ in 0..<count -> callers.push([Int]{})
-    // Each DataAddress: the data row and the function that takes it.
-    data_rows := [Int]{}
-    data_users := [Int]{}
+    // Per data row, the functions that take its address (DataAddress), in
+    // function order; a row past the last one taken has none.
+    takers := [[Int]]{}
     reaches := [Bool]{}
     work := [Int]{}
     loop (id, f) in m.functions {
@@ -477,13 +488,19 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
             callee := -1
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
             if op == .CallRuntime {
-                name: m.names[f.a[at]]
-                if IR_THREAD_START_SYMBOLS.contains(name) || receipt.contains(name) -> starts = true
-                callee = defined.get(name) ?? -1
+                name: f.a[at]
+                if name_callees[name] == -2 {
+                    text: m.names[name]
+                    name_starts[name] = IR_THREAD_START_SYMBOLS.contains(text) || receipt.contains(text)
+                    name_callees[name] = defined.get(text) ?? -1
+                }
+                if name_starts[name] -> starts = true
+                callee = name_callees[name]
             }
-            if op == .DataAddress {
-                data_rows.push(f.a[at])
-                data_users.push(id)
+            if op == .DataAddress && f.a[at] >= 0 {
+                data: f.a[at]
+                loop data >= takers.len() -> takers.push([Int]{})
+                takers[data].push(id)
             }
             if callee >= 0 && callee < count -> callers[callee].push(id)
         }
@@ -512,12 +529,14 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
             }
             if row.guards.len() == 0 -> return [String]{"*"}
             guarded[index] = true
-            loop (at, data) in data_rows {
-                id: data_users[at]
-                if !row.guards.contains(data) || reaches[id] -> next
-                reaches[id] = true
-                work.push(id)
-                added = true
+            loop data in row.guards {
+                if data < 0 || data >= takers.len() -> next
+                loop id in takers[data] {
+                    if reaches[id] -> next
+                    reaches[id] = true
+                    work.push(id)
+                    added = true
+                }
             }
         }
         if !added -> break
