@@ -35,7 +35,7 @@ RunLocalsTrace: struct {
             run_locals_files.append_all(self.path, "< {name} items={items}\n") ?? panic("cannot write the trace: {err}")
         }
 
-        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]> {
+        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
             line: if name.starts_with("counters.") -> "{name} = {done}\n" else -> "~ {name} {done}/{total}\n"
             run_locals_files.append_all(self.path, line) ?? panic("cannot write the trace: {err}")
         }

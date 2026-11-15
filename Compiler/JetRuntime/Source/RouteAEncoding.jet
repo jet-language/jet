@@ -187,8 +187,9 @@ encoding_env_plan: fn(name: I64, plan: I64) {
     jet_rt_string_drop(value)
 }
 
-// The thread's hostile plan state when JET_ENC_HOSTILE_IO is set (read once
-// per thread, as jet_encoding_hostile_io_plan caches it), else 0.
+// The thread's hostile plan state when JET_ENC_HOSTILE_IO is set, else 0;
+// the variable is read once per thread (active word 1 keeps "no plan"), so
+// a file write, flush or read costs no environment scan.
 encoding_hostile_state: fn() -> I64 {
     state := jet_rt_tls_get(encoding_hostile_key)
     if (state == I64{0}) {
@@ -196,8 +197,13 @@ encoding_hostile_state: fn() -> I64 {
         thread_zero(state, ENCODING_HOSTILE_BYTES)
         jet_rt_tls_set(encoding_hostile_key, state)
     }
-    if (rt_text_word(state) == I64{0}) {
-        if !encoding_env_flag(env_name_jet_enc_hostile_io()) -> return I64{0}
+    active: rt_text_word(state)
+    if (active == I64{1}) -> return I64{0}
+    if (active == I64{0}) {
+        if !encoding_env_flag(env_name_jet_enc_hostile_io()) {
+            rt_text_store(state, I64{1})
+            return I64{0}
+        }
         rt_text_store(state, I64{2})
         rt_text_store(wrapping(state + I64{8}), if encoding_env_flag(env_name_jet_enc_hostile_read_one()) -> I64{1} else -> I64{0})
         chunk: encoding_env_number(env_name_jet_enc_hostile_write_max(), U64{18446744073709551615})

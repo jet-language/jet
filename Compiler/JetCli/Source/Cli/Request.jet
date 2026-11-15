@@ -9,6 +9,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     cli_tasks: core.tasks
+    cli_time: core.time
     cli_term: core.term
     jet_foundation.[
         AppAuthorizedDirectory,
@@ -2300,7 +2301,7 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // The native `jet` implements the driver's CompilerTraceSink
 // (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
 // Chrome trace-event lines the Rust host's writer produces: the `[` header,
-// `process_name`, `trace.start` (`unix_ms`, `functions`, and `uptime_ms`, the
+// `process_name`, `trace.start` (`unix_ms`, `functions`, and `clock_us`, the
 // trace's clock origin, this writer only), one `B`/`E` event per
 // span, with `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time
 // (`cpu_ns` of its task, `proc_cpu_ns` of every thread, `majflt` major
@@ -2314,8 +2315,9 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // readable line per event to stderr instead. The target stays open for the
 // whole compile and every line is flushed as soon as its event happens, so a
 // running compile can be followed. A failed write stops the trace, never the
-// compile. The sink's calls stay inside the trait's FS row: monotonic time is
-// `/proc/uptime` (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as
+// compile. Timestamps are microseconds of the host's monotonic clock
+// (core.time.instant, a vDSO read, never a file), the clock every process
+// on the machine shares, and stderr is written as
 // `/dev/stderr`. `%p` in FILE is this process's id, so every jet a traced
 // process starts with the same `JET_TRACE_FILE` writes its own file; a
 // package build splices its steps' files into its own
@@ -2370,12 +2372,12 @@ JetCLITraceState: struct {
     // Each task's trace lane, its events' `tid`: 1 for the task that opened
     // the trace, then numbered in the order tasks first trace.
     lanes: [cli_tasks.TaskID:Int]
-    // When each progress kind was last written (uptime ms).
+    // When each progress kind was last written (clock µs).
     progress_at: [String:Int]
     // How many times each progress kind was reported.
     progress_calls: [String:Int]
     // The last read of the process's clocks and faults (`cpu_ns` -1) and
-    // memory, and when it was taken (uptime ms, -1 before the first).
+    // memory, and when it was taken (clock ms, -1 before the first).
     process: JetCLITraceUsage
     memory: JetCLITraceMemory?
     process_ms: Int
@@ -2387,8 +2389,9 @@ JetCLITraceSink: struct {
     // The trace file, or `/dev/stderr` for the readable stream.
     target: String
     human: Bool
-    // Uptime (ms) when the trace opened: the origin of every timestamp.
-    start_ms: Int
+    // The monotonic clock (µs) when the trace opened: the origin of every
+    // timestamp.
+    start_us: Int
     pid: Int
     functions: Bool
     phase_counters: Bool
@@ -2411,7 +2414,7 @@ JetCLITraceSink: struct {
         // this task writes nothing.
         end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
             cpu_ns: cli_tasks.cpu_ns()
-            ts: jet_cli_trace_micros(self.start_ms)
+            ts: jet_cli_trace_micros(self.start_us)
             id: cli_tasks.current_task()
             permit := self.state.guard_edit()
             if !permit.value.writing -> return
@@ -2430,7 +2433,7 @@ JetCLITraceSink: struct {
             memory := JetCLITraceMemory?{None}
             now := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
             if !closed.item {
-                now = jet_cli_trace_process(permit.value, self.start_ms + ts /% 1000, cpu_ns, stack.len() == 0)
+                now = jet_cli_trace_process(permit.value, (self.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
                 memory = permit.value.memory
             }
             spent: jet_cli_trace_usage_since(closed.start, now)
@@ -2439,22 +2442,22 @@ JetCLITraceSink: struct {
             jet_cli_trace_write(self.target, permit.value, line)
         }
 
-        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]> {
+        progress: fn(self, name: String, done: Int, total: Int) Never! -[FS, Time]> {
             if name.starts_with("counters.") {
                 self.counter(name, done)
                 return
             }
             last_item: total > 0 && done + 1 >= total
             if !jet_cli_trace_progress_due(self.state, name, last_item) -> return
-            now: jet_cli_trace_uptime_ms()
+            now: jet_cli_trace_clock_us()
             permit := self.state.guard_edit()
             if !permit.value.writing -> return
             if permit.value.progress_at.get(name) == .Val(previous) {
-                if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS -> return
+                if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS * 1000 -> return
             }
             permit.value.progress_at[name] = now
             task: jet_cli_trace_lane(permit.value, cli_tasks.current_task())
-            ts: if now > self.start_ms -> (now - self.start_ms) * 1000 else -> 0
+            ts: if now > self.start_us -> now - self.start_us else -> 0
             line := ""
             if self.human {
                 depth: (permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}).len()
@@ -2478,14 +2481,14 @@ JetCLITraceSink: struct {
     // A `counters.<phase>.<name>` progress kind: one #4319 scaling counter
     // value, written unthrottled as the `<phase>.<name>` counter event and,
     // with `--phase-counters`, as a `JET_PHASE_COUNTERS` stderr line.
-    counter: fn(self, kind: String, value: Int) Never! {
+    counter: fn(self, kind: String, value: Int) Never! -[FS, Time]> {
         parts := kind.split(".").to_list()
         if parts.len() < 3 -> return
         counter_name: parts.pop() ?? return
         phase := parts[1]
         loop index in 2..<parts.len() -> phase = "{phase}.{parts[index]}"
         counter: "{phase}.{counter_name}"
-        ts: jet_cli_trace_micros(self.start_ms)
+        ts: jet_cli_trace_micros(self.start_us)
         id: cli_tasks.current_task()
         permit := self.state.guard_edit()
         if permit.value.writing {
@@ -2523,7 +2526,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     human: chosen == "-" || chosen == "stderr"
     pid: cli_sys.pid()
     target: if human -> JET_CLI_TRACE_STDERR else -> chosen.replace("%p", "{pid}")
-    start_ms: jet_cli_trace_uptime_ms()
+    start_us: jet_cli_trace_clock_us()
     executable: cli_sys.executable().split("/").to_list()
     process := "jet"
     if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
@@ -2538,10 +2541,10 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     if !human {
         // The wall-clock anchor readers align the trace with: the
         // modification time the header write just set (no clock read); and
-        // the uptime its timestamps count from, which places it on the
-        // clock of a trace it is spliced into (jet_cli_trace_splice).
+        // the clock reading its timestamps count from, which places it on
+        // the clock of a trace it is spliced into (jet_cli_trace_splice).
         unix_ms: if cli_files.stat(target) == .Ok(info) -> info.modified.to_unix_ms() else -> 0
-        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail},\"uptime_ms\":{start_ms}}}}},\n")
+        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail},\"clock_us\":{start_us}}}}},\n")
         if started == .Val(problem) {
             _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
             return None
@@ -2555,7 +2558,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     Val(JetCLITraceSink{
         target: target,
         human: human,
-        start_ms: start_ms,
+        start_us: start_us,
         pid: pid,
         functions: functions,
         phase_counters: jet_cli_control_on("phase_counters"),
@@ -2592,12 +2595,12 @@ jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! {
 // Adds `text`, the trace file another jet process wrote (`--trace=FILE`; a
 // package build's step, BuildExecute.jet jet_cli_build_splice_traces), to
 // this file trace as one more process, named `label` and the process name the
-// file gives. Each event moves onto this trace's clock by the `uptime_ms` the
-// file's `trace.start` names (both clocks are `/proc/uptime`), and its lanes
+// file gives. Each event moves onto this trace's clock by the `clock_us` the
+// file's `trace.start` names (both are the machine's monotonic clock), and its lanes
 // are numbered from JET_CLI_TRACE_SPLICE_LANES times its place, so a reader
 // that pairs spans by lane (Tools/perf/jetc-trace) never pairs them with
 // another process's. The file's header, process name and `trace.start` are
-// left out; a file whose `trace.start` names no uptime has no place on this
+// left out; a file whose `trace.start` names no clock has no place on this
 // clock and adds nothing. The readable stream takes no other process's trace.
 jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Never! {
     if sink.human -> return
@@ -2615,8 +2618,8 @@ jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Nev
             next
         }
         if line.starts_with("{{\"name\":\"trace.start\",") {
-            started: jet_cli_trace_field(line, "uptime_ms") ?? next
-            shift = Val((started.value - sink.start_ms) * 1000)
+            started: jet_cli_trace_field(line, "clock_us") ?? next
+            shift = Val(started.value - sink.start_us)
             next
         }
         moved_by: shift ?? next
@@ -2676,7 +2679,7 @@ jet_cli_trace_progress_due: fn(state: Shared<JetCLITraceState>, name: String, la
 // An `item` span (one comptime item, or one indexed unit of a phase) reads
 // only its task's CPU clock, so a phase of many items stays cheap to trace.
 jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) Never! -[FS, Time]> {
-    ts: jet_cli_trace_micros(sink.start_ms)
+    ts: jet_cli_trace_micros(sink.start_us)
     id: cli_tasks.current_task()
     label: if detail == "" -> name else -> detail
     cpu_ns: cli_tasks.cpu_ns()
@@ -2685,7 +2688,7 @@ jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args
     task: jet_cli_trace_lane(permit.value, id)
     stack := permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}
     start := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
-    if !item -> start = jet_cli_trace_process(permit.value, sink.start_ms + ts /% 1000, cpu_ns, stack.len() == 0)
+    if !item -> start = jet_cli_trace_process(permit.value, (sink.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
     line := ""
     if sink.human {
         shown: if detail == "" -> "" else -> " {detail}"
@@ -2786,39 +2789,16 @@ jet_cli_trace_resident: fn(memory: JetCLITraceMemory?) -> String Never! {
     ""
 }
 
-// Microseconds since the trace opened (`/proc/uptime` resolution).
-jet_cli_trace_micros: fn(start_ms: Int) -> Int Never! {
-    elapsed: jet_cli_trace_uptime_ms() - start_ms
+// Microseconds since the trace opened.
+jet_cli_trace_micros: fn(start_us: Int) -[Time]> Int Never! {
+    elapsed: jet_cli_trace_clock_us() - start_us
     if elapsed < 0 -> return 0
-    elapsed * 1000
+    elapsed
 }
 
-// Milliseconds since boot from `/proc/uptime` (`12345.67 …`, CLOCK_BOOTTIME),
-// the trace's monotonic clock; 0 when it cannot be read. Every span's begin
-// and end reads it, so it is scanned in place, never split.
-jet_cli_trace_uptime_ms: fn() -> Int Never! {
-    text: cli_files.read("/proc/uptime") ?? return 0
-    bytes: text.bytes()
-    point := 0
-    loop point < bytes.len() && bytes[point] != (U8{46}) {
-        if bytes[point] == (U8{32}) -> return 0
-        point += 1
-    }
-    seconds: jet_cli_trace_number(bytes, 0, point)
-    if seconds < 0 || point >= bytes.len() -> return 0
-    end := point + 1
-    loop end < bytes.len() && bytes[end] != (U8{32}) && bytes[end] != (U8{10}) {
-        if bytes[end] == (U8{46}) -> return 0
-        end += 1
-    }
-    if end > point + 1 && jet_cli_trace_number(bytes, point + 1, end) < 0 -> return 0
-    // The first three fraction digits, zero-padded: `.67` is 670 ms.
-    millis := 0
-    loop index in 0..<3 {
-        digit: if point + 1 + index < end -> (Int{bytes[point + 1 + index]}) - 48 else -> 0
-        millis = millis * 10 + digit
-    }
-    seconds * 1000 + millis
+// The trace's clock: the host's monotonic clock in µs.
+jet_cli_trace_clock_us: fn() -[Time]> Int Never! {
+    cli_time.instant().start_ns /% 1000
 }
 
 // The decimal number `bytes[from..<to]`, or -1 when it is empty or holds a
@@ -2902,7 +2882,7 @@ jet_cli_trace_process_usage: fn() -> JetCLITraceUsage Never! {
     usage
 }
 
-// A phase span's usage at uptime `now_ms` with its task's `cpu_ns`, and
+// A phase span's usage at clock `now_ms` with its task's `cpu_ns`, and
 // `state.memory` set: the process's clocks, faults and memory read again
 // when `fresh` (a top-level span) or when the last read is
 // JET_CLI_TRACE_PROCESS_MS old, else the last read's.
