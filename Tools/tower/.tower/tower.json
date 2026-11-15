@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6884,
-    "rev": 103550,
+    "nextNum": 6885,
+    "rev": 103575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31933,8 +31933,8 @@
     {
       "id": "c02vmcbl",
       "num": 3329,
-      "title": "Construct generic collection destinations through one explicit protocol",
-      "body": "Construct generic collection destinations through one explicit protocol.\n\nRust FromIterator supports more than Vec. Jet collect/to_list and explicit Map/Set construction exist, but no complete general destination protocol is proven in this corpus.\n\nRatify one explicit destination-construction protocol over the existing Iterable/Iterator model. Preserve eager yielding-loop List semantics and keep the collection choice visible.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f017. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nThe exact final per-row contract is retained in target-mine-playlist-20260911/analyses/iterators/stable-capability-map.json. This card owns its named delta only. Current-source runtime is NOT RUN; frozen e841 receipts remain historical.",
+      "title": "One explicit destination protocol: FromIterator, extend, partition, sum and typed collection heads",
+      "body": "Destination: FromIterator is the one user-extensible way to build a collection from a source (D-ITER-COLLECT1=A); the destination is always explicit at the call; collect and to_list stay List terminals; typed collection heads take a loop (D-COMPREHEND1=A); extend, partition and the aggregates use the same protocol.\n\nWhy it matters: without one protocol each collection grows its own constructor, and an expected type that silently changes a loop's result breaks reasoning about cost and order.\n\nState (dev 168e1e9e92): no FromIterator trait; collect and to_list return List; Set.from takes a List.\n\nDecisions: D-ITER-COLLECT1=A, D-COMPREHEND1=A, D-ITER-EXTEND1=A, D-ITER-BRANCHPARTITION1=A, D-COMPREHENSION1=A.\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding iter-f017). Mapping owned items moved to #6871 c7.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
@@ -31948,6 +31948,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: criteria restated with decisions, current Example paths and proofs (c4, c5, c10, c13 merged in place); the #3359 owned-item mapping rows c17-c21 merged into #6871 c7, which already carried them."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -32049,20 +32054,22 @@
         {
           "n": 4,
           "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Examples/features/collections/from_iter.jet matches Examples/features/expected/collections/from_iter.out on O0, O1 and O2 (`jet test Compiler --profile golden collections/from_iter`): [1,2,1] into List keeps [1,2,1], into Set applies dedup, into Map applies last-wins, String concatenates, a user `impl Bag.FromIterator` builds, and a fallible source stops at the first error with no leaked partial resource. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:10:04.591Z"
+          "evidence": "Merged into #3329 c1: the from_iter golden is c1's proof",
+          "at": "2026-11-15T03:22:43.671Z",
+          "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): tests/ui/from_iter_expected_type_no_retype.jet snapshots that an expected `Set<Int>` type does not silently turn `list.map(f)` or a yielding loop into a Set (`jet test Compiler --profile ui from_iter_expected_type_no_retype`). Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:10:05.149Z"
+          "evidence": "Merged into #3329 c2: the no-retype UI fixture is c2's proof",
+          "at": "2026-11-15T03:22:44.559Z",
+          "closure": "obsolete"
         },
         {
           "n": 6,
@@ -32075,111 +32082,118 @@
         },
         {
           "n": 7,
-          "text": "[#3354]  • One classifier call routes each item to exactly one typed destination, through the same destination protocol. • A classifier failure is distinct from an error branch. • JP: `collections/partition_outcome`.",
+          "text": "partition routes each item to exactly one typed destination with one classifier call, through the destination protocol, and a classifier failure is distinct from an error branch (D-ITER-BRANCHPARTITION1=A). Proof: `jet test Compiler --profile golden --filter collections/partition_outcome`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:09.668Z"
+          "at": "2026-11-15T03:22:39.137Z"
         },
         {
           "n": 8,
-          "text": "[#3363]  • Empty-input sum/product identities are explicit. Custom domain values, reference items, Result/Option short-circuiting and numeric wrappers are covered. • Int overflow is the same told failure as the shared runtime `jet_list_sum` kernels. Routing is keyed on the checked builtin, never on evaluator spelling. • No duplicate Sum/Product traits. • Golden `collections/aggregate_matrix`; unsupported families are listed as scoped gaps.",
+          "text": "sum and product state their empty-input identities and cover custom domain values, reference items, Result and Option short-circuiting and numeric wrappers; Int overflow is the same failure as the shared list-sum kernel; there is one Sum and one Product trait; unsupported families are listed as gaps. Proof: `jet test Compiler --profile golden --filter collections/aggregate_matrix` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:27:10.796Z"
+          "at": "2026-11-15T03:22:40.067Z"
         },
         {
           "n": 9,
-          "text": "(was #1204 c1) D-COMPREHENSION1 is reconciled with D-ARROW-CONTROL1, D-LOOPEVAL1, D-LOOPSTATE1, D-FAILCOMP1, syntax-decisions.md, core-library.md and the syntax registry.",
+          "text": "syntax-decisions.md, core-library.md and the syntax registry state one yielding-loop and collection-head rule: D-COMPREHEND1=A on top of D-COMPREHENSION1, D-LOOPEVAL1 and D-ARROW-CONTROL1, with no contradiction left. Proof: `jet test tests/guards --filter syntax_registry` passes and `git grep -n 'D-COMPREHEND1' -- Docs/spec` shows the rule in both docs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:21:30.144Z"
+          "at": "2026-11-15T03:22:40.961Z"
         },
         {
           "n": 10,
           "text": "(was #1204 c2) Sema always infers List<T> for a yielding loop and never changes collector or timing from expected type or source family [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:08.606Z"
+          "evidence": "Merged into #3329 c2: same outcome as c2",
+          "at": "2026-11-15T03:22:45.455Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
-          "text": "O0, O1, O2 and compile-time evaluation preserve item order, nested List shape, filters, multiple sources and partial-list breaks for yielding loops (a golden FromIter example passes on every tier).",
+          "text": "Yielding loops keep item order, nested List shape, filters, multiple sources and partial-list breaks, with effects, fallibility, ownership, source mutation, stream exhaustion, cleanup and allocation timing matching the eager ordinary-loop law, on O0, O1, O2 and at compile time. Proof: `jet test Compiler --profile golden --filter Collections/FromIter` and `jet test Compiler --profile cases --filter yielding_loop_` on every tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:08.737Z"
+          "at": "2026-11-15T03:22:41.843Z"
         },
         {
           "n": 12,
-          "text": "(was #1204 c4) Maps use ordinary explicit construction, Sets use Set.from, lazy work uses existing iterator adapters, and no duplicate terminal or iterator mechanism appears [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "No duplicate terminal or iterator mechanism: collect and to_list are List terminals, every other destination goes through FromIterator (Set.from, Map construction, typed collection heads), and lazy work uses the existing adapters. Proof: `jet Tools/agent/CoreSurfaceLedger.jet --check` lists no second terminal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:45:09.996Z"
+          "at": "2026-11-15T03:22:42.775Z"
         },
         {
           "n": 13,
           "text": "(was #1204 c5) Effects, fallibility, ownership, source mutation, stream exhaustion, cleanup, and allocation timing match eager ordinary-loop laws [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:10.576Z"
+          "evidence": "Merged into #3329 c11: eager-loop laws are part of c11",
+          "at": "2026-11-15T03:22:46.361Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "(was #3359 c1) Owned-source mapper can transfer a move-only item exactly once [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:12.978Z"
+          "evidence": "Merged into #6871 c7: same outcome (archived #3359), already carried from #3317 c33",
+          "at": "2026-11-15T03:22:47.248Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "(was #3359 c2) Shared-view mapping cannot move the owner; exclusive-view mutation reaches original storage [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:13.589Z"
+          "evidence": "Merged into #6871 c7: same outcome (archived #3359)",
+          "at": "2026-11-15T03:22:48.127Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
           "text": "(was #3359 c3) A stored/escaping callback respects its source loan and capture lifetime; Thread/task transfer remains under I9 [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:14.205Z"
+          "evidence": "Merged into #6871 c7: escaping callbacks respecting loans are in #6871 c7",
+          "at": "2026-11-15T03:22:49.003Z",
+          "closure": "obsolete"
         },
         {
           "n": 20,
           "text": "(was #3359 c4) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Examples/features/collections/map_owned_items.jet matches Examples/features/expected/collections/map_owned_items.out on O0, O1 and O2 (`jet test Compiler --profile golden collections/map_owned_items`): an owned `Iter<Record>` mapped with `id_of: fn(r: &&Record) -> Int` moves each record once and runs each record's close exactly once. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:14.824Z"
+          "evidence": "Merged into #6871 c7: the map_owned_items golden is #6871 c7's proof",
+          "at": "2026-11-15T03:22:49.871Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
           "text": "(was #3359 c5) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): tests/ui/map_move_from_shared_view.jet snapshots the rejection of a callback that takes `item` (`&&`) over a borrowed List/View receiver (`jet test Compiler --profile ui map_move_from_shared_view`). Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:45:15.427Z"
+          "evidence": "Merged into #6871 c7: the map_move_from_shared_view UI fixture is #6871 c7's proof",
+          "at": "2026-11-15T03:22:50.771Z",
+          "closure": "obsolete"
         },
         {
           "n": 22,
@@ -32235,7 +32249,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-15T03:22:38.052Z",
+      "updated": "2026-11-15T03:22:53.105Z",
       "updatedBy": "TowerKeeper-1",
       "workOrder": 48,
       "goals": [
@@ -40717,6 +40731,78 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:19:46.919Z"
+        },
+        {
+          "n": 27,
+          "text": "The configured client's cookie jar is in Core: http_client_law cases cookie_jar_rejects_domain_attributes_on_ip_hosts, cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes and cookie_jar_enforces_per_domain_and_global_count_bounds pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/cookie_jar_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:54.878Z"
+        },
+        {
+          "n": 28,
+          "text": "Redirect policy is in Core: follow_same_origin_credentials_strips_authorization_on_redirect, cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth and unreplayable_307_closes_redirect_body pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/` on those rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:55.747Z"
+        },
+        {
+          "n": 29,
+          "text": "Proxy selection is in Core: public_client_proxy_none_ignores_environment_proxy and public_client_proxy_url_sends_absolute_form pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/public_client_proxy_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:56.634Z"
+        },
+        {
+          "n": 30,
+          "text": "The h2 client and HPACK are in Core: explicit_h2c_negotiates_hpack_and_reuses_one_session and the http_client_law/h2_ rows (queued frames, idle stream flood, invalid HPACK names and padding, 64 MiB body overrun) pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/h2_` and `--filter explicit_h2c`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:57.540Z"
+        },
+        {
+          "n": 31,
+          "text": "Client TLS policy is in Core: public_client_tls_custom_only_trust and public_client_tls_identity_and_version_bounds pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/public_client_tls_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:58.448Z"
+        },
+        {
+          "n": 32,
+          "text": "Request bodies stream: `.body(...)` takes a byte source, and upload_streams_before_the_body_source_finishes, unknown_length_upload_uses_h1_chunked_transfer_encoding, h2_upload_streams_data_frames_before_body_eof and post_307_replays_streamed_body_under_redirect_tee_cap pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/` on those rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:59.352Z"
+        },
+        {
+          "n": 33,
+          "text": "Client deadlines: request_first_byte_timeout_overrides_client_phase_budget and ambient_context_deadline_upper_bounds_client_total_timeout pass and leave tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter http_client_law/` on those rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:23:00.289Z"
+        },
+        {
+          "n": 34,
+          "text": "The four corelib/core_http_client_ fixtures (binary body once, multipart boundary, pre-response errors, invalid redirect limits) are written in current Jet and pass, leaving tests/known-failing.tsv. Proof: `jet test Compiler --profile cases --filter corelib/core_http_client_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:23:01.225Z"
         }
       ],
       "refs": [
@@ -40738,12 +40824,12 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-15T03:19:46.919Z",
+      "updated": "2026-11-15T03:23:01.225Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 26
+      "criteriaLastN": 34
     },
     {
       "id": "c077ihdp",
@@ -103604,6 +103690,94 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
       "updated": "2026-11-15T03:19:44.267Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0v54mn1",
+      "num": 6884,
+      "title": "Core sockets and DNS: one TCP write, honest EOF and close, UDP truncation, resolv.conf, and explicit call states",
+      "body": "Destination: TCP, Unix and TLS streams share one lifecycle law (positive limits, partial writes, EOF, half-close, cancellation, deadline, use after close), TCP writes have one spelling that never drops bytes, UDP keeps each packet's source, length and truncation, host DNS stays distinct from the wire resolver, and a TCP call says exactly when it was sent and what is uncertain.\n\nWhy it matters: servers and Jetpack's fetchers depend on these edges; a dropped byte or a fabricated success is silent corruption.\n\nRelated: #3665 (HTTP client), #6878 (byte streams and HTTP server), #6881 (I/O failures), #4954 (native UDP).\n\nSource: #3665 c7, c14, c18-c22, c24 (archived #3227, #3080, #3444, #3445; via #3595).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "TCP, Unix and TLS streams share positive-limit, partial-write and EOF semantics, and cancellation, deadline, half-close and use-after-close follow one law. Proof: `jet test Compiler --profile cases --filter net/stream_lifecycle_` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 2,
+          "text": "UDP receive keeps the packet source, the original length and truncation. Proof: `jet test Compiler --profile cases --filter net/udp_truncation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 3,
+          "text": "Host DNS stays distinct from the wire resolver, and the runtime parses resolver servers from resolv.conf text through a text-taking function whose Core #Tests cover native fixtures and reject noise and malformed lines. Proof: `jet test Compiler --profile core --filter resolv`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 4,
+          "text": "A service that accepts on tcp_listener and writes with tcp_stream.write_text builds and runs on O0, O1 and O2 with no ICE. Proof: `jet test Compiler --profile golden --filter Concurrency/Services/`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 5,
+          "text": "TCP writes have one spelling and never drop bytes: a write either writes everything or returns the short count to a caller that must handle it, and the five write spellings collapse to one. Proof: `jet test Compiler --profile cases --filter net/tcp_write_short_count`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        },
+        {
+          "n": 6,
+          "text": "A TCP call is sent exactly when the public API says, a timeout or lost reply after a possible mutation reports uncertainty rather than failure, and event publication never fabricates a handler result. Proof: `jet test Compiler --profile cases --filter net/tcp_call_states`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:22:53.996Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "net"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:22:53.996Z",
+      "updated": "2026-11-15T03:22:53.996Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209023,6 +209197,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:23:01.225Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#34 The four corelib/core_http_client_ fixtures (binary body onc"
+    },
+    {
+      "at": "2026-11-15T03:23:00.289Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#33 Client deadlines: request_first_byte_timeout_overrides_clien"
+    },
+    {
+      "at": "2026-11-15T03:22:59.352Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#32 Request bodies stream: `.body(...)` takes a byte source, and"
+    },
+    {
+      "at": "2026-11-15T03:22:58.448Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#31 Client TLS policy is in Core: public_client_tls_custom_only_"
+    },
+    {
+      "at": "2026-11-15T03:22:57.540Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#30 The h2 client and HPACK are in Core: explicit_h2c_negotiates"
+    },
+    {
+      "at": "2026-11-15T03:22:56.634Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#29 Proxy selection is in Core: public_client_proxy_none_ignores"
+    },
+    {
+      "at": "2026-11-15T03:22:55.748Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#28 Redirect policy is in Core: follow_same_origin_credentials_s"
+    },
+    {
+      "at": "2026-11-15T03:22:54.878Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c047t3lg",
+      "note": "#27 The configured client's cookie jar is in Core: http_client_l"
+    },
+    {
+      "at": "2026-11-15T03:22:53.996Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0v54mn1",
+      "note": "Core sockets and DNS: one TCP write, honest EOF and close, UDP truncation, resolv.conf, and explicit call states"
+    },
+    {
+      "at": "2026-11-15T03:22:53.105Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:22:52.248Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:22:50.771Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-15T03:22:49.871Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:22:49.003Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-15T03:22:48.127Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:22:47.248Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T03:22:46.362Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:22:45.456Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:22:44.559Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-15T03:22:43.671Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02vmcbl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-15T03:22:42.775Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#12: strip debris; proof; was: (was #1204 c4) Maps use ordinary explicit construction, Sets use Set.from, lazy work uses existing iterator adapters, and no duplicate terminal or iterator mechanism appears [precut audit: no dev test"
+    },
+    {
+      "at": "2026-11-15T03:22:41.843Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#11: absorbs c13; was: O0, O1, O2 and compile-time evaluation preserve item order, nested List shape, filters, multiple sources and partial-list breaks for yielding loops (a golden FromIter example passes on every tier)."
+    },
+    {
+      "at": "2026-11-15T03:22:40.961Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#9: name the current decision; proof; was: (was #1204 c1) D-COMPREHENSION1 is reconciled with D-ARROW-CONTROL1, D-LOOPEVAL1, D-LOOPSTATE1, D-FAILCOMP1, syntax-decisions.md, core-library.md and the syntax registry."
+    },
+    {
+      "at": "2026-11-15T03:22:40.067Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#8: strip debris; proof; was: [#3363]  • Empty-input sum/product identities are explicit. Custom domain values, reference items, Result/Option short-circuiting and numeric wrappers are covered. • Int overflow is the same told fail"
+    },
+    {
+      "at": "2026-11-15T03:22:39.137Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c02vmcbl",
+      "note": "#7: strip debris; decision; proof; was: [#3354]  • One classifier call routes each item to exactly one typed destination, through the same destination protocol. • A classifier failure is distinct from an error branch. • JP: `collections/par"
+    },
     {
       "at": "2026-11-15T03:22:38.052Z",
       "by": "TowerKeeper-1",
