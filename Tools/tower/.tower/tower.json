@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6926,
-    "rev": 104675,
+    "rev": 104700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20481,7 +20481,7 @@
     {
       "id": "c02lvwje",
       "num": 1387,
-      "title": "Security closure: reconcile all candidates and produce the final report",
+      "title": "Security closure: the four 2026-09-01 authority defects closed, a fresh scan clean, and the final report committed",
       "body": "Depends on #1377, #1378, #1379, #1380, #1381, #1382, #1383, #1384, #1385, #1386. Reconcile all 134 candidate IDs, maintain the canonical threat model, run the final independent review, and generate the final Codex Security report. Do not close with an unresolved candidate or an untracked residual finding.",
       "kind": "task",
       "track": "epoch",
@@ -20489,10 +20489,15 @@
       "milestoneId": "e12-m07-security-closure",
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal**\nClose the epoch-12 security gate. The 134-candidate reconciliation is already done. Remaining: a fresh full-repository scan at the integration revision with zero unresolved reportable findings, and the final report plus canonical evidence committed.\n\n**Current state**\n- Blockers #1377-#1385 are done; #1386 was folded into #1385. Criteria 1, 2 and 5 are met.\n- `Docs/audits/security-closure-2026-09-02.md` records 134 unique dispositions (133 `already-fixed`, 1 duplicate; receipt :237-270). Its fresh-scan gate is `pending-external-gate` (:210-235).\n- **The scan procedure is missing.** The gate command (:217-225) calls `scripts/agent/security-scan.mjs` and publishes to `docs/audits/…`. That script was deleted in 2efc938b3 and exists in neither `Tools/agent/` nor anywhere else in the tree.\n- **Unresolved findings are open.** The 2026-09-01 review rejected closure with four authority-boundary defects: effect-fact snapshot TOCTOU and fail-open reload; path-following source, manifest and lock authority writes; grant persisted before receipt commit; split-authority or lost-update receipt append. Tower has no card title for any of the four. Separately, #3697 (P0, ready: \"manifest-less scripts can spawn processes: the ambient floor grants the whole Exec root\") is an open authority defect that a fresh scan would report.\n\n**Changes**\n1. Main maps each of the four 2026-09-01 defects to a done card with file:line evidence, or files one card each.\n2. Restore the scan driver from `2efc938b3^:scripts/agent/security-scan.mjs` to `Tools/agent/security-scan.mjs`. Fix its paths (`Tools/agent/jet-env`, `Docs/audits/…`) and commit the procedure next to the report (the 2026-08-19 gate note).\n3. Once the defect cards and #3697 are done, run prepare, scan and finalize on a clean checkout at the integration HEAD. Publish to `Docs/audits/security-final-<date>/` and update the report's gate section and receipt.\n\n**Proof**\n`Tools/agent/jet-env full node Tools/agent/security-scan.mjs finalize --repo . --request <REQ>/request.json --scan-dir <SCAN> --plugin-dir \"$CODEX_SECURITY_PLUGIN_DIR\" --publish-dir Docs/audits/security-final-<date>` exits 0. The official validator passes with 0 reportable findings, 0 deferred items and 0 open questions, and the publish directory plus report are committed.\n\n**Batch**\n`batch-measure`: an evidence run. The script restore is tooling with no compiler build.\n\n**Dependencies**\n#3697, plus the four 2026-09-01 authority defects, each needing a card, and a clean checkout.",
+      "plan": "**Goal**\nClose the epoch-12 security gate. The 134-candidate reconciliation is done (Docs/audits/security-closure-2026-09-02.md: 133 already-fixed, 1 duplicate), and the campaign cards #1377-#1385 are done.\n\n**Remaining**\n1. Map each of the four 2026-09-01 authority defects to a done card with file:line evidence, or fix it with a case (AUTHDEFS).\n2. Write the security-scan procedure as a Jet tool under Tools/ (the old scripts/agent/security-scan.mjs, deleted in 2efc938b3, is not restored).\n3. On a clean checkout at the integration HEAD, run the scan and its finalize step, publish Docs/audits/security-final-<date>/, and update the report's gate section and receipt.\n\nCrypto, sandbox, web and Jetpack items that were folded here went to #6925, #6697, #6865 and #6632.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1. c2 met (campaign cards done) and c10 met by D-EXEC1/D-EXEC2. c1 and c3 merged into c4 and c6. c7 went to #6865, c12 to #6697, c16 to #6632, and c13-c15 and c18-c20 to #6925. New AUTHDEFS carries the four 2026-09-01 defects from the plan."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -20724,11 +20729,12 @@
         {
           "n": 16,
           "text": "The Jetpack Jet port refuses writes that skip policy gates (TrustStore, workspace lock, invocation flags) with E3415, proven by Jetpack claims in `jet test Compiler --profile packages --filter Trust`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:52:29.690Z"
+          "evidence": "Moved to #6632 c108: Jetpack policy gates belong with the package manager behaviors on #6632 (G7)",
+          "at": "2026-11-15T04:35:36.996Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
@@ -20753,11 +20759,12 @@
         {
           "n": 20,
           "text": "(was #5891) Merge core.crypto.Secret onto the runtime Secret (two Secret mechanisms break I8): one Secret mechanism; crypto keys are built on it; examples prove the wipe on Close and on",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:59:59.957Z"
+          "evidence": "Moved to #6925 c4: one Secret mechanism",
+          "at": "2026-11-15T04:35:06.243Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
@@ -20779,13 +20786,12 @@
         "audit-remediation",
         "epoch-gate",
         "p0-proof",
-        "batch-measure",
-        "wayfinder:map"
+        "batch-measure"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T15:42:30.347Z",
-      "updated": "2026-11-15T04:35:05.050Z",
+      "updated": "2026-11-15T04:35:36.996Z",
       "updatedBy": "TowerKeeper-1",
       "probe": null,
       "visualMedia": [],
@@ -26647,8 +26653,8 @@
     {
       "id": "c0c4k3fw",
       "num": 3102,
-      "title": "Prove the existing component trust and resource boundary",
-      "body": "Prove the existing component trust and resource boundary.\n\nAn environment, memory-safe source and a native library are not interchangeable with a resource/fault-isolated extension. Current component controls deserve exact proof rather than replacement by another sandbox.\n\nUse the existing Component path for the untrusted extension workload. Keep native in-process libraries explicitly trusted. Exercise authority denial, malformed component, budget exhaustion and failed-call recovery.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-script-f04. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "title": "Sandboxed plugins: denied imports, limits, failures and release are proven at the Component boundary, and native libraries stay explicitly trusted",
+      "body": "Destination: the existing Component plugin path is the boundary for untrusted extensions, and its trust and resource controls are proven case by case: denied imports fail before the operation, limits report real failures, a failed guest leaves the host running, blocking import work is bounded, release happens exactly once, and failures are typed (D-PLUGIN-FAILURE1=A). Native in-process libraries stay explicitly trusted and are never covered by a sandbox receipt.\n\nWhy: an environment, memory-safe source and a native library are not the same as a resource- and fault-isolated extension; the controls deserve exact proof, not another sandbox.\n\nSource: Docs/research/mine-for-jet-2026-09-12.md#finding-script-f04, with #3072, #3073, #3109-#3111, #3114, #3115, #3253 and #3670 absorbed. The plan's Rust homes (crates/jet-pkg-model, tests/authority.rs) are retired; the cases live in tests/cases/authority.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e6",
@@ -26662,6 +26668,11 @@
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15 by TowerKeeper-1: debris stripped, every criterion names its case, and the body states the destination."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -26731,129 +26742,129 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Denied host imports fail before the external operation.",
+          "text": "A denied host import in a sandboxed component fails before the external operation starts. Proof: `jet test Compiler --profile cases --filter authority/plugin_denied_import_fails_first`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-30T16:30:25.595Z"
+          "at": "2026-11-15T04:36:00.282Z"
         },
         {
           "n": 2,
-          "text": "Fuel, memory, wire and call-time limits report actual consumer failure without fabricated success.",
+          "text": "Fuel, memory, wire and call-time limits report the real failure to the consumer, never a fabricated success. Proof: `jet test Compiler --profile cases --filter authority/plugin_limit_`, one case per limit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-30T16:30:26.403Z"
+          "at": "2026-11-15T04:36:01.166Z"
         },
         {
           "n": 3,
-          "text": "A failed guest does not terminate unrelated host work in the selected component scenario.",
+          "text": "A failed guest call leaves unrelated host work running and the plugin handle usable. Proof: `jet test Compiler --profile cases --filter authority/plugin_failed_guest_host_continues`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T18:38:04.431Z"
+          "at": "2026-11-15T04:36:02.067Z"
         },
         {
           "n": 4,
-          "text": "Blocking native/import work and re-entry are either safely bounded or declared unsupported with an exact reason.",
+          "text": "Blocking import work (DNS resolution, file I/O) and re-entry are bounded by the call deadline or refused as unsupported with an exact reason; on 2026-09-12 DNS resolution ran unbounded after the authority check and file imports had no deadline. Proof: `jet test Compiler --profile cases --filter authority/plugin_blocking_import_bounded`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-30T16:30:27.111Z"
+          "at": "2026-11-15T04:36:02.983Z"
         },
         {
           "n": 5,
-          "text": "The result records source/binary identity and does not generalize a sandbox receipt to native Library panic containment.",
+          "text": "Each plugin receipt records the source and binary identity and never extends a sandbox receipt to native in-process library panic containment; native libraries stay explicitly trusted. Proof: `jet test Compiler --profile cases --filter authority/plugin_receipt_identity`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T18:38:04.790Z"
+          "at": "2026-11-15T04:36:03.878Z"
         },
         {
           "n": 7,
-          "text": "[#3072] Public `close(plugin)` (close takes `&&`) gives exactly-once release. Use-after-close is rejected under checked ownership, and stale host handles fail before store access. Golden packages/sandbox_mathkit covers load/call/close/reload/close-after-failure.",
+          "text": "Public `close(plugin)` (close takes `&&`) releases exactly once: use after close is refused by the ownership check, and a stale host handle fails before any store access. Proof: `jet test Compiler --profile golden --filter packages/sandbox_mathkit` (load, call, close, reload, close after failure).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:32.878Z"
+          "at": "2026-11-15T04:36:04.762Z"
         },
         {
           "n": 8,
-          "text": "[#3073] The sandbox_mathkit and library_loadable examples use only registered named exports (D-EMBED2=C, target:sandbox), with no `.call*` or target:plugin teaching left.",
+          "text": "The sandbox_mathkit and library_loadable examples use only registered named exports (D-EMBED2=C, target: sandbox), with no `.call*` or target: plugin teaching left. Proof: `jet test Compiler --profile golden --filter packages/sandbox_mathkit` and `--filter packages/library_loadable`, and git grep finds no `.call` export use in either.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:33.566Z"
+          "at": "2026-11-15T04:36:05.701Z"
         },
         {
           "n": 9,
-          "text": "[#3109] No borrowed host view outlives its call. Recursive host-to-guest-to-host calls work or are rejected with a type. Managed callback stop, unsubscribe and cancel are proven, with native and Component evidence kept separate.",
+          "text": "No borrowed host view outlives its call, recursive host-to-guest-to-host calls work or are refused with a type, and a managed callback's stop, unsubscribe and cancel are proven, with native and Component evidence kept separate. Proof: `jet test Compiler --profile cases --filter authority/plugin_host_view_and_reentry_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:34.589Z"
+          "at": "2026-11-15T04:36:07.403Z"
         },
         {
           "n": 10,
-          "text": "[#3110] Retention is measured at 1k and 100k for prepare, call, failure and release, separating allocator, managed and external roots.",
+          "text": "Retention is measured at 1k and 100k iterations for prepare, call, failure and release, separating allocator, managed and external roots. Proof: a committed measurement receipt, and `jet test Compiler --profile cases --filter authority/plugin_retention_flat` holds the 100k run flat.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:35.853Z"
+          "at": "2026-11-15T04:36:09.134Z"
         },
         {
           "n": 11,
-          "text": "[#3111] Artifacts name runtime, toolchain, target, ABI and system assets. Wrong ABI, version or digest is rejected (PackageModel #Test receipts). C-safe ownership is observable on both sides.",
+          "text": "Plugin artifacts name runtime, toolchain, target, ABI and system assets, a wrong ABI, version or digest is refused, and C-safe ownership is observable on both sides. Proof: `jet test Compiler --profile packages --filter plugin_artifact_identity`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:36.562Z"
+          "at": "2026-11-15T04:36:10.029Z"
         },
         {
           "n": 12,
-          "text": "[#3114] Native and Component adapters show the same exports, values, errors and denials, with no-execution preparation, first and repeated calls, and release receipts (D-EMBED1/2).",
+          "text": "The native and Component adapters show the same exports, values, errors and denials through no-execution preparation, first and repeated calls, and release (D-EMBED1=E, D-EMBED2=C). Proof: `jet test Compiler --profile cases --filter authority/plugin_adapters_agree`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:37.239Z"
+          "at": "2026-11-15T04:36:10.957Z"
         },
         {
           "n": 14,
-          "text": "[#3253] The typed plugin ABI covers version, ownership, error and unload contracts with real host/guest fixtures. An ABI addition goes to a ballot.",
+          "text": "The typed plugin ABI covers version, ownership, error and unload contracts, proven with real host and guest fixtures; any ABI addition goes to a ballot first. Proof: `jet test Compiler --profile cases --filter authority/plugin_abi_contracts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:25:39.476Z"
+          "at": "2026-11-15T04:36:11.855Z"
         },
         {
           "n": 15,
-          "text": "[#3670] Plugin and build-plugin budgets, failure kinds, FS scoping, authority mapping, connect scope and load admission are Jet source, and the plugin authority tests pass on every hosted level.",
+          "text": "Plugin and build-plugin budgets, failure kinds, file-system scoping, authority mapping, connect scope and load admission are Jet source, and the plugin authority cases pass on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter authority/plugin_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:21:07.999Z"
+          "at": "2026-11-15T04:36:12.768Z"
         },
         {
           "n": 16,
-          "text": "[#3115] Implement ratified D-PLUGIN-FAILURE1=A (A typed PluginError, one case per cause) as one greenfield cutover: compiler/CoreLib/tools, every in-repo caller, examples with goldens, diagnostics with UI snapshots, and the explaining docs",
+          "text": "D-PLUGIN-FAILURE1=A is built in one cutover: a failed sandbox plugin call returns a typed PluginError with one case per cause, across the compiler, Core, tools, every in-repo caller, examples with goldens, errors with UI snapshots and the docs. Proof: `jet test Compiler --profile cases --filter authority/plugin_error_cause_` and `jet test Compiler --profile ui --filter plugin_error_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T16:59:22.391Z"
+          "at": "2026-11-15T04:36:13.702Z"
         }
       ],
       "refs": [
@@ -26877,8 +26888,8 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-09-12T12:54:04.168Z",
-      "updated": "2026-11-13T01:55:52.428Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-15T04:36:16.178Z",
+      "updatedBy": "TowerKeeper-1",
       "workOrder": 103,
       "claimedAt": "2026-11-13T01:49:14.801Z",
       "goals": [
@@ -59973,6 +59984,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "Batch self-build wall p143-p146 (38.7, 40.1, 42.4, 46.4 s) is machine load, not code (Speed-3, 2026-11-14). perf stat instructions:u for jet check Compiler/JetCli on a fixed tree with compilers p142-p146: 550.6-553.5 G (+0.5%); a cold jet build of CompilerData.jet: 18.57-18.68 G. The same binary on the same tree varies 9% in cycles at load average 13-18. One real shift: from p145 the small comptime.build batches bill about 35 ms to the calling thread (c23), with wall unchanged. Next: the batch gate judges instructions:u plus interleaved A/B cycles, not wall under load."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "sema.codecs follow-up (GoalsB-5, 2026-11-14 23:00): no regression. The p143 gate trace (p142 binary, cutover sema) gives sema.codecs 2.84 s cpu, against 3.33 on p141 and 4.13 on p142. A controlled A/B on the same 964-codec input with --threads=1, interleaved, gives medians p141 4.75 s, p142 4.74 s, p143 4.64 s. The p142 rise was gate noise; 04e397982f only removes per-field and per-type marker scans."
         },
         {
@@ -60374,7 +60390,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-15T03:57:05.744Z",
+      "updated": "2026-11-15T04:36:08.280Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -100940,6 +100956,11 @@
         {
           "at": "2026-11-15",
           "by": "Main",
+          "text": "p146 after-rows (batch compiler from dev 02cb957084; run on 2026-11-14 23:45 with perf 7.2.9, pinned). rawword (u32 cell, b2d7cb512c), asm-parity --gate: ref 10 B / 287974739 cycles; jet-release 8 B code (code_x 0.80, ok) / 368598222 cycles (1.28x, over), output same. On p144: 32 B (3.20x) / 1.50x. The pointer-step-fold second program (CardCloser-3-pointer-step-fold/second/measure.sh, 11 pinned runs of run 20000): 166 B / 694.2M cycles on p144, 114 B / 254.9M on p146, output sum 81920000 unchanged. The fold (9a82866572) cuts the general pointer step's code 31% and its cycles 63% on a program unlike the cell. rawword cycles stay over at 1.28x; the gap is open."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
           "text": "c11 decisions (Main, 2026-11-14 23:35). (1) Each remaining primitive cell (mapping, compare, alloc/free, resize) lands as an honest measurement even while it fails the ceiling. (2) No easier substitute: Region.claim is an extra cell, never alloc/free's replacement. The alloc/free and resize references implement the same features at minimum size: a slab with size classes, the page map, and cross-thread free. (3) Compare adds no primitive (I8): the cell measures existing [U8] equality against a memcmp-class SIMD reference; a byte-loop loss is fixed in the general equality lowering. (4) Mapping: the runtime fix carves page-map units from one aligned VA reservation (no trim munmaps) and keeps the global lock off the fast path, general for every Region.reserve."
         },
         {
@@ -101086,6 +101107,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T02:40:14.066Z"
+        },
+        {
+          "n": 13,
+          "text": "#Policy(sentries: .Off) takes effect or is removed: sema builds TStmt.SentryPolicy so a nested #Unsafe { #Policy(sentries: .Off) { mem.list_copy ... } } runs without the R0801 sentry check, with a case that proves it on every tier; or, if the policy should not exist, the spelling, the dead Core/Mem/Mem.jet wrapper and every caller are removed in one cutover. (Found by Speed-3 on 2026-11-14: nothing constructs TStmt.SentryPolicy.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:36:06.586Z"
+        },
+        {
+          "n": 14,
+          "text": "Kernel mappings are sentry-tracked: os_map, Region.reserve and every kernel map path register the mapped (page-rounded) range with the sentry after mapping, and os_unmap and trim unmaps quarantine it first, inline and free in non-sentry builds. Every compiler and runtime mapping site (loader_c_string page, image reservation, loader_view, child start stack, comptime reply mapping) goes through them, with no direct mmap. Proof: a case where a checked mem.list_copy into a fresh mapping passes and the same copy after unmap stops with R0801, on every tier. (Root found by Speed-3 on 2026-11-14; it blocks #5479 S2.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T04:36:47.215Z"
         }
       ],
       "refs": [],
@@ -101096,9 +101135,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-15T04:31:26.938Z",
+      "updated": "2026-11-15T04:36:47.215Z",
       "updatedBy": "Main",
-      "criteriaLastN": 12
+      "criteriaLastN": 14
     },
     {
       "id": "c0in2dft",
@@ -214398,6 +214437,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T04:36:47.215Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#14 Kernel mappings are sentry-tracked: os_map, Region.reserve a"
+    },
+    {
+      "at": "2026-11-15T04:36:20.614Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:36:16.179Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0c4k3fw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:36:15.284Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0c4k3fw",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T04:36:13.702Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#16: strip debris; proof; was: [#3115] Implement ratified D-PLUGIN-FAILURE1=A (A typed PluginError, one case per cause) as one greenfield cutover: compiler/CoreLib/tools, every in-repo caller, examples with goldens, diagnostics wit"
+    },
+    {
+      "at": "2026-11-15T04:36:12.768Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#15: strip debris; proof; was: [#3670] Plugin and build-plugin budgets, failure kinds, FS scoping, authority mapping, connect scope and load admission are Jet source, and the plugin authority tests pass on every hosted level."
+    },
+    {
+      "at": "2026-11-15T04:36:11.856Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#14: strip debris; proof; was: [#3253] The typed plugin ABI covers version, ownership, error and unload contracts with real host/guest fixtures. An ABI addition goes to a ballot."
+    },
+    {
+      "at": "2026-11-15T04:36:10.957Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#12: strip debris; proof; was: [#3114] Native and Component adapters show the same exports, values, errors and denials, with no-execution preparation, first and repeated calls, and release receipts (D-EMBED1/2)."
+    },
+    {
+      "at": "2026-11-15T04:36:10.029Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#11: strip debris; proof; was: [#3111] Artifacts name runtime, toolchain, target, ABI and system assets. Wrong ABI, version or digest is rejected (PackageModel #Test receipts). C-safe ownership is observable on both sides."
+    },
+    {
+      "at": "2026-11-15T04:36:09.134Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#10: strip debris; proof; was: [#3110] Retention is measured at 1k and 100k for prepare, call, failure and release, separating allocator, managed and external roots."
+    },
+    {
+      "at": "2026-11-15T04:36:08.280Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:36:07.403Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#9: strip debris; proof; was: [#3109] No borrowed host view outlives its call. Recursive host-to-guest-to-host calls work or are rejected with a type. Managed callback stop, unsubscribe and cancel are proven, with native and Compo"
+    },
+    {
+      "at": "2026-11-15T04:36:06.586Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#13 #Policy(sentries: .Off) takes effect or is removed: sema bui"
+    },
+    {
+      "at": "2026-11-15T04:36:05.702Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#8: strip debris; proof; was: [#3073] The sandbox_mathkit and library_loadable examples use only registered named exports (D-EMBED2=C, target:sandbox), with no `.call*` or target:plugin teaching left."
+    },
+    {
+      "at": "2026-11-15T04:36:04.762Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#7: strip debris; proof; was: [#3072] Public `close(plugin)` (close takes `&&`) gives exactly-once release. Use-after-close is rejected under checked ownership, and stale host handles fail before store access. Golden packages/sand"
+    },
+    {
+      "at": "2026-11-15T04:36:03.878Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#5: proof; was: The result records source/binary identity and does not generalize a sandbox receipt to native Library panic containment."
+    },
+    {
+      "at": "2026-11-15T04:36:02.983Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#4: proof; was: Blocking native/import work and re-entry are either safely bounded or declared unsupported with an exact reason."
+    },
+    {
+      "at": "2026-11-15T04:36:02.067Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#3: proof; was: A failed guest does not terminate unrelated host work in the selected component scenario."
+    },
+    {
+      "at": "2026-11-15T04:36:01.167Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#2: proof; was: Fuel, memory, wire and call-time limits report actual consumer failure without fabricated success."
+    },
+    {
+      "at": "2026-11-15T04:36:00.282Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-edit",
+      "ref": "c0c4k3fw",
+      "note": "#1: proof; was: Denied host imports fail before the external operation."
+    },
+    {
+      "at": "2026-11-15T04:35:36.996Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02lvwje",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T04:35:10.492Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02lvwje",
+      "note": "removeTags,tags"
+    },
+    {
+      "at": "2026-11-15T04:35:08.857Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02lvwje",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T04:35:07.913Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c02lvwje",
+      "note": "title,plan"
+    },
+    {
+      "at": "2026-11-15T04:35:06.243Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c02lvwje",
+      "note": "#20"
+    },
     {
       "at": "2026-11-15T04:35:05.050Z",
       "by": "TowerKeeper-1",
