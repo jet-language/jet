@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6888,
-    "rev": 103650,
+    "nextNum": 6889,
+    "rev": 103675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54445,6 +54445,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-15 TowerKeeper-1: c10, c11, c12, c16 and c20 met with G3Core commits and passing cases on dev a652c3674b (gate-p141). Still failing there: the context/context_allocator_* cases, context_scratch_block_rewinds_and_moves_what_leaves (ICE) and Examples/Memory/Allocation/ContextAllocator (served by the allocator: false), so c2 (allocator field), c4, c21 and c22 stay open."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "c2 allocator field: no ballot needed (Main, 2026-11-12). Ratified D-CONTEXT1 types the field as `allocator: mem.Allocator`, and D-ALLOC-TRAIT1=A makes mem.Allocator a trait whose calls go through one trait-value slot with no box. So context.allocator reads as a borrowed mem.Allocator trait value. Arena, Bump, Pool and Fixed implement the trait, and #Context(allocator:) accepts any implementer, user allocators included, in place of the hard-coded four-name list. G12Docs-4 builds it as G3Core-c2-ctxalloc on G3Core-c2-ctxreads."
@@ -54592,29 +54597,29 @@
         {
           "n": 10,
           "text": "D-PRINTSTYLE1=A is built (owner ratified 2026-11-11): term.PrintStyle has simple typed default fields (int_base, int_min_digits and the rest the ballot lists), installed through the approved Context, `#Context(print: term.PrintStyle{int_base: .Hex, int_min_digits: 4}) { … }`, and applied by Core/Text/Fmt.jet's radix and decimal formatting. The ballot program prints 00ff; [0001, 0002, 0003]; x = 255. Owner: the G3 lane. Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T12:41:40.642Z"
+          "evidence": "dev ea79be6bbd (G3Core-c10-printstyle) and 7ae10ba960. On dev a652c3674b with gate-p141: `jet test Compiler --profile golden --filter Concurrency/Context` PASS 24 (ContextPrintStyle o0, o1, o2) and `jet test Compiler --profile cases --filter context/` print_style_sets_how_print_shows_values_inside_its_block PASS.",
+          "at": "2026-11-15T03:28:23.726Z"
         },
         {
           "n": 11,
           "text": "A case pins the compile-time context reads: `comptime { context.thread }` returns the build root context thread (index 0), and `context.deadline` returns None, at O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:15.383Z"
+          "evidence": "On dev a652c3674b with gate-p141: `jet test Compiler --profile cases --filter context/` compile_time_code_reads_the_build_root_context PASS.",
+          "at": "2026-11-15T03:28:25.114Z"
         },
         {
           "n": 12,
           "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The ratified `core.context` qualification works: a program that imports core.context and reads `context.deadline` through the qualified module checks and runs at O0/O1/O2. On seed-b5 the import gives E1001; local shadowing works.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T22:07:58.231Z"
+          "evidence": "dev bba8e6b588 (G3Core-c12-ctxmod). On dev a652c3674b with gate-p141: `jet test Compiler --profile cases --filter context/` context_reads_through_the_core_context_import PASS.",
+          "at": "2026-11-15T03:28:26.242Z"
         },
         {
           "n": 13,
@@ -54637,11 +54642,11 @@
         {
           "n": 16,
           "text": "Local-value fold under F: a local whose initializer reaches a context read stays run-time code, as one reading #phase does, and is never folded at build time. Proof: the review's fold.jet prints \"local 95 prepared 0\" and thread2.jet prints \"task local 1\" at O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T11:47:12.026Z"
+          "evidence": "On dev a652c3674b with gate-p141: `jet test Compiler --profile cases --filter context/` local_values_reaching_a_context_read_stay_run_time_code PASS.",
+          "at": "2026-11-15T03:28:27.361Z"
         },
         {
           "n": 17,
@@ -54673,11 +54678,11 @@
         {
           "n": 20,
           "text": "D-CONTEXT-CALLBACK1=A is built (ratified 2026-11-13). F's clause \"until the callback installs one\" is dropped. A C callback reads no context, directly or through anything it calls, and sema refuses such a read with a registered error naming the context field and the callback. A UI snapshot shows the refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:16:57.551Z"
+          "evidence": "dev 38b7225d66 (E3218 names the read and the callback). On dev a652c3674b with gate-p141: `jet test Compiler --profile ui --filter cffi_callback_context_read` PASS.",
+          "at": "2026-11-15T03:28:28.617Z"
         },
         {
           "n": 21,
@@ -54713,7 +54718,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-15T03:28:06.690Z",
+      "updated": "2026-11-15T03:28:33.061Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -55114,8 +55119,8 @@
     {
       "id": "c0776o2m",
       "num": 5035,
-      "title": "Core platform layer for games in Jet: present a pixel buffer, play PCM audio, read raw input, without SDL or raylib",
-      "body": "Source: mine-for-jet V report (2026-10-16) and owner direction 2026-10-16: the Jet Doom port must be as much Jet as possible, not leaning on C FFI. Today Core/game/game.jet is a 19-line shell and the only game backend is Core/game/raylib.jet (a C bridge with known gaps, #4663). Jet has no audio output module (only the done investigation #3287; jetos audio #334 is frozen) and no pure-Jet way to show a CPU-rendered framebuffer. V reaches these through sokol/gg C code and its DOOM links SDL through Chocolate Doom's C objects. A Doom-class program needs four things from Core: open a window and present an RGBA/indexed pixel buffer at a fixed rate with vsync or a timer; mix and play 16-bit PCM at 11025-48000 Hz with low latency; read keyboard and mouse as raw events; a monotonic tick clock (core.time exists, see #4662). The OS edge (Wayland/X11, Win32, Cocoa; ALSA/PipeWire, WASAPI, CoreAudio) stays inside vetted #Unsafe Core, exactly as files and sockets do, so user programs contain no FFI. New public API: an owner ballot is required on the module names and shapes before implementation.",
+      "title": "ui and audio subsystems for games and apps in Jet: present pixels, play PCM, read input, no SDL or raylib (D-GAME-PLATFORM1=A)",
+      "body": "Destination: Jet programs open windows, present RGBA or palette-indexed pixel buffers at a fixed rate, mix and play PCM audio with low latency, and read raw keyboard, mouse and gamepad input through two independent Core subsystems, ui and audio (D-GAME-PLATFORM1=A), written in Jet and speaking the display and sound protocols directly (D-RAYLIB-DRIVER-LOAD1), with headless recorders for goldens.\n\nWhy it matters: the Jet Doom port, and any game or graphical app, needs this without leaning on C libraries (owner direction 2026-10-16); the owner wants no raylib reference anywhere, only ui and app (2026-11-08).\n\nState: Compiler/JetRuntime/Source/RouteAGame.jet opens no window and input is inert; Core/Game/Raylib.jet's play_sound only checks the path.\n\nSource: mine-for-jet V report (2026-10-16); the 2026-11-05 Doom port investigation. Game scheduling and tooling moved to the core.game tools card on 2026-11-15.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e15",
@@ -55129,6 +55134,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: this card is now the ui and audio platform layer (c19, c21, c22). Game scheduling, frame schedule and tooling (c5-c18, c20, c23) moved to #6887."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -55183,110 +55193,122 @@
         {
           "n": 6,
           "text": "(was #2484 c2) Pause and frame advance are real state transitions; frame advance is admitted only while paused [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:02.826Z"
+          "evidence": "Merged into #6887 c3: pause and frame advance are part of the play modes criterion",
+          "at": "2026-11-15T03:28:08.714Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
           "text": "(was #2484 c3) Eject selection and explicit Keep/Discard source-backed operations are implemented without implicit authored-source writes [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:03.480Z"
+          "evidence": "Moved to #6887 c4: game tooling gets its own card",
+          "at": "2026-11-15T03:28:09.664Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "(was #2484 c4) Native overlay debugger categories and actor/world selection consume the shared observation stream [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:04.118Z"
+          "evidence": "Merged into #6887 c5: overlay debugger categories are part of the overlay criterion",
+          "at": "2026-11-15T03:28:10.634Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
           "text": "(was #2484 c5) Typed launcher profiles record target, mode and phase outcomes and are consumed by the headless path [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:04.725Z"
+          "evidence": "Moved to #6887 c6: game tooling gets its own card",
+          "at": "2026-11-15T03:28:11.556Z",
+          "closure": "obsolete"
         },
         {
           "n": 10,
           "text": "(was #2484 c6) Declared asset watchers publish changed, created, deleted and skipped session events through the canonical bridge [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:05.343Z"
+          "evidence": "Moved to #6887 c7: game tooling gets its own card",
+          "at": "2026-11-15T03:28:12.478Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "(was #2485 c1) The in-game overlay runs on the real native window/frame/input/draw loop with typed console, stat, category and error-pause state, proven by an example with golden output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:08.564Z"
+          "evidence": "Moved to #6887 c5: game tooling gets its own card",
+          "at": "2026-11-15T03:28:13.391Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
           "text": "(was #2490 c1) The ratified game packaging phases/profile CLI and help source are implemented [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:06.729Z"
+          "evidence": "Moved to #6887 c8: game tooling gets its own card",
+          "at": "2026-11-15T03:28:14.427Z",
+          "closure": "obsolete"
         },
         {
           "n": 13,
           "text": "(was #2490 c2) Packaging source emits a machine receipt for each selected phase, including target/profile/backend/source/result/error facts [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:07.307Z"
+          "evidence": "Merged into #6887 c8: packaging receipts are part of the packaging criterion",
+          "at": "2026-11-15T03:28:15.455Z",
+          "closure": "obsolete"
         },
         {
           "n": 15,
           "text": "(was #2490 c4) Crash reporting is an explicit consent/profile choice with inspectable routing/retention/upload policy; unavailable upload transport fails closed [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:08.516Z"
+          "evidence": "Moved to #6887 c9: game tooling gets its own card",
+          "at": "2026-11-15T03:28:16.457Z",
+          "closure": "obsolete"
         },
         {
           "n": 16,
           "text": "(was #2490 c5) The target ReleaseDevtoolsPolicy controls game inspector data allocation, collection, publication and control; stripped release does not construct the debug session [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:09.718Z"
+          "evidence": "Moved to #6887 c10: game tooling gets its own card",
+          "at": "2026-11-15T03:28:17.437Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
           "text": "(was #2490 c6) Missing renderer authority produces the registered E1803 receipt path, proven by a UI snapshot or cases row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:09.444Z"
+          "evidence": "Moved to #6887 c11: game tooling gets its own card",
+          "at": "2026-11-15T03:28:18.366Z",
+          "closure": "obsolete"
         },
         {
           "n": 18,
           "text": "(was #2491 c1) Implementation-only closure: `jet new game` emits the complete ratified role-home scaffold, runnable scene, profiles, diagnostics/error-pause behavior, bounded remote protocol, typed tooling metadata, and real source/build/revision session identity [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:10.877Z"
+          "evidence": "Moved to #6887 c12: game tooling gets its own card",
+          "at": "2026-11-15T03:28:19.326Z",
+          "closure": "obsolete"
         },
         {
           "n": 19,
@@ -55300,11 +55322,12 @@
         {
           "n": 20,
           "text": "(was #2967 c1) Checked resource and hardware accesses produce one canonical frame schedule whose submission-bound completion handles retain the actual resource guards until provider completion, proven by a golden on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:11.260Z"
+          "evidence": "Moved to #6887 c2: the frame schedule is core.game runtime",
+          "at": "2026-11-15T03:28:20.377Z",
+          "closure": "obsolete"
         },
         {
           "n": 21,
@@ -55327,11 +55350,12 @@
         {
           "n": 23,
           "text": "D-SYSSCHED1=A is built: systems run in parallel by default from the conflict graph of each system's parameter access; conflicting systems keep source order; commands, events and logs merge in declaration order at each stage end. `schedule: .Serial` and `schedule: .Manual(stages)` are the expert forms, and a manual stage whose systems conflict is refused. Proof: a game example prints the same output on O0, O1 and O2 under each schedule, and a UI snapshot shows the refusal. (from #3645 c1)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "TowerKeeper-1",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:18.959Z"
+          "evidence": "Moved to #6887 c1: system scheduling is core.game runtime",
+          "at": "2026-11-15T03:28:22.191Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -55347,7 +55371,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-15T03:28:07.603Z",
+      "updated": "2026-11-15T03:28:31.936Z",
       "updatedBy": "TowerKeeper-1",
       "goals": [
         "G3"
@@ -79530,6 +79554,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:47:33.282Z"
+        },
+        {
+          "n": 9,
+          "text": "The `tui` package publishes only the managed `tui.run`: it takes the typed model, update, view and adapt callbacks and returns the owned final model; commands are children of the structured task scope; the terminal guard is the only raw-mode boundary, restored exactly on exit, failure and panic; a non-TTY paints one frame and returns NonTty. Proof: `jet test Compiler --profile golden --filter tui/run_tasks` and `jet test Compiler --profile cases --filter tui_run_pty_`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:12.265Z"
         }
       ],
       "refs": [],
@@ -79540,8 +79573,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-13T02:10:32.383Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-15T03:30:12.265Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 9
     },
     {
       "id": "c02t52c5",
@@ -98194,6 +98228,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T14:23:44.305Z"
+        },
+        {
+          "n": 12,
+          "text": "A `#Codable(only: .Decode)` struct whose field has a declared default decodes without the field type's Encode: an absent key takes the default value directly, in both the tree decode and the streaming read, never through `default.encode()`. Proof: `jet test Compiler --profile cases --filter codable_options/decode_only_default_field_needs_no_encode`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:28:21.286Z"
         }
       ],
       "refs": [],
@@ -98204,9 +98247,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-14T14:32:02.823Z",
+      "updated": "2026-11-15T03:28:21.287Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c0voqhky",
@@ -104172,6 +104215,95 @@
       "needsAcceptance": false,
       "created": "2026-11-15T03:28:03.889Z",
       "updated": "2026-11-15T03:28:03.889Z",
+      "updatedBy": "TowerKeeper-1"
+    },
+    {
+      "id": "c0rqtmrp",
+      "num": 6888,
+      "title": "Core codecs: gzip and zstd live in core.compress and really compress, and image decode is bounded by one shared inflater",
+      "body": "Destination: stream codecs (gzip, zstd) have one public home, core.compress, and their encoders actually compress; core.archive keeps only the zip and tar containers; one source-owned inflater checks the caller's output ceiling before every byte, and core.image decodes and encodes PNG, JPEG and GIF with bounded, typed failures on every tier.\n\nWhy it matters: an encoder that writes stored blocks only is a silent 0% compression; an unbounded inflater is a decompression bomb; two homes for gzip is two names for one thing.\n\nState (dev 7259131021): gzip and zstd live in Core/Archive/Gzip.jet and Core/Archive/Zstd.jet (and Archive.jet compress/decompress); there is no Core/Compress; the encoders write stored blocks only (D-COMPTIME-SIZE1 review, 2026-11-12).\n\nDecisions: D-CODECS1=A, D-CORE-COMPRESS1=A (split codecs from containers), D-CORE-ARCHIVE-BOUND1=A (bounded inflater, spelled core.archive.decompress_bounded), D-CORE-IMAGE1=A. The two module homes conflict; see the owner-gates row on the first criterion.\n\nSource: #3551 c9-c15, c17 (archived #499, #3561, #3562, #3564).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.compress is the only public home for gzip and zstd byte-stream codecs and core.archive exposes only zip and tar (D-CORE-COMPRESS1=A): the module registry, prelude templates, examples, goldens, Core reference docs and module inventories name the split, with no alias or duplicate registry entry, and an old core.archive gzip call gets the ordinary unknown-member error. Owner choice first: D-CORE-ARCHIVE-BOUND1=A (later) spells the bounded inflater in core.archive (owner-gates row). Proof: `git grep -n -E 'archive\\.(gzip|zstd)|Archive/Gzip' -- Core Examples Docs` prints nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 2,
+          "text": "gzip and zstd round trips run through core.compress on O0, O1 and O2, and zip and tar output stays byte-correct. Proof: `jet test Compiler --profile golden --filter Systems/Files/Archive` and `--filter Systems/Compress` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 3,
+          "text": "core.compress's gzip and zstd encoders compress: output for compressible input is smaller than the input and within 10% of the reference tool at its default level (today they write stored blocks only). Proof: `jet test Compiler --profile cases --filter compress/ratio_matches_reference`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 4,
+          "text": "One source-owned inflater checks the caller's output ceiling before each output byte (stored, fixed and dynamic blocks), with a typed Limit error for zero, negative, above-cap limits and overruns (D-CORE-ARCHIVE-BOUND1=A), and core.image decode reports ImageError.Limit within budget. Proof: `jet test Compiler --profile cases --filter archive/decompress_bounded`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 5,
+          "text": "core.image is one checked codec and value mechanism (D-CORE-IMAGE1=A): PNG round trip, GIF limits, and malformed and bomb input bounded with ImageError, with an example golden on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Systems/Image`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        },
+        {
+          "n": 6,
+          "text": "JPEG encode refuses non-opaque RGBA before allocating output, so fully transparent input never leaks RGB. Proof: `jet test Compiler --profile cases --filter image/jpeg_alpha_rejects_nonopaque` on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T03:30:11.324Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "core",
+        "compress",
+        "image"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:30:11.324Z",
+      "updated": "2026-11-15T03:30:11.324Z",
       "updatedBy": "TowerKeeper-1"
     }
   ],
@@ -209591,6 +209723,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-15T03:30:12.265Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-add",
+      "ref": "c0isxyo3",
+      "note": "#9 The `tui` package publishes only the managed `tui.run`: it t"
+    },
+    {
+      "at": "2026-11-15T03:30:11.324Z",
+      "by": "TowerKeeper-1",
+      "action": "card.add",
+      "ref": "c0rqtmrp",
+      "note": "Core codecs: gzip and zstd live in core.compress and really compress, and image decode is bounded by one shared inflater"
+    },
+    {
+      "at": "2026-11-15T03:28:33.061Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:28:31.936Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0776o2m",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-15T03:28:30.734Z",
+      "by": "TowerKeeper-1",
+      "action": "card.update",
+      "ref": "c0776o2m",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-15T03:28:28.617Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dhc7rh",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:28:27.361Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dhc7rh",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:28:26.242Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dhc7rh",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T03:28:25.114Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dhc7rh",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:28:23.726Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0dhc7rh",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:28:22.191Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-15T03:28:21.287Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ue0hua",
+      "note": "#12 A `#Codable(only: .Decode)` struct whose field has a declare"
+    },
+    {
+      "at": "2026-11-15T03:28:20.377Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-15T03:28:19.326Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-15T03:28:18.366Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-15T03:28:17.437Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-15T03:28:16.457Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-15T03:28:15.455Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-15T03:28:14.427Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-15T03:28:13.391Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-15T03:28:12.478Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-15T03:28:11.556Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-15T03:28:10.634Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-15T03:28:09.664Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-15T03:28:08.714Z",
+      "by": "TowerKeeper-1",
+      "action": "card.criteria-meet",
+      "ref": "c0776o2m",
+      "note": "#6"
+    },
     {
       "at": "2026-11-15T03:28:07.603Z",
       "by": "TowerKeeper-1",
