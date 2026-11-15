@@ -501,6 +501,12 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
   with 8 bits and `F32`'s is a 32-bit float. A `distinct` type over a number
   reports its base's form; any other type has `None`.
 
+[`TypeFacts`](../../../Examples/Metaprogramming/Reflection/TypeFacts/run.jet)
+reads all three: a marker body, a comptime constant, ordinary code and fn
+build list the same constants and values, `Pair<Int, String>` binds `A` and
+`B` at each rung, and the builtin numbers and a `distinct` one report their
+form.
+
 [`reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet) combines typed
 fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/Metaprogramming/Reflection/ReflectValue.jet)
 shows the runtime floor:

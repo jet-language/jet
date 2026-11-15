@@ -89,4 +89,5 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [ReflectValue](Reflection/ReflectValue.jet) — `reflect.of(x)` — the runtime reflection floor.
 - [ReflectedInspector](Reflection/ReflectedInspector/) — An entity editor driven by field metadata: inspector, edits, undo, and versioned text files.
 - [ReflectionRungs](Reflection/ReflectionRungs/) — Every rung reads a declaration the same way: a marker body, a marker that adds a method to the type it marks, a comptime constant and fn build each read the type's name, kind, identity, module, field and marker counts, and the typed `marker(Label)` argument, and each prints the same line.
+- [TypeFacts](Reflection/TypeFacts/) — A TypeInfo lists the associated constants its traits give, with their values; the generic bindings of a type named with its arguments; and, for a number type, its signedness and width in bits.
 - [UserRuleBody](Reflection/UserRuleBody.jet) — A source rule with a body adds an ordinary method.
