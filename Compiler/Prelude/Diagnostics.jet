@@ -11341,6 +11341,30 @@ RawMemoryOutsideKernel: struct {
     }
 }
 
+RawAddressIntoKernel: struct {
+    subject: String
+    operation: String
+
+    impl Diagnostic {
+        code: "E3114"
+        safety_class: .Soundness
+        safety_reason: "Code outside the kernel files reaches a kernel's public function or field without a gate, so the address it hands the raw operation is one no audit checked."
+        expert_path: "`#Unsafe(\"…\")` on the kernel function, so each caller vouches for the address"
+        meaning: "A memory kernel's public function or field carries a caller-chosen address to a raw memory operation"
+        detail: true
+
+        what: fn(self) -> String { "`{self.subject}` carries a caller-chosen address to `{self.operation}`" }
+
+        why: fn(self) -> String {
+            "Code outside the kernel files reaches `{self.subject}` without a gate, so the address `{self.operation}` uses would skip the kernel's audit."
+        }
+
+        fix: fn(self) -> String {
+            "Take an owner or a `View<T>` instead of the address, make the field `priv`, or mark the function `#Unsafe(\"…\")` so each caller vouches for the address."
+        }
+    }
+}
+
 ImpureReason: struct {
     impl Diagnostic {
         code: "L3102"

@@ -54,6 +54,15 @@ run: fn() Never! {
     unsafe_test_require(no_kernel.diagnostics.len() == 2 && no_kernel.diagnostics[0].diagnostic.code == "E3113", "a package naming no kernel refuses raw pointers")
     single_program: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: raw.program, policy_path: Val("app.jet")}], GateSet{})
     unsafe_test_require(single_program.diagnostics.len() == 0, "a single program is its own kernel")
+    // A kernel file's public function may not carry a caller's address to a
+    // raw operation, nor may a kernel record's public field; a `priv` function,
+    // a `priv` field and an `#Unsafe` function may.
+    kernel: parse_source("peek: fn(address: Int) -> Int {{\n#Unsafe(\"the caller hands a live cell\") {{\np: mem.Ptr<Int>.from_addr(address)\nreturn mem.volatile_read(p)\n}}\n}}\npriv inner: fn(address: Int) -> Int {{\n#Unsafe(\"only kernel code calls this\") {{\nreturn mem.Ptr<Int>.from_addr(address).*\n}}\n}}\n#Unsafe(\"each caller vouches for the address\") raw: fn(address: Int) -> Int {{\nreturn mem.Ptr<Int>.from_addr(address).*\n}}\nbounded: fn(index: Int) -> Int {{\n#Unsafe(\"the index stays inside the owned cells\") {{\nreturn mem.volatile_read(owned().offset(index))\n}}\n}}\nCell: struct {{\nbase: Int\npriv held: Int\nread: fn(self) -> Int {{\n#Unsafe(\"the cell owns its storage\") {{\nreturn mem.Ptr<Int>.from_addr(self.base).* + mem.Ptr<Int>.from_addr(self.held).*\n}}\n}}\n}}\n".bytes())
+    unsafe_test_require(kernel.diagnostics.len() == 0, "kernel fixture parse: {kernel.diagnostics:Debug}")
+    boundary: sema_unsafe_inspect([SemaGateModule{source: "cell.jet", program: kernel.program, policy_path: Val("src/kernel/cell.jet"), memory_kernel: Val([String]{"src/kernel"})}], GateSet{})
+    unsafe_test_require(boundary.diagnostics.len() == 2, "one refusal per caller-chosen address: {boundary.diagnostics:Debug}")
+    loop refused in boundary.diagnostics -> unsafe_test_require(refused.diagnostic.code == "E3114", "kernel address refusal code")
+    unsafe_test_require(boundary.diagnostics[0].diagnostic.what.contains("`peek`") && boundary.diagnostics[1].diagnostic.what.contains("`Cell.base`"), "the parameter and the public field are named")
     invocation: GateSet{allowed: [PolicyKey.Unsafe]}
     declaration: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}
     refusal: sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], invocation)
