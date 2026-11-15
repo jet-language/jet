@@ -36,7 +36,7 @@
 // Addresses and section offsets in the other sections are relocations
 // against section symbols, so any ELF linker can place the sections.
 
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
 
 ELF64_R_X86_64_32: 10
 
@@ -65,6 +65,12 @@ X64DwarfSections: struct {
     jet_line_relas: [X64ObjectRela]
     loclists: [U8]
     loclists_relas: [X64ObjectRela]
+}
+
+// One section's bytes and their relocations.
+DwarfSectionRows: struct {
+    bytes: [U8]
+    relas: [X64ObjectRela]
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +186,7 @@ dwarf_eh_finish: fn(eh: &[U8], start: Int) Never! {
     dwarf_patch_length(eh, start)
 }
 
-dwarf_eh_frame: fn(sections: &X64DwarfSections, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+dwarf_eh_frame: fn(functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) -> DwarfSectionRows Never! {
     eh := [U8]{}
     // CIE: version 1, augmentation "zR" (FDE addresses pcrel sdata4), code
     // alignment 1, data alignment -8, return address column 16 (rip).
@@ -210,8 +216,7 @@ dwarf_eh_frame: fn(sections: &X64DwarfSections, functions: [X64CompiledFunction]
         loop byte in debug[index].cfi -> eh.push(byte)
         dwarf_eh_finish(eh, start)
     }
-    sections.eh_frame = eh
-    sections.eh_relas = relas
+    DwarfSectionRows{bytes: eh.move(), relas: relas.move()}
 }
 
 // The symbol function `index`'s address relocations name: `.text`'s or its
@@ -912,7 +917,7 @@ dwarf_info_variable: fn(info: &[U8], relas: &[X64ObjectRela], row: X64DebugVaria
     if located -> dwarf_section_offset(info, relas, symbols.loclists, place)
 }
 
-dwarf_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+dwarf_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) -> DwarfSectionRows Never! {
     line := [U8]{}
     relas := [X64ObjectRela]{}
     elf64_u32(line, 0)
@@ -987,8 +992,7 @@ dwarf_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
         dwarf_u8(line, 1)
     }
     dwarf_patch_length(line, 0)
-    sections.line = line
-    sections.line_relas = relas
+    DwarfSectionRows{bytes: line.move(), relas: relas.move()}
 }
 
 // The `.debug_jetline` table of the Jet functions (those with a source file
@@ -1007,7 +1011,7 @@ dwarf_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
 // This is the object form: the linker (Image/DebugPrune.jet) drops the
 // records of the functions it dropped and writes the linked form the fault
 // report reads, varint records in address order.
-dwarf_jet_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+dwarf_jet_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) -> DwarfSectionRows Never! {
     table := [U8]{}
     relas := [X64ObjectRela]{}
     strings := [U8]{}
@@ -1057,8 +1061,7 @@ dwarf_jet_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functi
     dwarf_patch_u32(table, rows_at, rows_start)
     table.extend(rows)
     dwarf_patch_length(table, 0)
-    sections.jet_line = table
-    sections.jet_line_relas = relas
+    DwarfSectionRows{bytes: table.move(), relas: relas.move()}
 }
 
 // The debug and unwind sections for `functions` (placed at `offsets` in a
@@ -1066,18 +1069,97 @@ dwarf_jet_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functi
 // of its own section; debug[i] belongs to functions[i]); the subprograms of
 // `.debug_info` on the threads `threads` admits. With `debug_info` false
 // only `.eh_frame` is built; the DWARF sections and `.debug_jetline` stay
-// empty.
+// empty. Each section reads only the inputs, so when `threads` admits a
+// second thread for the line rows, `.eh_frame`, `.debug_line` and
+// `.debug_jetline` are each built on a thread of their own while this
+// thread builds `.debug_info`: the bytes are the same for any thread count.
 x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
         eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: [U8]{}, info: [U8]{}, info_relas: [X64ObjectRela]{},
         line: [U8]{}, line_relas: [X64ObjectRela]{}, jet_line: [U8]{}, jet_line_relas: [X64ObjectRela]{},
         loclists: [U8]{}, loclists_relas: [X64ObjectRela]{},
     }
-    dwarf_eh_frame(sections, functions, debug, offsets, symbols)
-    if !debug_info -> return sections
-    sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0)
-    dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
-    dwarf_line(sections, program, functions, debug, offsets, symbols)
-    dwarf_jet_line(sections, program, functions, debug, offsets, symbols)
+    rows := 0
+    loop row in debug -> rows += 1 + row.lines.len()
+    frame := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
+    line := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
+    jet_line := DwarfSectionRows{bytes: [U8]{}, relas: [X64ObjectRela]{}}
+    if debug_info -> sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0)
+    if {
+        !debug_info -> frame = dwarf_eh_frame(functions, debug, offsets, symbols)
+        compiler_threads_admit(threads, functions.len(), rows, DWARF_LINE_MIN_ROWS_PER_THREAD, 0, 0) <= 1 -> {
+            frame = dwarf_eh_frame(functions, debug, offsets, symbols)
+            dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
+            line = dwarf_line(program, functions, debug, offsets, symbols)
+            jet_line = dwarf_jet_line(program, functions, debug, offsets, symbols)
+        }
+        else -> task.group dwarf_section_threads {
+            framing: task dwarf_eh_frame(functions, debug, offsets, symbols)
+            lining: task dwarf_line(program, functions, debug, offsets, symbols)
+            jet_lining: task dwarf_jet_line(program, functions, debug, offsets, symbols)
+            dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
+            frame = framing.join() ?? panic(compiler_threads_failure_text(err))
+            line = lining.join() ?? panic(compiler_threads_failure_text(err))
+            jet_line = jet_lining.join() ?? panic(compiler_threads_failure_text(err))
+        }
+    }
+    sections.eh_frame = frame.bytes.move()
+    sections.eh_relas = frame.relas.move()
+    sections.line = line.bytes.move()
+    sections.line_relas = line.relas.move()
+    sections.jet_line = jet_line.bytes.move()
+    sections.jet_line_relas = jet_line.relas.move()
     sections
+}
+
+// Fewest line rows (a function counts one besides its rows) a section
+// thread is admitted for: below it `.eh_frame`, `.debug_line` and
+// `.debug_jetline` are built on the calling thread, after the subprograms.
+DWARF_LINE_MIN_ROWS_PER_THREAD: 20000
+
+// The section rows' relocations as numbers, for comparing them.
+dwarf_test_relas: fn(relas: [X64ObjectRela]) -> [Int] Never! {
+    out := [Int]{}
+    loop rela in relas {
+        out.push(rela.at)
+        out.push(rela.symbol)
+        out.push(rela.kind)
+        out.push(rela.addend)
+    }
+    out
+}
+
+#Test("the debug sections built beside the subprograms are those of one thread") {
+    count: 3000
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    sources := [X64FunctionSource]{}
+    offsets := [Int]{}
+    loop id in 0..<count {
+        code := [U8]{}
+        lines := [X64LineRow]{}
+        loop row in 0..<20 {
+            code.push(U8{0x90})
+            lines.push(X64LineRow{at: row, line: id + 2 * row + 1})
+        }
+        code.push(U8{0xc3})
+        offsets.push(id * 32)
+        functions.push(X64CompiledFunction{id: X64FunctionID{value: id}, name: "f{id}", code: code.move(), relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
+        debug.push(X64FunctionDebug{lines: lines.move(), body: 1, cfi: [U8]{U8{0x0e}, U8{0x10}}, ranges: [X64VariableRange]{}})
+        sources.push(X64FunctionSource{name: "f{id}", file: id % 2, line: id + 1, variables: [X64DebugVariable]{}})
+    }
+    program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{"a.jet", "b.jet"}, types: [X64DebugType]{}}, functions: sources.move()}
+    symbols: X64DwarfSymbols{text: 1, abbrev: 2, line: 3, loclists: 4, functions: [Int]{}}
+    one: x64_dwarf_sections(program, functions, debug, offsets, count * 32, symbols, compiler_threads_single(), true)
+    many: x64_dwarf_sections(program, functions, debug, offsets, count * 32, symbols, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}, true)
+    assert(one.line.len() > 0 && one.jet_line.len() > 0 && one.eh_frame.len() > 0)
+    assert_eq(many.eh_frame, one.eh_frame)
+    assert_eq(dwarf_test_relas(many.eh_relas), dwarf_test_relas(one.eh_relas))
+    assert_eq(many.info, one.info)
+    assert_eq(dwarf_test_relas(many.info_relas), dwarf_test_relas(one.info_relas))
+    assert_eq(many.line, one.line)
+    assert_eq(dwarf_test_relas(many.line_relas), dwarf_test_relas(one.line_relas))
+    assert_eq(many.jet_line, one.jet_line)
+    assert_eq(dwarf_test_relas(many.jet_line_relas), dwarf_test_relas(one.jet_line_relas))
+    assert_eq(many.loclists, one.loclists)
 }
